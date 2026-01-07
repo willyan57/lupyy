@@ -1,0 +1,92 @@
+{
+  "expo": {
+    "name": "Lupyy",
+    "slug": "looply",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "lupyy",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "icon": "./assets/branding/icon.png",
+    "splash": {
+      "image": "./assets/branding/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#000000"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "bundleIdentifier": "com.lupyy.app",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "O Lupyy precisa acessar a câmera para tirar fotos e gravar vídeos.",
+        "NSMicrophoneUsageDescription": "O Lupyy precisa do microfone para gravar vídeos com áudio.",
+        "NSPhotoLibraryUsageDescription": "O Lupyy precisa acessar sua galeria para escolher e salvar fotos e vídeos.",
+        "NSPhotoLibraryAddUsageDescription": "O Lupyy precisa salvar fotos e vídeos na sua galeria."
+      }
+    },
+    "android": {
+      "package": "com.lupyy.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/branding/adaptive-icon-foreground.png",
+        "backgroundColor": "#000000"
+      },
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "READ_MEDIA_IMAGES",
+        "READ_MEDIA_VIDEO",
+        "READ_EXTERNAL_STORAGE"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ],
+          "data": [
+            {
+              "scheme": "lupyy"
+            }
+          ]
+        }
+      ]
+    },
+    "web": {
+      "favicon": "./assets/branding/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-image-picker",
+      "expo-camera",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/branding/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#000000"
+        }
+      ],
+      "expo-video",
+      "expo-audio",
+      "expo-secure-store",
+      "expo-asset"
+    ],
+    "updates": {
+      "fallbackToCacheTimeout": 0
+    },
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "d4a1344a-2e48-4b89-bf0e-22566253ca94"
+      }
+    }
+  }
+}
