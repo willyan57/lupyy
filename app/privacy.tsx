@@ -32,7 +32,7 @@ export default function PrivacyScreen() {
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
       <View style={styles.hero}>
         <View style={styles.heroTop}>
-          <Text style={styles.kicker}>Lupyy • Política de Privacidade</Text>
+          <Text style={styles.kicker}>Lupyy • Política de Privacidade </Text>
           <Text style={styles.title}>Política de Privacidade</Text>
           <Text style={styles.meta}>Última atualização: 07 de janeiro de 2026</Text>
         </View>
