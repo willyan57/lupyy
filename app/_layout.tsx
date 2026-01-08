@@ -12,7 +12,6 @@ export default function RootLayout() {
   const router = useRouter();
   const pathname = usePathname();
   const [ready, setReady] = useState(false);
-  const [isMobileWeb, setIsMobileWeb] = useState(false);
 
   const publicRoutes = useMemo(() => {
   return ["/", "/login", "/signup", "/reset", "/terms", "/privacy"];
@@ -30,31 +29,6 @@ const isPublicRoute = useMemo(() => {
 const isRedirectToFeedRoute = useMemo(() => {
   return redirectToFeedRoutes.includes(pathname);
 }, [redirectToFeedRoutes, pathname]);
-
-  useEffect(() => {
-    if (Platform.OS !== "web") return;
-
-    const mq = window.matchMedia("(pointer: coarse)");
-    const compute = () => {
-      const w = window.innerWidth || 0;
-      setIsMobileWeb(w < 900 || mq.matches);
-    };
-
-    compute();
-
-    window.addEventListener("resize", compute);
-
-    if (mq.addEventListener) mq.addEventListener("change", compute);
-    // @ts-ignore - suporte legado
-    else mq.addListener(compute);
-
-    return () => {
-      window.removeEventListener("resize", compute);
-      if (mq.removeEventListener) mq.removeEventListener("change", compute);
-      // @ts-ignore - suporte legado
-      else mq.removeListener(compute);
-    };
-  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -103,7 +77,7 @@ const isRedirectToFeedRoute = useMemo(() => {
 
   if (!ready) return null;
 
-  const showSidebar = Platform.OS === "web" && !isPublicRoute && !isMobileWeb;
+  const showSidebar = Platform.OS === "web" && !isPublicRoute;
 
   return (
     <GestureHandlerRootView

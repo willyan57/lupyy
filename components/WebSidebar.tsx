@@ -42,12 +42,6 @@ export const WEB_SIDEBAR_WIDTH = 240;
 export default function WebSidebar() {
   if (Platform.OS !== "web") return null;
 
-  // No navegador do celular (web mobile), escondemos o sidebar desktop
-  if (typeof window !== "undefined") {
-    const mq = window.matchMedia("(max-width: 899px), (pointer: coarse)");
-    if (mq.matches) return null;
-  }
-
   const pathname = usePathname();
 
   const items: ItemProps[] = [
