@@ -157,6 +157,18 @@ function _PostCard(props: PostCardProps) {
     setPaused((prev) => !prev);
   }, []);
 
+  const handleSinglePress = useCallback(() => {
+    if (media_type === "video") {
+      if (onPressMedia) {
+        onPressMedia();
+      } else {
+        togglePaused();
+      }
+    } else if (onPressMedia) {
+      onPressMedia();
+    }
+  }, [media_type, onPressMedia, togglePaused]);
+
   const handleSingleTap = useCallback(() => {
     if (media_type === "video") {
       if (onPressMedia) {
