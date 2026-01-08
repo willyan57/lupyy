@@ -4,6 +4,7 @@ import { PostCard } from "@/components/PostCard";
 import SkeletonPost from "@/components/SkeletonPost";
 import { useTheme } from "@/contexts/ThemeContext";
 import { supabase } from "@/lib/supabase";
+import { useIsMobileWeb } from "@/lib/useIsMobileWeb";
 import { useIsFocused } from "@react-navigation/native";
 import { Image as ExpoImage } from "expo-image";
 import { useRouter } from "expo-router";
@@ -82,6 +83,8 @@ export default function Feed() {
   const { theme } = useTheme();
   const router = useRouter();
   const isFocused = useIsFocused();
+  const isMobileWeb = useIsMobileWeb(900);
+  const isDesktopWeb = Platform.OS === "web" && !isMobileWeb;
 
   const [posts, setPosts] = useState<UiPost[]>([]);
   const [page, setPage] = useState(0);
@@ -129,11 +132,11 @@ export default function Feed() {
       onPanResponderRelease: (_evt, gestureState) => {
         const { dx } = gestureState;
         if (dx > swipeThreshold) {
-          if (Platform.OS !== "web") {
+          if (!isDesktopWeb) {
             router.push("/capture");
           }
         } else if (dx < -swipeThreshold) {
-          if (Platform.OS !== "web") {
+          if (!isDesktopWeb) {
             router.replace("/(tabs)/tribes");
           }
         }
@@ -512,7 +515,7 @@ export default function Feed() {
 
   const openComments = useCallback(
     (postId: number) => {
-      if (Platform.OS === "web" && viewerOpen) {
+      if (isDesktopWeb && viewerOpen) {
         resumeViewerAfterCommentsRef.current = true;
         resumeViewerIndexRef.current = viewerIndex;
         setViewerOpen(false);
@@ -533,7 +536,7 @@ export default function Feed() {
     setCommentsOpen(false);
     setTimeout(() => {
       setCommentsPostId(null);
-      if (Platform.OS === "web" && resumeViewerAfterCommentsRef.current) {
+      if (isDesktopWeb && resumeViewerAfterCommentsRef.current) {
         resumeViewerAfterCommentsRef.current = false;
         setViewerIndex(resumeViewerIndexRef.current);
         setViewerOpen(true);
@@ -561,7 +564,7 @@ const viewerItems: ViewerItem[] = posts.map((p) => ({
   };
 
   const listContentStyle =
-    Platform.OS === "web" ? styles.listContentWeb : styles.listContentMobile;
+    isDesktopWeb ? styles.listContentWeb : styles.listContentMobile;
 
   const handlePressStory = useCallback(
     (user: StoryUser) => {
@@ -579,7 +582,7 @@ const viewerItems: ViewerItem[] = posts.map((p) => ({
 
   return (
     <SafeAreaView
-      {...(Platform.OS !== "web" ? (panResponder as any).panHandlers : {})}
+      {...(!isDesktopWeb ? (panResponder as any).panHandlers : {})}
       style={[styles.container, { backgroundColor: theme.colors.background }]}
       edges={["top", "left", "right"]}
     >
@@ -606,7 +609,7 @@ const viewerItems: ViewerItem[] = posts.map((p) => ({
               <TouchableOpacity
                 activeOpacity={0.8}
                 onPress={() => {
-                  if (Platform.OS !== "web") {
+                  if (!isDesktopWeb) {
                     router.push("/capture");
                   } else {
                     router.push("/new");

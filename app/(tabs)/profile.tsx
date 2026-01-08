@@ -41,6 +41,7 @@ import {
   ConversationType,
   getOrCreateConversation,
 } from "@/lib/conversations";
+import { useIsMobileWeb } from "@/lib/useIsMobileWeb";
 
 type DbPost = {
   id: number;
@@ -187,7 +188,7 @@ const router = useRouter();
       onPanResponderRelease: (_evt, gestureState) => {
         const { dx } = gestureState;
         if (dx > swipeThreshold) {
-          if (Platform.OS !== "web") {
+          if (!isDesktopWeb) {
             router.replace("/(tabs)/search");
           }
         }
@@ -236,6 +237,9 @@ const router = useRouter();
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [commentsPostId, setCommentsPostId] = useState<number | null>(null);
   const IS_WEB = Platform.OS === "web";
+  const isMobileWeb = useIsMobileWeb(900);
+  const isDesktopWeb = IS_WEB && !isMobileWeb;
+  const isMobileLayout = !isDesktopWeb;
 
   const resumeViewerAfterCommentsRef = useRef(false);
   const resumeViewerIndexRef = useRef(0);
@@ -1270,7 +1274,7 @@ const handleChangeAvatar = useCallback(async () => {
   if (editing) {
     return (
       <SafeAreaView
-        {...(Platform.OS !== "web" ? (panResponder as any).panHandlers : {})}
+        {...(!isDesktopWeb ? (panResponder as any).panHandlers : {})}
         style={[styles.screen, { backgroundColor: theme.colors.background }]}
       >
         <ScrollView contentContainerStyle={styles.editScrollContent}>
@@ -1352,7 +1356,7 @@ const handleChangeAvatar = useCallback(async () => {
     )}
   </TouchableOpacity>
 
-              <View style={[styles.statsRow, Platform.OS !== "web" && styles.statsRowMobile]}>
+              <View style={[styles.statsRow, isMobileLayout && styles.statsRowMobile]}>
                 <View style={styles.statItem}>
                   <Text
                     style={[styles.statNumber, { color: theme.colors.text }]}
@@ -1418,12 +1422,12 @@ const handleChangeAvatar = useCallback(async () => {
 
             <View style={styles.bioSection}>
               {fullName ? (
-                <Text style={[styles.fullName, { color: theme.colors.text }, Platform.OS !== "web" && { textAlign: "center" }]}>
+                <Text style={[styles.fullName, { color: theme.colors.text }, isMobileLayout && { textAlign: "center" }]}>
                   {fullName}
                 </Text>
               ) : null}
               {bio ? (
-                <Text style={[styles.bioText, { color: theme.colors.text }, Platform.OS !== "web" && { textAlign: "center" }]}>
+                <Text style={[styles.bioText, { color: theme.colors.text }, isMobileLayout && { textAlign: "center" }]}>
                   {bio}
                 </Text>
               ) : authEmail && isOwnProfile ? (
@@ -1649,18 +1653,19 @@ const handleChangeAvatar = useCallback(async () => {
           </View>
         </View>
 
-        <View style={[styles.header, Platform.OS !== "web" && styles.headerMobile]}>
-          <TouchableOpacity
-            style={[styles.avatarWrapper, Platform.OS !== "web" && styles.avatarWrapperMobile]}
-            onPress={() => {
-              if (hasStories) {
-                openStory(0);
-              } else if (isOwnProfile) {
-                handleChangeAvatar();
-              }
-            }}
-            onLongPress={isOwnProfile ? handleChangeAvatar : undefined}
-            activeOpacity={0.8}
+ <View style={[styles.header, isMobileLayout && styles.headerMobile]}>
+  <TouchableOpacity
+    style={[styles.avatarWrapper, isMobileLayout && styles.avatarWrapperMobile]}
+    onPress={() => {
+      if (hasStories) {
+        openStory(0);
+      } else if (isOwnProfile) {
+        handleChangeAvatar();
+      }
+    }}
+    onLongPress={isOwnProfile ? handleChangeAvatar : undefined}
+    activeOpacity={0.8}
+
           >
             {hasStories ? (
               <LinearGradient
@@ -1814,7 +1819,7 @@ const handleChangeAvatar = useCallback(async () => {
           </View>
         </View>
 
-        <View style={[styles.bioSection, Platform.OS !== "web" && styles.bioSectionMobile]}>
+        <View style={[styles.bioSection, isMobileLayout && styles.bioSectionMobile]}>
           {fullName ? (
             <Text style={[styles.fullName, { color: theme.colors.text }]}>
               {fullName}
@@ -2089,7 +2094,7 @@ const handleChangeAvatar = useCallback(async () => {
 
   return (
     <SafeAreaView
-      {...(Platform.OS !== "web" ? (panResponder as any).panHandlers : {})}
+      {...(!isDesktopWeb ? (panResponder as any).panHandlers : {})}
       style={[styles.screen, { backgroundColor: theme.colors.background }]}
     >
       {isLoadingInitial ? (
