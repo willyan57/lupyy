@@ -77,9 +77,11 @@ function _PostCard(props: PostCardProps) {
     onPressUser,
   } = props;
 
+  const isWeb = Platform.OS === "web";
+
   const player = useVideoPlayer(media_url, (p) => {
     p.loop = true;
-    p.muted = !!muted;
+    p.muted = isWeb ? false : !!muted;
   });
 
   const [paused, setPaused] = useState(!isVisible);
@@ -105,9 +107,9 @@ function _PostCard(props: PostCardProps) {
   }, [paused, isVisible, player, media_type]);
 
   useEffect(() => {
-    if (media_type !== "video") return;
+    if (media_type !== "video" || isWeb) return;
     player.muted = !!muted;
-  }, [muted, player, media_type]);
+  }, [muted, player, media_type, isWeb]);
 
   useEffect(() => {
     return () => {
@@ -149,6 +151,18 @@ function _PostCard(props: PostCardProps) {
     setPaused((prev) => !prev);
   }, []);
 
+  const handleSingleTap = useCallback(() => {
+    if (media_type === "video") {
+      if (onPressMedia) {
+        onPressMedia();
+      } else {
+        togglePaused();
+      }
+    } else if (onPressMedia) {
+      onPressMedia();
+    }
+  }, [media_type, onPressMedia, togglePaused]);
+
   const doubleTap = Gesture.Tap().numberOfTaps(2).onEnd((_evt, success) => {
     if (success) runOnJS(onDoubleTapLike)();
   });
@@ -158,22 +172,42 @@ function _PostCard(props: PostCardProps) {
     .requireExternalGestureToFail(doubleTap)
     .onEnd((_evt, success) => {
       if (!success) return;
-      if (media_type === "video") {
-        if (onPressMedia) {
-          runOnJS(onPressMedia)();
-        } else {
-          runOnJS(togglePaused)();
-        }
-      } else if (onPressMedia) {
-        runOnJS(onPressMedia)();
-      }
+      runOnJS(handleSingleTap)();
     });
 
   const composedGesture = Gesture.Exclusive(doubleTap, singleTap);
 
-  const isWeb = Platform.OS === "web";
-
   const likeIconColor = liked ? Colors.brandStart : Colors.text;
+
+  const shouldShowVideo = media_type === "video" && isVisible && !paused;
+
+  const MediaContent = (
+    <>
+      {media_type === "image" ? (
+        <Image
+          source={{ uri: media_url }}
+          style={styles.media}
+          contentFit="cover"
+          cachePolicy="disk"
+        />
+      ) : shouldShowVideo ? (
+        <VideoView style={styles.media} player={player} contentFit="cover" />
+      ) : thumb_url ? (
+        <Image
+          source={{ uri: thumb_url }}
+          style={styles.media}
+          contentFit="cover"
+          cachePolicy="disk"
+        />
+      ) : (
+        <View style={styles.videoPlaceholder} />
+      )}
+
+      <Animated.View pointerEvents="none" style={[styles.heartWrap, heartStyle]}>
+        <Text style={styles.heart}>❤</Text>
+      </Animated.View>
+    </>
+  );
 
   return (
     <View style={styles.card}>
@@ -201,53 +235,29 @@ function _PostCard(props: PostCardProps) {
       </View>
 
       <View style={styles.mediaContainer}>
-        <GestureDetector gesture={composedGesture}>
-          <View
+        {isWeb ? (
+          <TouchableOpacity
+            activeOpacity={1}
             style={styles.mediaWrapper}
             accessible
             accessibilityRole="imagebutton"
+            onPress={handleSingleTap}
           >
-            {media_type === "image" ? (
-              <Image
-                source={{ uri: media_url }}
-                style={styles.media}
-                contentFit="cover"
-                cachePolicy="disk"
-              />
-            ) : isWeb ? (
-              <VideoView
-                style={styles.media}
-                player={player}
-                contentFit="cover"
-              />
-            ) : isVisible && !paused ? (
-              <VideoView
-                style={styles.media}
-                player={player}
-                contentFit="cover"
-              />
-            ) : thumb_url ? (
-              <Image
-                source={{ uri: thumb_url }}
-                style={styles.media}
-                contentFit="cover"
-                cachePolicy="disk"
-              />
-            ) : (
-              <View style={styles.videoPlaceholder} />
-            )}
-
-            <Animated.View
-              pointerEvents="none"
-              style={[styles.heartWrap, heartStyle]}
+            {MediaContent}
+          </TouchableOpacity>
+        ) : (
+          <GestureDetector gesture={composedGesture}>
+            <View
+              style={styles.mediaWrapper}
+              accessible
+              accessibilityRole="imagebutton"
             >
-              <Text style={styles.heart}>❤</Text>
-            </Animated.View>
-          </View>
-        </GestureDetector>
+              {MediaContent}
+            </View>
+          </GestureDetector>
+        )}
       </View>
 
-      {/* AÇÕES EMBAIXO – ÍCONES “TRANSPARENTES” ESTILO INSTAGRAM */}
       <View style={styles.actionsBar}>
         <TouchableOpacity onPress={onLike} style={styles.actionBtn}>
           <Ionicons
@@ -306,6 +316,7 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     ...(Platform.OS === "web" && {
       maxWidth: 520,
+      width: 520,
       marginTop: 24,
     }),
   },
@@ -326,7 +337,7 @@ const styles = StyleSheet.create({
   date: { color: Colors.textMuted, fontSize: 12 },
   mediaContainer: {
     width: "100%",
-    aspectRatio: Platform.OS === "web" ? 9 / 16 : 4 / 5,
+    aspectRatio: 4 / 5,
     position: "relative",
     backgroundColor: Colors.border,
   },
