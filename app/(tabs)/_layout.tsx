@@ -5,31 +5,30 @@ import { supabase } from "@/lib/supabase";
 import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 import { Stack, usePathname, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { Platform, StatusBar, View, useWindowDimensions } from "react-native";
+import { Platform, StatusBar, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 export default function RootLayout() {
   const router = useRouter();
   const pathname = usePathname();
   const [ready, setReady] = useState(false);
-  const { width } = useWindowDimensions();
 
   const publicRoutes = useMemo(() => {
-    return ["/", "/login", "/signup", "/reset", "/terms", "/privacy"];
-  }, []);
+  return ["/", "/login", "/signup", "/reset", "/terms", "/privacy"];
+}, []);
 
-  const redirectToFeedRoutes = useMemo(() => {
-    // rotas que devem jogar para o feed se já tiver sessão
-    return ["/", "/login", "/signup", "/reset"];
-  }, []);
+const redirectToFeedRoutes = useMemo(() => {
+  // rotas que devem jogar para o feed se já tiver sessão
+  return ["/", "/login", "/signup", "/reset"];
+}, []);
 
-  const isPublicRoute = useMemo(() => {
-    return publicRoutes.includes(pathname);
-  }, [publicRoutes, pathname]);
+const isPublicRoute = useMemo(() => {
+  return publicRoutes.includes(pathname);
+}, [publicRoutes, pathname]);
 
-  const isRedirectToFeedRoute = useMemo(() => {
-    return redirectToFeedRoutes.includes(pathname);
-  }, [redirectToFeedRoutes, pathname]);
+const isRedirectToFeedRoute = useMemo(() => {
+  return redirectToFeedRoutes.includes(pathname);
+}, [redirectToFeedRoutes, pathname]);
 
   useEffect(() => {
     let mounted = true;
@@ -78,15 +77,17 @@ export default function RootLayout() {
 
   if (!ready) return null;
 
-  const isDesktopWeb = Platform.OS === "web" && width >= 900;
-  const showSidebar = isDesktopWeb && !isPublicRoute;
+  const showSidebar = Platform.OS === "web" && !isPublicRoute;
 
   return (
     <GestureHandlerRootView
       style={{ flex: 1, backgroundColor: Colors.background }}
     >
       <ThemeProvider>
-        <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+        <StatusBar
+          barStyle="light-content"
+          backgroundColor={Colors.background}
+        />
 
         {showSidebar && <WebSidebar />}
 
