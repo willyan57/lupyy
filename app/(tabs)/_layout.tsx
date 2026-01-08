@@ -2,6 +2,7 @@ import WebSidebar from "@/components/WebSidebar";
 import Colors from "@/constants/Colors";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { supabase } from "@/lib/supabase";
+import { useIsMobileWeb } from "@/lib/useIsMobileWeb";
 import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 import { Stack, usePathname, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
@@ -18,7 +19,6 @@ export default function RootLayout() {
   }, []);
 
   const redirectToFeedRoutes = useMemo(() => {
-    // rotas que devem jogar para o feed se já tiver sessão
     return ["/", "/login", "/signup", "/reset"];
   }, []);
 
@@ -29,6 +29,8 @@ export default function RootLayout() {
   const isRedirectToFeedRoute = useMemo(() => {
     return redirectToFeedRoutes.includes(pathname);
   }, [redirectToFeedRoutes, pathname]);
+
+  const isMobileWeb = useIsMobileWeb(900);
 
   useEffect(() => {
     let mounted = true;
@@ -77,7 +79,7 @@ export default function RootLayout() {
 
   if (!ready) return null;
 
-  const showSidebar = Platform.OS === "web" && !isPublicRoute;
+  const showSidebar = Platform.OS === "web" && !isPublicRoute && !isMobileWeb;
 
   const stack = (
     <Stack
