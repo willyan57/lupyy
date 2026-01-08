@@ -10,6 +10,7 @@ import {
   Text,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
@@ -78,6 +79,8 @@ function _PostCard(props: PostCardProps) {
   } = props;
 
   const isWeb = Platform.OS === "web";
+
+  const { width: windowWidth } = useWindowDimensions();
 
   const player = useVideoPlayer(media_url, (p) => {
     p.loop = true;
@@ -169,18 +172,6 @@ function _PostCard(props: PostCardProps) {
     }
   }, [media_type, onPressMedia, togglePaused]);
 
-  const handleSingleTap = useCallback(() => {
-    if (media_type === "video") {
-      if (onPressMedia) {
-        onPressMedia();
-      } else {
-        togglePaused();
-      }
-    } else if (onPressMedia) {
-      onPressMedia();
-    }
-  }, [media_type, onPressMedia, togglePaused]);
-
   const doubleTap = Gesture.Tap().numberOfTaps(2).onEnd((_evt, success) => {
     if (success) runOnJS(onDoubleTapLike)();
   });
@@ -190,7 +181,7 @@ function _PostCard(props: PostCardProps) {
     .requireExternalGestureToFail(doubleTap)
     .onEnd((_evt, success) => {
       if (!success) return;
-      runOnJS(handleSingleTap)();
+      runOnJS(handleSinglePress)();
     });
 
   const composedGesture = Gesture.Exclusive(doubleTap, singleTap);
@@ -199,8 +190,15 @@ function _PostCard(props: PostCardProps) {
 
   const shouldShowVideo = media_type === "video" && isVisible && !paused;
 
+  const cardStyle = [
+    styles.card,
+    isWeb && windowWidth < 520
+      ? { width: windowWidth, maxWidth: windowWidth }
+      : null,
+  ];
+
   return (
-    <View style={styles.card}>
+    <View style={cardStyle}>
       <View style={styles.header}>
         {avatarUrl ? (
           <Image
@@ -231,7 +229,7 @@ function _PostCard(props: PostCardProps) {
             style={styles.mediaWrapper}
             accessible
             accessibilityRole="imagebutton"
-            onPress={handleSingleTap}
+            onPress={handleSinglePress}
           >
             {media_type === "image" ? (
               <Image
