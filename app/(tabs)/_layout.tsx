@@ -1,4 +1,4 @@
-import WebSidebar, { WEB_SIDEBAR_WIDTH } from "@/components/WebSidebar";
+import WebSidebar from "@/components/WebSidebar";
 import Colors from "@/constants/Colors";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { supabase } from "@/lib/supabase";
@@ -14,21 +14,21 @@ export default function RootLayout() {
   const [ready, setReady] = useState(false);
 
   const publicRoutes = useMemo(() => {
-  return ["/", "/login", "/signup", "/reset", "/terms", "/privacy"];
-}, []);
+    return ["/", "/login", "/signup", "/reset", "/terms", "/privacy"];
+  }, []);
 
-const redirectToFeedRoutes = useMemo(() => {
-  // rotas que devem jogar para o feed se já tiver sessão
-  return ["/", "/login", "/signup", "/reset"];
-}, []);
+  const redirectToFeedRoutes = useMemo(() => {
+    // rotas que devem jogar para o feed se já tiver sessão
+    return ["/", "/login", "/signup", "/reset"];
+  }, []);
 
-const isPublicRoute = useMemo(() => {
-  return publicRoutes.includes(pathname);
-}, [publicRoutes, pathname]);
+  const isPublicRoute = useMemo(() => {
+    return publicRoutes.includes(pathname);
+  }, [publicRoutes, pathname]);
 
-const isRedirectToFeedRoute = useMemo(() => {
-  return redirectToFeedRoutes.includes(pathname);
-}, [redirectToFeedRoutes, pathname]);
+  const isRedirectToFeedRoute = useMemo(() => {
+    return redirectToFeedRoutes.includes(pathname);
+  }, [redirectToFeedRoutes, pathname]);
 
   useEffect(() => {
     let mounted = true;
@@ -79,44 +79,36 @@ const isRedirectToFeedRoute = useMemo(() => {
 
   const showSidebar = Platform.OS === "web" && !isPublicRoute;
 
-  return (
-    <GestureHandlerRootView
-      style={{ flex: 1, backgroundColor: Colors.background }}
+  const stack = (
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: Colors.background },
+      }}
     >
+      <Stack.Screen name="index" />
+      <Stack.Screen name="login" />
+      <Stack.Screen name="terms" />
+      <Stack.Screen name="privacy" />
+      <Stack.Screen name="signup" />
+      <Stack.Screen name="reset" />
+      <Stack.Screen name="(tabs)" />
+    </Stack>
+  );
+
+  return (
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: Colors.background }}>
       <ThemeProvider>
-        <StatusBar
-          barStyle="light-content"
-          backgroundColor={Colors.background}
-        />
+        <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
 
-        {showSidebar && <WebSidebar />}
-
-        <View
-          style={
-            showSidebar
-              ? {
-                  flex: 1,
-                  marginLeft: WEB_SIDEBAR_WIDTH,
-                  backgroundColor: Colors.background,
-                }
-              : { flex: 1, backgroundColor: Colors.background }
-          }
-        >
-          <Stack
-            screenOptions={{
-              headerShown: false,
-              contentStyle: { backgroundColor: Colors.background },
-            }}
-          >
-            <Stack.Screen name="index" />
-            <Stack.Screen name="login" />
-            <Stack.Screen name="terms" />
-            <Stack.Screen name="privacy" />
-            <Stack.Screen name="signup" />
-            <Stack.Screen name="reset" />
-            <Stack.Screen name="(tabs)" />
-          </Stack>
-        </View>
+        {showSidebar ? (
+          <View style={{ flex: 1, flexDirection: "row", backgroundColor: Colors.background }}>
+            <WebSidebar />
+            <View style={{ flex: 1, backgroundColor: Colors.background }}>{stack}</View>
+          </View>
+        ) : (
+          <View style={{ flex: 1, backgroundColor: Colors.background }}>{stack}</View>
+        )}
       </ThemeProvider>
     </GestureHandlerRootView>
   );
