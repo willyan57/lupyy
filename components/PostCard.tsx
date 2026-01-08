@@ -81,11 +81,14 @@ function _PostCard(props: PostCardProps) {
 
   const player = useVideoPlayer(media_url, (p) => {
     p.loop = true;
+    // no WEB: nunca mutar o vídeo (som sempre liberado)
+    // no APK / nativo: respeita a prop muted
     p.muted = isWeb ? false : !!muted;
   });
 
   const [paused, setPaused] = useState(!isVisible);
 
+  // controla play/pause quando entra/sai da tela
   useEffect(() => {
     if (media_type !== "video") return;
     if (isVisible) {
@@ -97,6 +100,7 @@ function _PostCard(props: PostCardProps) {
     }
   }, [isVisible, player, media_type]);
 
+  // controla play/pause quando toca na tela
   useEffect(() => {
     if (media_type !== "video") return;
     if (paused) {
@@ -106,11 +110,13 @@ function _PostCard(props: PostCardProps) {
     }
   }, [paused, isVisible, player, media_type]);
 
+  // mute / unmute — só no nativo, para não brigar com o navegador
   useEffect(() => {
     if (media_type !== "video" || isWeb) return;
     player.muted = !!muted;
   }, [muted, player, media_type, isWeb]);
 
+  // cleanup
   useEffect(() => {
     return () => {
       try {
@@ -181,34 +187,6 @@ function _PostCard(props: PostCardProps) {
 
   const shouldShowVideo = media_type === "video" && isVisible && !paused;
 
-  const MediaContent = (
-    <>
-      {media_type === "image" ? (
-        <Image
-          source={{ uri: media_url }}
-          style={styles.media}
-          contentFit="cover"
-          cachePolicy="disk"
-        />
-      ) : shouldShowVideo ? (
-        <VideoView style={styles.media} player={player} contentFit="cover" />
-      ) : thumb_url ? (
-        <Image
-          source={{ uri: thumb_url }}
-          style={styles.media}
-          contentFit="cover"
-          cachePolicy="disk"
-        />
-      ) : (
-        <View style={styles.videoPlaceholder} />
-      )}
-
-      <Animated.View pointerEvents="none" style={[styles.heartWrap, heartStyle]}>
-        <Text style={styles.heart}>❤</Text>
-      </Animated.View>
-    </>
-  );
-
   return (
     <View style={styles.card}>
       <View style={styles.header}>
@@ -243,7 +221,36 @@ function _PostCard(props: PostCardProps) {
             accessibilityRole="imagebutton"
             onPress={handleSingleTap}
           >
-            {MediaContent}
+            {media_type === "image" ? (
+              <Image
+                source={{ uri: media_url }}
+                style={styles.media}
+                contentFit="cover"
+                cachePolicy="disk"
+              />
+            ) : shouldShowVideo ? (
+              <VideoView
+                style={styles.media}
+                player={player}
+                contentFit="cover"
+              />
+            ) : thumb_url ? (
+              <Image
+                source={{ uri: thumb_url }}
+                style={styles.media}
+                contentFit="cover"
+                cachePolicy="disk"
+              />
+            ) : (
+              <View style={styles.videoPlaceholder} />
+            )}
+
+            <Animated.View
+              pointerEvents="none"
+              style={[styles.heartWrap, heartStyle]}
+            >
+              <Text style={styles.heart}>❤</Text>
+            </Animated.View>
           </TouchableOpacity>
         ) : (
           <GestureDetector gesture={composedGesture}>
@@ -252,7 +259,36 @@ function _PostCard(props: PostCardProps) {
               accessible
               accessibilityRole="imagebutton"
             >
-              {MediaContent}
+              {media_type === "image" ? (
+                <Image
+                  source={{ uri: media_url }}
+                  style={styles.media}
+                  contentFit="cover"
+                  cachePolicy="disk"
+                />
+              ) : shouldShowVideo ? (
+                <VideoView
+                  style={styles.media}
+                  player={player}
+                  contentFit="cover"
+                />
+              ) : thumb_url ? (
+                <Image
+                  source={{ uri: thumb_url }}
+                  style={styles.media}
+                  contentFit="cover"
+                  cachePolicy="disk"
+                />
+              ) : (
+                <View style={styles.videoPlaceholder} />
+              )}
+
+              <Animated.View
+                pointerEvents="none"
+                style={[styles.heartWrap, heartStyle]}
+              >
+                <Text style={styles.heart}>❤</Text>
+              </Animated.View>
             </View>
           </GestureDetector>
         )}
