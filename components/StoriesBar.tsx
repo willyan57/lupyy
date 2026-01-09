@@ -2,6 +2,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { Ionicons } from "@expo/vector-icons";
 import { Image as ExpoImage } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
+import { useEffect, useState } from "react";
 import {
   FlatList,
   StyleSheet,
@@ -46,11 +47,16 @@ export default function StoriesBar({
   onPressAdd,
 }: StoriesBarProps) {
   const { theme } = useTheme();
+  const [internalData, setInternalData] = useState<StoryUser[]>(data);
+
+  useEffect(() => {
+    setInternalData(data);
+  }, [data]);
 
   return (
     <View style={styles.storiesContainer}>
       <FlatList
-        data={data}
+        data={internalData}
         keyExtractor={(item) => String(item.id)}
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -73,7 +79,16 @@ export default function StoriesBar({
             <View style={styles.storyItem}>
               <TouchableOpacity
                 activeOpacity={0.8}
-                onPress={() => onPressStory?.(item)}
+                onPress={() => {
+                  onPressStory?.(item);
+                  setInternalData((prev) =>
+                    prev.map((u) =>
+                      u.id === item.id
+                        ? { ...u, hasUnseen: false, seen: true }
+                        : u
+                    )
+                  );
+                }}
               >
                 <View>
                   {(() => {

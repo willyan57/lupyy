@@ -344,6 +344,20 @@ export default function Feed() {
           return;
         }
 
+        const { data: metaRows, error: metaError } = await supabase
+          .from("view_stories_bar")
+          .select("*");
+
+        if (metaError) {
+          console.log("loadStoriesFeed meta error details", metaError);
+        }
+
+        const metaByUserId: Record<string, any> = {};
+        (metaRows ?? []).forEach((mr: any) => {
+          const key = String(mr.user_id);
+          metaByUserId[key] = mr;
+        });
+
         const grouped: Record<string, StoryItem[]> = {};
         const usersMap: Record<string, StoryUser> = {};
 
@@ -364,6 +378,10 @@ export default function Feed() {
             media_type: row.media_type,
             media_url: url,
             duration: null,
+            // Metadados para o cabeçalho do StoryViewer
+            userName: row.username ?? "user",
+            userAvatarUrl: row.avatar_url ?? null,
+            createdAt: row.created_at ?? null,
           };
 
           const userId = String(row.user_id);
@@ -380,14 +398,20 @@ export default function Feed() {
                 : "S";
 
             const avatarUrl: string | null = row.avatar_url ?? null;
+            const meta = metaByUserId[userId];
+
+            const hasUnseen = meta?.has_unseen ?? true;
+            const seen = meta?.seen ?? !hasUnseen;
+            const isCurrentUser = meta?.is_current_user ?? !!isMe;
 
             usersMap[userId] = {
               id: userId,
               label,
               initials,
               avatarUrl: avatarUrl ?? undefined,
-              hasUnseen: true,
-              isCurrentUser: !!isMe,
+              hasUnseen,
+              seen,
+              isCurrentUser,
             };
           }
         });
@@ -405,6 +429,7 @@ export default function Feed() {
     },
     [authUserId]
   );
+
 
   useEffect(() => {
     supabase.auth

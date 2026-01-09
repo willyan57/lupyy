@@ -1,4 +1,5 @@
 import Colors from "@/constants/Colors";
+import { OffscreenLutRenderer } from "@/lib/gl/OffscreenLutRenderer";
 import { uploadStoryMediaFromUri } from "@/lib/storage";
 import { supabase } from "@/lib/supabase";
 import { ResizeMode, Video } from "expo-av";
@@ -69,6 +70,7 @@ export default function CapturePreview() {
   const [userId, setUserId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [mediaLoaded, setMediaLoaded] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     // força re-render limpo quando troca de mídia/filtro; evita tela preta em alguns Android
@@ -126,13 +128,13 @@ export default function CapturePreview() {
 
   const handleBack = () => router.back();
 
-  const handleSend = async () => {
-    if (!uri || sending) return;
+  const performSendWithUri = async (finalUri: string) => {
+    if (!uri) return;
 
     if (mode === "story") {
       try {
         setSending(true);
-        const uploaded = await uploadStoryMediaFromUri(uri, mediaType, filter);
+        const uploaded = await uploadStoryMediaFromUri(finalUri, mediaType, filter);
         if (!uploaded) {
           setSending(false);
           return;
@@ -159,8 +161,19 @@ export default function CapturePreview() {
 
     router.push({
       pathname: "/new" as any,
-      params: { source: "camera", uri, mediaType, filter },
+      params: { source: "camera", uri: finalUri, mediaType, filter },
     });
+  };
+
+  const handleSend = () => {
+    if (!uri || sending || exporting) return;
+
+    if (mediaType === "image" && filter !== "none") {
+      setExporting(true);
+      return;
+    }
+
+    void performSendWithUri(uri);
   };
 
   const label = mode === "story" ? "Publicar Story" : "Continuar";
@@ -195,6 +208,18 @@ export default function CapturePreview() {
 
   return (
     <View style={styles.container}>
+      {exporting && mediaType === "image" && uri ? (
+        <OffscreenLutRenderer
+          sourceUri={uri}
+          filter={filter}
+          onFinish={(processedUri) => {
+            setExporting(false);
+            const finalUri = processedUri || uri;
+            void performSendWithUri(finalUri);
+          }}
+        />
+      ) : null}
+
       {mediaType === "image" ? (
         <Image
           key={`${uri}::${nonce}::${filter}`}

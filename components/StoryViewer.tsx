@@ -22,6 +22,14 @@ export type StoryItem = {
   media_url: string;
   filter?: string | null;
   duration?: number | null; // em segundos (opcional). Se não vier, usa 30s
+  // Metadados opcionais para cabeçalho estilo IG
+  userName?: string | null;
+  userAvatarUrl?: string | null;
+  createdAt?: string | null; // ISO string
+  // Fallback genérico caso venham de outras fontes
+  username?: string | null;
+  avatar_url?: string | null;
+  created_at?: string | null;
 };
 
 type StoryViewerProps = {
@@ -46,6 +54,24 @@ const FILTERS: { id: FilterId; overlay?: string; blur?: number; vignette?: boole
 
 const getFilter = (id?: string | null) =>
   FILTERS.find((f) => f.id === (id as FilterId)) ?? FILTERS[0];
+;
+
+const formatStoryTime = (createdAt?: string | null): string => {
+  if (!createdAt) return "";
+  const date = new Date(createdAt);
+  if (isNaN(date.getTime())) return "";
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return "agora";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `há ${diffMin} min`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return `há ${diffH} h`;
+  const diffD = Math.floor(diffH / 24);
+  if (diffD === 1) return "ontem";
+  return `${diffD} d`;
+};
 
 
 function StoryVideo({ uri, playing }: { uri: string; playing: boolean }) {
@@ -147,6 +173,20 @@ export default function StoryViewer({
     if (!visible || paused || total === 0) return;
 
     const current = items[currentIndex];
+
+  const headerName =
+    (current as any)?.userName ||
+    (current as any)?.username ||
+    "Story";
+
+  const headerAvatar: string | null =
+    (current as any)?.userAvatarUrl ||
+    (current as any)?.avatar_url ||
+    null;
+
+  const headerTime = formatStoryTime(
+    (current as any)?.createdAt || (current as any)?.created_at || null
+  );
     if (!current) return;
 
     const durationSec =
@@ -173,6 +213,20 @@ export default function StoryViewer({
   }
 
   const current = items[currentIndex];
+
+  const headerName =
+    (current as any)?.userName ||
+    (current as any)?.username ||
+    "Story";
+
+  const headerAvatar: string | null =
+    (current as any)?.userAvatarUrl ||
+    (current as any)?.avatar_url ||
+    null;
+
+  const headerTime = formatStoryTime(
+    (current as any)?.createdAt || (current as any)?.created_at || null
+  );
 
   const handlePress = (evt: any) => {
     const x = evt.nativeEvent.locationX;
@@ -371,6 +425,50 @@ backdrop: {
     color: "#cccccc",
     fontSize: 11,
     marginTop: 4,
+  },
+
+  headerRow: {
+    marginTop: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "stretch",
+    paddingHorizontal: 4,
+  },
+  headerAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.85)",
+  },
+  headerAvatarPlaceholder: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.85)",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.4)",
+  },
+  headerAvatarInitial: {
+    color: "#ffffff",
+    fontWeight: "700",
+    fontSize: 16,
+  },
+  headerTextCol: {
+    marginLeft: 8,
+    flex: 1,
+  },
+  headerName: {
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  headerTime: {
+    color: "rgba(255,255,255,0.7)",
+    fontSize: 11,
+    marginTop: 1,
   },
 
   glowWrap: { ...StyleSheet.absoluteFillObject },
