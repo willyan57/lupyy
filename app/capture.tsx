@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
+  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -14,6 +15,7 @@ import {
 } from "react-native";
 
 const { width, height } = Dimensions.get("window");
+const isWeb = Platform.OS === "web";
 
 type CaptureMode = "post" | "story" | "reel";
 type FilterId = "none" | "warm" | "cool" | "night" | "pink" | "gold";
@@ -77,6 +79,11 @@ export default function CaptureScreen() {
   };
 
   const handleShotPress = async () => {
+    if (isWeb) {
+      handleOpenGallery();
+      return;
+    }
+
     if (!cameraRef.current || loadingCapture || recording) return;
 
     if (mode === "reel") {
@@ -137,6 +144,10 @@ export default function CaptureScreen() {
   };
 
   const handleShotLongPress = async () => {
+    if (isWeb) {
+      return;
+    }
+
     if (!cameraRef.current || mode !== "story" || recording) return;
 
     try {
@@ -193,15 +204,19 @@ export default function CaptureScreen() {
 
   return (
     <View style={styles.container}>
-      <CameraView
-        ref={(ref) => {
-          cameraRef.current = ref;
-        }}
-        style={styles.camera}
-        facing={facing}
-        enableTorch={flashOn}
-        mode={mode === "reel" ? "video" : "picture"}
-      />
+      {isWeb ? (
+        <View style={styles.cameraPlaceholder} />
+      ) : (
+        <CameraView
+          ref={(ref) => {
+            cameraRef.current = ref;
+          }}
+          style={styles.camera}
+          facing={facing}
+          enableTorch={flashOn}
+          mode={mode === "reel" ? "video" : "picture"}
+        />
+      )}
 
       <LinearGradient
         colors={["rgba(0,0,0,0.7)", "rgba(0,0,0,0.0)"]}
@@ -305,6 +320,14 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 0,
     left: 0,
+  },
+  cameraPlaceholder: {
+    width,
+    height,
+    position: "absolute",
+    top: 0,
+    left: 0,
+    backgroundColor: "#000",
   },
   topGradient: {
     position: "absolute",
