@@ -126,6 +126,10 @@ export default function CapturePreview() {
     | "draw"
     | "save"
   >(null);
+  const [quickAdjustment, setQuickAdjustment] = useState<
+    "none" | "bright" | "dark" | "punch"
+  >("none");
+
 
 
   useEffect(() => {
@@ -315,17 +319,24 @@ export default function CapturePreview() {
     { key: "draw", label: "Desenhar", icon: "✎" },
     { key: "save", label: "Salvar", icon: "⇣" },
   ] as const;
+  const quickAdjustments = [
+    { key: "none", label: "Normal" },
+    { key: "bright", label: "Claro" },
+    { key: "dark", label: "Escuro" },
+    { key: "punch", label: "Punch" },
+  ] as const;
+
 
   // quando estiver colapsado: mostra só as 4 primeiras + botão de expandir
   // quando expandido: mostra todas + botão de recolher
   const tools = toolsCollapsed
     ? [
         ...baseTools.slice(0, 4),
-        { key: "more", label: "Mais", icon: "˅" },
+        { key: "more", label: "Mais", icon: "⋮" },
       ]
     : [
         ...baseTools,
-        { key: "more", label: "Menos", icon: "˄" },
+        { key: "more", label: "Menos", icon: "⋮" },
       ];
 
   const handleToolPress = (key: string) => {
@@ -450,6 +461,25 @@ export default function CapturePreview() {
         </View>
       )}
 
+      {quickAdjustment === "bright" && (
+        <View
+          pointerEvents="none"
+          style={[styles.adjustmentOverlay, styles.adjustmentBright]}
+        />
+      )}
+      {quickAdjustment === "dark" && (
+        <View
+          pointerEvents="none"
+          style={[styles.adjustmentOverlay, styles.adjustmentDark]}
+        />
+      )}
+      {quickAdjustment === "punch" && (
+        <View
+          pointerEvents="none"
+          style={[styles.adjustmentOverlay, styles.adjustmentPunch]}
+        />
+      )}
+
       <Animated.View
         pointerEvents="none"
         style={[
@@ -520,6 +550,31 @@ export default function CapturePreview() {
       </View>
 
       <View style={styles.bottomPanel}>
+        <View style={styles.quickAdjustRow}>
+          {quickAdjustments.map((item) => {
+            const active = quickAdjustment === item.key;
+            return (
+              <TouchableOpacity
+                key={item.key}
+                activeOpacity={0.9}
+                onPress={() => setQuickAdjustment(item.key as any)}
+                style={[
+                  styles.quickAdjustChip,
+                  active && styles.quickAdjustChipActive,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.quickAdjustText,
+                    active && styles.quickAdjustTextActive,
+                  ]}
+                >
+                  {item.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
         <View style={styles.legendRow}>
           <TextInput
             style={styles.legendInput}
@@ -875,6 +930,24 @@ const styles = StyleSheet.create({
     right: 0,
     height: 220,
   },
+  adjustmentOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  adjustmentBright: {
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  adjustmentDark: {
+    backgroundColor: "rgba(0,0,0,0.22)",
+  },
+  adjustmentPunch: {
+    backgroundColor: "rgba(0,0,0,0.16)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(255,255,255,0.25)",
+  },
   filterLabel: {
     position: "absolute",
     top: height * 0.18,
@@ -957,6 +1030,36 @@ const styles = StyleSheet.create({
     bottom: 0,
     paddingHorizontal: 18,
     paddingBottom: 22,
+  },
+  quickAdjustRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+    paddingHorizontal: 4,
+  },
+  quickAdjustChip: {
+    flex: 1,
+    height: 32,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+    marginHorizontal: 4,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.45)",
+  },
+  quickAdjustChipActive: {
+    backgroundColor: "rgba(255,51,85,0.2)",
+    borderColor: "rgba(255,51,85,0.6)",
+  },
+  quickAdjustText: {
+    color: "rgba(255,255,255,0.8)",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  quickAdjustTextActive: {
+    color: "#fff",
   },
   legendRow: {
     borderRadius: 18,
