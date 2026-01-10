@@ -1,4 +1,3 @@
-// app/capture.tsx
 import Colors from "@/constants/Colors";
 import { CameraType, CameraView, useCameraPermissions } from "expo-camera";
 import { LinearGradient } from "expo-linear-gradient";
@@ -7,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -18,14 +18,23 @@ const { width, height } = Dimensions.get("window");
 type CaptureMode = "post" | "story" | "reel";
 type FilterId = "none" | "warm" | "cool" | "night" | "pink" | "gold";
 
+const FILTERS: { id: FilterId; label: string }[] = [
+  { id: "none", label: "Normal" },
+  { id: "warm", label: "Quente" },
+  { id: "cool", label: "Frio" },
+  { id: "pink", label: "Rosé" },
+  { id: "gold", label: "Dourado" },
+  { id: "night", label: "Night" },
+];
+
 export default function CaptureScreen() {
   const router = useRouter();
   const [permission, requestPermission] = useCameraPermissions();
 
   const [facing, setFacing] = useState<CameraType>("back");
   const [flashOn, setFlashOn] = useState(false);
-  const [mode, setMode] = useState<CaptureMode>("post");
-  const [filter] = useState<FilterId>("none");
+  const [mode, setMode] = useState<CaptureMode>("story");
+  const [filter, setFilter] = useState<FilterId>("none");
   const [recording, setRecording] = useState(false);
   const [loadingCapture, setLoadingCapture] = useState(false);
 
@@ -36,8 +45,6 @@ export default function CaptureScreen() {
       requestPermission();
     }
   }, [permission, requestPermission]);
-
-
 
   if (!permission) {
     return (
@@ -86,13 +93,10 @@ export default function CaptureScreen() {
       }
       try {
         setRecording(true);
-
-        const video = await cameraRef.current?.recordAsync(
-          {
-            maxDuration: 60,
-            quality: "1080p",
-          } as any
-        );
+        const video = await cameraRef.current.recordAsync({
+          maxDuration: 60,
+          quality: "1080p",
+        } as any);
         setRecording(false);
         if (video?.uri) {
           router.push({
@@ -141,12 +145,10 @@ export default function CaptureScreen() {
 
     try {
       setRecording(true);
-      const video = await cameraRef.current.recordAsync(
-        {
-          maxDuration: 30,
-          quality: "1080p",
-        } as any
-      );
+      const video = await cameraRef.current.recordAsync({
+        maxDuration: 30,
+        quality: "1080p",
+      } as any);
       setRecording(false);
       if (video?.uri) {
         router.push({
@@ -191,6 +193,32 @@ export default function CaptureScreen() {
     );
   };
 
+  const renderFilterChip = (item: { id: FilterId; label: string }) => {
+    const active = filter === item.id;
+    return (
+      <TouchableOpacity
+        key={item.id}
+        onPress={() => setFilter(item.id)}
+        activeOpacity={0.9}
+        style={[styles.filterChip, active && styles.filterChipActive]}
+      >
+        <Text
+          style={[styles.filterChipText, active && styles.filterChipTextActive]}
+        >
+          {item.label}
+        </Text>
+      </TouchableOpacity>
+    );
+  };
+
+  const leftMenuItems = [
+    { key: "criar", label: "Criar" },
+    { key: "boomerang", label: "Boomerang" },
+    { key: "layout", label: "Layout" },
+    { key: "handsfree", label: "Mãos livres" },
+    { key: "fechar", label: "Fechar" },
+  ] as const;
+
   return (
     <View style={styles.container}>
       <CameraView
@@ -209,7 +237,7 @@ export default function CaptureScreen() {
       />
 
       <LinearGradient
-        colors={["rgba(0,0,0,0.0)", "rgba(0,0,0,0.85)"]}
+        colors={["rgba(0,0,0,0.0)", "rgba(0,0,0,0.9)"]}
         style={styles.bottomGradient}
       />
 
@@ -224,7 +252,41 @@ export default function CaptureScreen() {
         </View>
 
         <View style={styles.topRightIcons}>
-          <Text style={styles.smallIcon}>⧉</Text>
+          <Text style={styles.smallIcon}>⚙︎</Text>
+        </View>
+      </View>
+
+      <View style={styles.leftMenu}>
+        <View style={styles.leftMenuInner}>
+          {leftMenuItems.map((item, index) => {
+            const isTop = index === 0;
+            const isBottom = index === leftMenuItems.length - 1;
+            const isActive = item.key === "criar";
+            const onPress = item.key === "fechar" ? handleClose : undefined;
+
+            return (
+              <TouchableOpacity
+                key={item.key}
+                activeOpacity={0.9}
+                onPress={onPress}
+                style={[
+                  styles.leftMenuItem,
+                  isTop && styles.leftMenuItemTop,
+                  isBottom && styles.leftMenuItemBottom,
+                  isActive && styles.leftMenuItemActive,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.leftMenuText,
+                    isActive && styles.leftMenuTextActive,
+                  ]}
+                >
+                  {item.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
       </View>
 
@@ -247,7 +309,15 @@ export default function CaptureScreen() {
       </View>
 
       <View style={styles.bottomContent}>
-        <View className="modesRow" style={styles.modesRow}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filtersRow}
+        >
+          {FILTERS.map(renderFilterChip)}
+        </ScrollView>
+
+        <View style={styles.modesRow}>
           {renderModeLabel("post", "Post")}
           {renderModeLabel("story", "Story")}
           {renderModeLabel("reel", "Reel")}
@@ -290,8 +360,9 @@ export default function CaptureScreen() {
         </View>
 
         <View style={styles.bottomTabsRow}>
-          <Text style={styles.bottomTabText}>PUBLICAÇÃO</Text>
-          <Text style={styles.bottomTabText}>CRIAR</Text>
+          <Text style={styles.bottomTabText}>POST</Text>
+          <Text style={styles.bottomTabText}>STORY</Text>
+          <Text style={styles.bottomTabText}>REEL</Text>
         </View>
       </View>
     </View>
@@ -363,6 +434,45 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 18,
   },
+  leftMenu: {
+    position: "absolute",
+    left: 12,
+    top: height * 0.18,
+    bottom: height * 0.25,
+    justifyContent: "center",
+  },
+  leftMenuInner: {
+    borderRadius: 20,
+    overflow: "hidden",
+    backgroundColor: "rgba(0,0,0,0.45)",
+  },
+  leftMenuItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(255,255,255,0.12)",
+  },
+  leftMenuItemTop: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  leftMenuItemBottom: {
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+    borderBottomWidth: 0,
+  },
+  leftMenuItemActive: {
+    backgroundColor: "rgba(255,255,255,0.12)",
+  },
+  leftMenuText: {
+    color: "rgba(255,255,255,0.78)",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  leftMenuTextActive: {
+    color: "#fff",
+    fontWeight: "800",
+  },
   rightTools: {
     position: "absolute",
     right: 16,
@@ -379,13 +489,40 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    paddingBottom: 28,
-    paddingHorizontal: 24,
+    paddingBottom: 26,
+    paddingHorizontal: 20,
+  },
+  filtersRow: {
+    paddingHorizontal: 4,
+    paddingBottom: 12,
+    gap: 8,
+  },
+  filterChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.3)",
+    backgroundColor: "rgba(0,0,0,0.5)",
+    marginRight: 8,
+  },
+  filterChipActive: {
+    backgroundColor: "rgba(255,255,255,0.18)",
+    borderColor: "#fff",
+  },
+  filterChipText: {
+    color: "rgba(255,255,255,0.8)",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  filterChipTextActive: {
+    color: "#fff",
+    fontWeight: "800",
   },
   modesRow: {
     flexDirection: "row",
     alignSelf: "center",
-    marginBottom: 16,
+    marginBottom: 12,
     paddingHorizontal: 8,
     paddingVertical: 6,
     borderRadius: 999,
@@ -407,7 +544,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 18,
+    marginBottom: 12,
   },
   thumbPlaceholder: {
     width: 58,
@@ -454,12 +591,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     paddingHorizontal: 6,
+    marginTop: 4,
   },
   bottomTabText: {
     color: "#fff",
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "700",
-    letterSpacing: 0.5,
+    letterSpacing: 0.8,
   },
   permissionContainer: {
     flex: 1,
@@ -477,14 +615,12 @@ const styles = StyleSheet.create({
   permissionButton: {
     borderRadius: 999,
     overflow: "hidden",
+    backgroundColor: Colors.border,
   },
   permissionButtonText: {
     paddingHorizontal: 20,
     paddingVertical: 10,
-    borderRadius: 999,
-    backgroundColor: Colors.brandStart,
-    color: "#fff",
-    fontWeight: "700",
-    fontSize: 14,
+    color: Colors.text,
+    fontWeight: "600",
   },
 });
