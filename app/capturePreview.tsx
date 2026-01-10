@@ -16,12 +16,14 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const { width, height } = Dimensions.get("window");
 
@@ -40,8 +42,20 @@ const FILTERS: {
   { id: "warm", name: "Quente", overlay: "rgba(255,140,90,0.18)", glow: true },
   { id: "cool", name: "Frio", overlay: "rgba(70,150,255,0.18)", glow: true },
   { id: "pink", name: "Rosé", overlay: "rgba(255,80,160,0.16)", glow: true },
-  { id: "gold", name: "Dourado", overlay: "rgba(255,220,120,0.16)", glow: true, vignette: true },
-  { id: "night", name: "Night", overlay: "rgba(0,0,0,0.28)", blur: 18, vignette: true },
+  {
+    id: "gold",
+    name: "Dourado",
+    overlay: "rgba(255,220,120,0.16)",
+    glow: true,
+    vignette: true,
+  },
+  {
+    id: "night",
+    name: "Night",
+    overlay: "rgba(0,0,0,0.28)",
+    blur: 18,
+    vignette: true,
+  },
 ];
 
 const ITEM_W = 92;
@@ -60,6 +74,8 @@ export default function CapturePreview() {
     [params.mode]
   );
   const nonce = useMemo(() => String(params.nonce ?? ""), [params.nonce]);
+
+  const insets = useSafeAreaInsets();
 
   const initialFilter = useMemo(
     () => String(params.filter ?? "none") as FilterId,
@@ -97,8 +113,20 @@ export default function CapturePreview() {
   const [mediaLoaded, setMediaLoaded] = useState(false);
   const [exporting, setExporting] = useState(false);
 
-  const [toolsCollapsed, setToolsCollapsed] = useState(false);
+  // começa COLAPSADO por padrão, igual Instagram
+  const [toolsCollapsed, setToolsCollapsed] = useState(true);
   const [caption, setCaption] = useState("");
+  const [activeToolSheet, setActiveToolSheet] = useState<
+    | null
+    | "text"
+    | "stickers"
+    | "music"
+    | "mention"
+    | "effects"
+    | "draw"
+    | "save"
+  >(null);
+
 
   useEffect(() => {
     setMediaLoaded(false);
@@ -275,17 +303,30 @@ export default function CapturePreview() {
   });
   const nextOpacity = transition;
 
-  const tools = [
+  // lista base de ferramentas (todas, sem "Mais/Menos")
+  const baseTools = [
     { key: "text", label: "Texto", icon: "Aa" },
-    { key: "stickers", label: "Figurinhas", icon: "😊" },
-    { key: "music", label: "Músicas", icon: "♪" },
-    { key: "restyle", label: "Reestilizar", icon: "✦" },
+    // ícone sem emoji colorido, para ficar branco como os outros
+    { key: "stickers", label: "Figurinhas", icon: "☻" },
+    { key: "music", label: "Músicas", icon: "♫" },
+    { key: "restyle", label: "Reestilizar", icon: "✧" },
     { key: "mention", label: "Mencionar", icon: "@" },
     { key: "effects", label: "Efeitos", icon: "✺" },
     { key: "draw", label: "Desenhar", icon: "✎" },
-    { key: "save", label: "Salvar", icon: "↓" },
-    { key: "more", label: toolsCollapsed ? "Mais" : "Menos", icon: "⋯" },
+    { key: "save", label: "Salvar", icon: "⇣" },
   ] as const;
+
+  // quando estiver colapsado: mostra só as 4 primeiras + botão de expandir
+  // quando expandido: mostra todas + botão de recolher
+  const tools = toolsCollapsed
+    ? [
+        ...baseTools.slice(0, 4),
+        { key: "more", label: "Mais", icon: "˅" },
+      ]
+    : [
+        ...baseTools,
+        { key: "more", label: "Menos", icon: "˄" },
+      ];
 
   const handleToolPress = (key: string) => {
     if (key === "restyle") {
@@ -296,6 +337,21 @@ export default function CapturePreview() {
       setToolsCollapsed((prev) => !prev);
       return;
     }
+
+    if (
+      key === "text" ||
+      key === "stickers" ||
+      key === "music" ||
+      key === "mention" ||
+      key === "effects" ||
+      key === "draw" ||
+      key === "save"
+    ) {
+      setActiveToolSheet(key as any);
+      return;
+    }
+
+    // outros botões podem ser tratados aqui no futuro
   };
 
   return (
@@ -439,6 +495,7 @@ export default function CapturePreview() {
         </TouchableOpacity>
       </View>
 
+      {/* Ferramentas laterais estilo Instagram */}
       <View style={styles.rightTools}>
         {tools.map((tool) => (
           <TouchableOpacity
@@ -447,12 +504,17 @@ export default function CapturePreview() {
             onPress={() => handleToolPress(tool.key)}
             style={styles.rightToolButton}
           >
+            {/* texto primeiro, bolinha depois */}
+            {!toolsCollapsed && tool.key !== "more" && (
+              <Text style={styles.rightToolLabel}>{tool.label}</Text>
+            )}
+            {!toolsCollapsed && tool.key === "more" && (
+              <Text style={styles.rightToolLabel}>{tool.label}</Text>
+            )}
+
             <View style={styles.rightToolCircle}>
               <Text style={styles.rightToolIcon}>{tool.icon}</Text>
             </View>
-            {!toolsCollapsed && (
-              <Text style={styles.rightToolLabel}>{tool.label}</Text>
-            )}
           </TouchableOpacity>
         ))}
       </View>
@@ -493,11 +555,9 @@ export default function CapturePreview() {
         </View>
       </View>
 
+      {/* Carrossel de filtros inline ao tocar em Reestilizar */}
       <View
-        style={[
-          styles.carouselWrap,
-          !showInlineFilters && { opacity: 0 },
-        ]}
+        style={[styles.carouselWrap, !showInlineFilters && { opacity: 0 }]}
         pointerEvents={showInlineFilters ? "auto" : "none"}
       >
         <FlatList
@@ -523,6 +583,163 @@ export default function CapturePreview() {
         />
       </View>
 
+      {/* Modal de filtros completo */}
+
+      {/* Modais de ferramentas (Etapa 1) */}
+      <Modal
+        visible={activeToolSheet === "text"}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setActiveToolSheet(null)}
+      >
+        <View style={styles.toolModalOverlay}>
+          <View style={[styles.textToolContainer, { paddingBottom: insets.bottom + 24 }]}>
+            <View style={styles.textToolHeader}>
+              <TouchableOpacity onPress={() => setActiveToolSheet(null)}>
+                <Text style={styles.textToolHeaderButton}>Cancelar</Text>
+              </TouchableOpacity>
+              <Text style={styles.textToolHeaderTitle}>Texto</Text>
+              <TouchableOpacity onPress={() => setActiveToolSheet(null)}>
+                <Text style={styles.textToolHeaderButton}>Concluir</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.textToolFormattingRow}>
+              <Text style={styles.textToolFormattingLabel}>Aa</Text>
+              <View style={styles.textToolColorDotRow}>
+                <View style={styles.textToolColorDot} />
+                <View style={styles.textToolColorDot} />
+                <View style={styles.textToolColorDot} />
+              </View>
+            </View>
+
+            <TextInput
+              style={styles.textToolInput}
+              placeholder="Toque para digitar..."
+              placeholderTextColor="#ccc"
+              multiline
+            />
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={
+          activeToolSheet === "stickers" ||
+          activeToolSheet === "music" ||
+          activeToolSheet === "mention" ||
+          activeToolSheet === "effects" ||
+          activeToolSheet === "draw" ||
+          activeToolSheet === "save"
+        }
+        transparent
+        animationType="slide"
+        onRequestClose={() => setActiveToolSheet(null)}
+      >
+        <Pressable
+          style={styles.toolModalOverlay}
+          onPress={() => setActiveToolSheet(null)}
+        >
+          <Pressable style={styles.bottomSheet} onPress={() => {}}>
+            <View style={styles.bottomSheetHandle} />
+            <View style={styles.bottomSheetHeaderRow}>
+              <Text style={styles.bottomSheetTitle}>
+                {activeToolSheet === "stickers" && "Figurinhas"}
+                {activeToolSheet === "music" && "Músicas"}
+                {activeToolSheet === "mention" && "Mencionar"}
+                {activeToolSheet === "effects" && "Efeitos"}
+                {activeToolSheet === "draw" && "Desenhar"}
+                {activeToolSheet === "save" && "Salvar"}
+              </Text>
+              <TouchableOpacity onPress={() => setActiveToolSheet(null)}>
+                <Text style={styles.bottomSheetClose}>Fechar</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Barra de busca genérica */}
+            <View style={styles.searchBar}>
+              <Text style={styles.searchIcon}>🔍</Text>
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Pesquisar..."
+                placeholderTextColor="#888"
+              />
+            </View>
+
+            {/* Conteúdo de exemplo por ferramenta (Etapa 1 - estático) */}
+            {activeToolSheet === "stickers" && (
+              <View style={styles.stickersGrid}>
+                {[
+                  "LOCALIZAÇÃO",
+                  "MENÇÃO",
+                  "MÚSICA",
+                  "GIF",
+                  "PERGUNTAS",
+                  "ENQUETE",
+                  "LINK",
+                  "HASHTAG",
+                ].map((label) => (
+                  <View key={label} style={styles.stickerChip}>
+                    <Text style={styles.stickerChipText}>{label}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {activeToolSheet === "music" && (
+              <ScrollView style={styles.musicList}>
+                {[
+                  "Fim de Tarde – JrOliveira",
+                  "Dias De Luta, Dias De Glória – Charlie Brown Jr.",
+                  "Disciplina Blindada – Jamal Natuê",
+                  "De uns Dias pra Cá – Mc Luuky",
+                  "Um Centímetro – Toque Dez",
+                  "Onde Nós Chegou – Toque Dez",
+                ].map((track) => (
+                  <View key={track} style={styles.musicRow}>
+                    <View style={styles.musicThumb} />
+                    <View style={styles.musicInfo}>
+                      <Text style={styles.musicTitle}>{track}</Text>
+                      <Text style={styles.musicSubtitle}>Pré-visualização</Text>
+                    </View>
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+
+            {activeToolSheet === "mention" && (
+              <ScrollView style={styles.mentionList}>
+                {[
+                  "kaka_piecho",
+                  "julyanags",
+                  "sthefandambros",
+                  "regisrafael",
+                  "alexandre.da.fonseca",
+                ].map((user) => (
+                  <View key={user} style={styles.mentionRow}>
+                    <View style={styles.mentionAvatar} />
+                    <Text style={styles.mentionName}>{user}</Text>
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+
+            {(activeToolSheet === "effects" ||
+              activeToolSheet === "draw" ||
+              activeToolSheet === "save") && (
+              <View style={styles.placeholderContent}>
+                <Text style={styles.placeholderText}>
+                  Em breve aqui vão os recursos completos de{" "}
+                  {activeToolSheet === "effects" && "efeitos"}
+                  {activeToolSheet === "draw" && "desenho"}
+                  {activeToolSheet === "save" && "salvar / rascunho"}{" "}
+                  do seu Story.
+                </Text>
+              </View>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
       <Modal
         visible={filtersOpen}
         transparent
@@ -714,7 +931,7 @@ const styles = StyleSheet.create({
     top: height * 0.16,
   },
   rightToolButton: {
-    flexDirection: "row",
+    flexDirection: "row-reverse", // texto primeiro, ícone depois
     alignItems: "center",
     marginBottom: 10,
   },
@@ -725,7 +942,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.65)",
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 8,
+    marginLeft: 8,
   },
   rightToolIcon: { color: "#fff", fontSize: 18, fontWeight: "800" },
   rightToolLabel: {
@@ -903,4 +1120,189 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     letterSpacing: 0.4,
   },
+
+  toolModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    justifyContent: "flex-end",
+  },
+  textToolContainer: {
+    backgroundColor: "#000",
+    paddingTop: 24,
+    paddingHorizontal: 16,
+    paddingBottom: 24,
+  },
+  textToolHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 16,
+  },
+  textToolHeaderTitle: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  textToolHeaderButton: {
+    color: "#0095F6",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  textToolFormattingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  textToolFormattingLabel: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  textToolColorDotRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  textToolColorDot: {
+    width: 16,
+    height: 16,
+    borderRadius: 999,
+    backgroundColor: "#fff",
+  },
+  textToolInput: {
+    minHeight: 120,
+    color: "#fff",
+    fontSize: 18,
+    textAlignVertical: "top",
+  },
+  bottomSheet: {
+    backgroundColor: Colors.surface,
+    paddingTop: 8,
+    paddingBottom: 12,
+    paddingHorizontal: 16,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  bottomSheetHandle: {
+    alignSelf: "center",
+    width: 40,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.28)",
+    marginBottom: 12,
+  },
+  bottomSheetHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  bottomSheetTitle: {
+    color: Colors.text,
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  bottomSheetClose: {
+    color: "#0095F6",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  searchBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 12,
+  },
+  searchIcon: {
+    fontSize: 14,
+    marginRight: 6,
+    color: "#888",
+  },
+  searchInput: {
+    flex: 1,
+    color: Colors.text,
+    fontSize: 14,
+  },
+  stickersGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    rowGap: 8,
+    marginTop: 4,
+  },
+  stickerChip: {
+    backgroundColor: "#fff",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginBottom: 4,
+  },
+  stickerChipText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#111",
+  },
+  musicList: {
+    maxHeight: 260,
+    marginTop: 4,
+  },
+  musicRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(255,255,255,0.1)",
+  },
+  musicThumb: {
+    width: 40,
+    height: 40,
+    borderRadius: 6,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    marginRight: 10,
+  },
+  musicInfo: {
+    flex: 1,
+  },
+  musicTitle: {
+    color: Colors.text,
+    fontSize: 14,
+    marginBottom: 2,
+  },
+  musicSubtitle: {
+    color: "rgba(255,255,255,0.5)",
+    fontSize: 12,
+  },
+  mentionList: {
+    maxHeight: 260,
+    marginTop: 4,
+  },
+  mentionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 8,
+  },
+  mentionAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    marginRight: 10,
+  },
+  mentionName: {
+    color: Colors.text,
+    fontSize: 14,
+  },
+  placeholderContent: {
+    marginTop: 16,
+    paddingVertical: 16,
+  },
+  placeholderText: {
+    color: "rgba(255,255,255,0.8)",
+    fontSize: 13,
+    lineHeight: 18,
+  },
 });
+
