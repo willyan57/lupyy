@@ -14,6 +14,7 @@ import {
   FlatList,
   Image,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -350,7 +351,7 @@ export default function CapturePreview() {
         />
       )}
 
-      {blurIntensity > 0 && (
+      {blurIntensity > 0 && Platform.OS !== "web" && (
         <Animated.View
           pointerEvents="none"
           style={[styles.blurWrap, { opacity: blurOpacity }]}
