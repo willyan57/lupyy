@@ -1763,6 +1763,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 6,
   },
+  adjustSliderStaticValue: {
+    marginLeft: 8,
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+    minWidth: 28,
+    textAlign: "right",
+  },
   adjustSliderTrack: {
     flex: 1,
     height: 4,
