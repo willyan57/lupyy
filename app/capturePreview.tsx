@@ -129,6 +129,30 @@ export default function CapturePreview() {
   const [quickAdjustment, setQuickAdjustment] = useState<
     "none" | "bright" | "dark" | "punch"
   >("none");
+  const [effectsOpen, setEffectsOpen] = useState(false);
+
+const [showBeautifyPanel, setShowBeautifyPanel] = useState(false);
+const [beautifyTab, setBeautifyTab] = useState<"face" | "makeup">("face");
+const [beautifyOption, setBeautifyOption] = useState("Ativado");
+const [beautifyValues, setBeautifyValues] = useState<Record<string, number>>(() => {
+  const allOptions = [
+    "Ativado",
+    "Suavizar",
+    "Contraste",
+    "Dente",
+    "Base",
+    "Batom",
+    "Sombra",
+    "Blush",
+    "Contorno",
+  ];
+  const initial: Record<string, number> = {};
+  allOptions.forEach((opt) => {
+    initial[opt] = 60;
+  });
+  return initial;
+});
+const [beautifyTrackWidth, setBeautifyTrackWidth] = useState(0);
 
 
 
@@ -313,18 +337,38 @@ export default function CapturePreview() {
     // ícone sem emoji colorido, para ficar branco como os outros
     { key: "stickers", label: "Figurinhas", icon: "☻" },
     { key: "music", label: "Músicas", icon: "♫" },
-    { key: "restyle", label: "Reestilizar", icon: "✧" },
+    { key: "beautify", label: "Embelezar", icon: "✧" },
     { key: "mention", label: "Mencionar", icon: "@" },
     { key: "effects", label: "Efeitos", icon: "✺" },
     { key: "draw", label: "Desenhar", icon: "✎" },
     { key: "save", label: "Salvar", icon: "⇣" },
   ] as const;
+
+const beautifyFaceOptions = ["Ativado", "Suavizar", "Contraste", "Dente", "Base"];
+const beautifyMakeupOptions = ["Ativado", "Batom", "Sombra", "Blush", "Contorno"];
+
   const quickAdjustments = [
     { key: "none", label: "Normal" },
     { key: "bright", label: "Claro" },
     { key: "dark", label: "Escuro" },
     { key: "punch", label: "Punch" },
   ] as const;
+
+
+  const beautifyValue = beautifyValues[beautifyOption] ?? 60;
+
+  const handleBeautifyValueFromGesture = (evt: any) => {
+    if (!beautifyTrackWidth) return;
+    const { locationX } = evt.nativeEvent;
+    const ratio = locationX / beautifyTrackWidth;
+    const clampedRatio = Math.max(0, Math.min(1, ratio));
+    const value = Math.round(clampedRatio * 100);
+
+    setBeautifyValues((prev) => ({
+      ...prev,
+      [beautifyOption]: value,
+    }));
+  };
 
 
   // quando estiver colapsado: mostra só as 4 primeiras + botão de expandir
@@ -339,32 +383,55 @@ export default function CapturePreview() {
         { key: "more", label: "Menos", icon: "⋮" },
       ];
 
-  const handleToolPress = (key: string) => {
-    if (key === "restyle") {
-      setShowInlineFilters((prev) => !prev);
-      return;
-    }
-    if (key === "more") {
-      setToolsCollapsed((prev) => !prev);
-      return;
-    }
+  
+const handleToolPress = (key: string) => {
+  if (key === "beautify") {
+    setShowBeautifyPanel((prev) => !prev);
+    setShowInlineFilters(false);
+    setEffectsOpen(false);
+    setActiveToolSheet(null);
+    setToolsCollapsed(true);
+    return;
+  }
 
-    if (
-      key === "text" ||
-      key === "stickers" ||
-      key === "music" ||
-      key === "mention" ||
-      key === "effects" ||
-      key === "draw" ||
-      key === "save"
-    ) {
-      setActiveToolSheet(key as any);
-      return;
-    }
+  if (key === "effects") {
+    setEffectsOpen((prev) => !prev);
+    setShowBeautifyPanel(false);
+    setActiveToolSheet(null);
+    setShowInlineFilters(false);
+    setToolsCollapsed(true);
+    return;
+  }
 
-    // outros botões podem ser tratados aqui no futuro
-  };
+  if (key === "more") {
+    setToolsCollapsed((prev) => !prev);
+    setEffectsOpen(false);
+    setShowBeautifyPanel(false);
+    setShowInlineFilters(false);
+    setActiveToolSheet(null);
+    return;
+  }
 
+  // Para outros botões, abrimos/fechamos o bottom sheet padrão
+  setEffectsOpen(false);
+  setShowBeautifyPanel(false);
+  setShowInlineFilters(false);
+  setToolsCollapsed(true);
+
+  if (
+    key === "text" ||
+    key === "stickers" ||
+    key === "music" ||
+    key === "mention" ||
+    key === "draw" ||
+    key === "save"
+  ) {
+    setActiveToolSheet((prev) => (prev === key ? null : (key as any)));
+    return;
+  }
+
+  // outros botões podem ser tratados aqui no futuro
+};
   return (
     <View style={styles.container}>
       {exporting && mediaType === "image" && uri ? (
@@ -550,31 +617,165 @@ export default function CapturePreview() {
       </View>
 
       <View style={styles.bottomPanel}>
-        <View style={styles.quickAdjustRow}>
-          {quickAdjustments.map((item) => {
-            const active = quickAdjustment === item.key;
-            return (
-              <TouchableOpacity
-                key={item.key}
-                activeOpacity={0.9}
-                onPress={() => setQuickAdjustment(item.key as any)}
+
+{showBeautifyPanel && (
+  <View style={styles.beautifyPanel}>
+    <View style={styles.beautifySliderRow}>
+      <View
+        style={styles.beautifySliderTrack}
+        onLayout={(e) => setBeautifyTrackWidth(e.nativeEvent.layout.width)}
+        onStartShouldSetResponder={() => true}
+        onMoveShouldSetResponder={() => true}
+        onResponderGrant={handleBeautifyValueFromGesture}
+        onResponderMove={handleBeautifyValueFromGesture}
+      >
+        <View
+          style={[
+            styles.beautifySliderFill,
+            { width: `${beautifyValue}%` },
+          ]}
+        />
+        <View
+          style={[
+            styles.beautifySliderThumb,
+            { left: `${beautifyValue}%` },
+          ]}
+        />
+      </View>
+      <Text style={styles.beautifyValueLabel}>{beautifyValue}</Text>
+    </View>
+
+    <View style={styles.beautifyTabsRow}>
+      <View style={styles.beautifyTabsLeft}>
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={() => {
+            setBeautifyTab("face");
+            setBeautifyOption(beautifyFaceOptions[0]);
+          }}
+          style={[
+            styles.beautifyTabButton,
+            beautifyTab === "face" && styles.beautifyTabButtonActive,
+          ]}
+        >
+          <Text
+            style={[
+              styles.beautifyTabText,
+              beautifyTab === "face" && styles.beautifyTabTextActive,
+            ]}
+          >
+            Rosto
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={() => {
+            setBeautifyTab("makeup");
+            setBeautifyOption(beautifyMakeupOptions[0]);
+          }}
+          style={[
+            styles.beautifyTabButton,
+            beautifyTab === "makeup" && styles.beautifyTabButtonActive,
+          ]}
+        >
+          <Text
+            style={[
+              styles.beautifyTabText,
+              beautifyTab === "makeup" && styles.beautifyTabTextActive,
+            ]}
+          >
+            Maquiagem
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onPress={() => {
+          setBeautifyValues((prev) => ({
+            ...prev,
+            [beautifyOption]: 60,
+          }));
+          setBeautifyOption("Ativado");
+        }}
+      >
+        <Text style={styles.beautifyResetText}>Redefinir</Text>
+      </TouchableOpacity>
+    </View>
+
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.beautifyOptionsRow}
+    >
+      {(beautifyTab === "face"
+        ? beautifyFaceOptions
+        : beautifyMakeupOptions
+      ).map((option) => {
+        const active = beautifyOption === option;
+        return (
+          <TouchableOpacity
+            key={option}
+            activeOpacity={0.9}
+            onPress={() => setBeautifyOption(option)}
+            style={styles.beautifyOptionItem}
+          >
+            <View
+              style={[
+                styles.beautifyOptionCircle,
+                active && styles.beautifyOptionCircleActive,
+              ]}
+            >
+              <Text
                 style={[
-                  styles.quickAdjustChip,
-                  active && styles.quickAdjustChipActive,
+                  styles.beautifyOptionIcon,
+                  active && styles.beautifyOptionIconActive,
                 ]}
               >
-                <Text
+                ●
+              </Text>
+            </View>
+            <Text
+              style={[
+                styles.beautifyOptionLabel,
+                active && styles.beautifyOptionLabelActive,
+              ]}
+            >
+              {option}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </ScrollView>
+  </View>
+)}
+        {effectsOpen && (
+          <View style={styles.quickAdjustRow}>
+            {quickAdjustments.map((item) => {
+              const active = quickAdjustment === item.key;
+              return (
+                <TouchableOpacity
+                  key={item.key}
+                  activeOpacity={0.9}
+                  onPress={() => setQuickAdjustment(item.key as any)}
                   style={[
-                    styles.quickAdjustText,
-                    active && styles.quickAdjustTextActive,
+                    styles.quickAdjustChip,
+                    active && styles.quickAdjustChipActive,
                   ]}
                 >
-                  {item.label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+                  <Text
+                    style={[
+                      styles.quickAdjustText,
+                      active && styles.quickAdjustTextActive,
+                    ]}
+                  >
+                    {item.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
         <View style={styles.legendRow}>
           <TextInput
             style={styles.legendInput}
@@ -1406,6 +1607,113 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.8)",
     fontSize: 13,
     lineHeight: 18,
+  
   },
-});
-
+  beautifyPanel: {
+  marginBottom: 10,
+  paddingHorizontal: 4,
+},
+  beautifySliderRow: {
+  flexDirection: "row",
+  alignItems: "center",
+  marginBottom: 10,
+},
+  beautifySliderTrack: {
+  flex: 1,
+  height: 4,
+  borderRadius: 999,
+  backgroundColor: "rgba(255,255,255,0.25)",
+  overflow: "hidden",
+  position: "relative",
+},
+  beautifySliderFill: {
+  position: "absolute",
+  left: 0,
+  top: 0,
+  bottom: 0,
+  backgroundColor: "#ff3366",
+},
+  beautifySliderThumb: {
+  position: "absolute",
+  top: -8,
+  width: 22,
+  height: 22,
+  marginLeft: -11,
+  borderRadius: 999,
+  backgroundColor: "#fff",
+},
+  beautifyValueLabel: {
+  marginLeft: 10,
+  color: "#fff",
+  fontWeight: "700",
+  fontSize: 13,
+},
+  beautifyTabsRow: {
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "space-between",
+  marginBottom: 8,
+},
+  beautifyTabsLeft: {
+  flexDirection: "row",
+  gap: 8,
+},
+  beautifyTabButton: {
+  paddingHorizontal: 10,
+  paddingVertical: 4,
+  borderRadius: 999,
+  backgroundColor: "rgba(0,0,0,0.6)",
+},
+  beautifyTabButtonActive: {
+  backgroundColor: "rgba(255,51,85,0.22)",
+},
+  beautifyTabText: {
+  color: "rgba(255,255,255,0.8)",
+  fontSize: 13,
+  fontWeight: "600",
+},
+  beautifyTabTextActive: {
+  color: "#fff",
+},
+  beautifyResetText: {
+  color: "rgba(255,255,255,0.85)",
+  fontSize: 13,
+  fontWeight: "600",
+},
+  beautifyOptionsRow: {
+  paddingTop: 6,
+  paddingBottom: 2,
+},
+  beautifyOptionItem: {
+  alignItems: "center",
+  marginRight: 18,
+},
+  beautifyOptionCircle: {
+  width: 52,
+  height: 52,
+  borderRadius: 26,
+  backgroundColor: "rgba(0,0,0,0.6)",
+  alignItems: "center",
+  justifyContent: "center",
+  marginBottom: 4,
+},
+  beautifyOptionCircleActive: {
+  backgroundColor: "rgba(255,51,85,0.28)",
+},
+  beautifyOptionIcon: {
+  color: "rgba(255,255,255,0.85)",
+  fontSize: 18,
+},
+  beautifyOptionIconActive: {
+  color: "#fff",
+},
+  beautifyOptionLabel: {
+  color: "rgba(255,255,255,0.85)",
+  fontSize: 12,
+},
+  beautifyOptionLabelActive: {
+    color: "#fff",
+    fontWeight: "700",
+  },
+},
+);
