@@ -354,8 +354,68 @@ const beautifyMakeupOptions = ["Ativado", "Batom", "Sombra", "Blush", "Contorno"
     { key: "punch", label: "Punch" },
   ] as const;
 
+  const [adjustmentsValues, setAdjustmentsValues] = useState<Record<string, number>>({
+    none: 50,
+    bright: 50,
+    dark: 50,
+    punch: 50,
+  });
+  const [adjustTrackWidth, setAdjustTrackWidth] = useState(0);
+
+  const currentAdjustValue = adjustmentsValues[quickAdjustment] ?? 50;
+
+  const handleAdjustValueFromGesture = (evt: any) => {
+    if (!adjustTrackWidth) return;
+    const { locationX } = evt.nativeEvent;
+    const ratio = locationX / adjustTrackWidth;
+    const clampedRatio = Math.max(0, Math.min(1, ratio));
+    const value = Math.round(clampedRatio * 100);
+
+    setAdjustmentsValues((prev) => ({
+      ...prev,
+      [quickAdjustment]: value,
+    }));
+  };
+
+  const quickAdjustIntensity = currentAdjustValue / 50 || 0;
+  const brightAlpha = Math.min(1, 0.08 * quickAdjustIntensity);
+  const darkAlpha = Math.min(1, 0.22 * quickAdjustIntensity);
+  const punchAlpha = Math.min(1, 0.16 * quickAdjustIntensity);
 
   const beautifyValue = beautifyValues[beautifyOption] ?? 60;
+  const beautifyNormalized = Math.min(1, Math.max(0, beautifyValue / 100));
+  let beautifyOverlayColor: string | null = null;
+
+  switch (beautifyOption) {
+    case "Suavizar":
+      beautifyOverlayColor = `rgba(255,255,255,${0.04 + 0.10 * beautifyNormalized})`;
+      break;
+    case "Contraste":
+      beautifyOverlayColor = `rgba(0,0,0,${0.10 * beautifyNormalized})`;
+      break;
+    case "Dente":
+      beautifyOverlayColor = `rgba(255,255,255,${0.06 * beautifyNormalized})`;
+      break;
+    case "Base":
+      beautifyOverlayColor = `rgba(255,210,150,${0.10 * beautifyNormalized})`;
+      break;
+    case "Batom":
+      beautifyOverlayColor = `rgba(255,80,160,${0.12 * beautifyNormalized})`;
+      break;
+    case "Sombra":
+      beautifyOverlayColor = `rgba(0,0,0,${0.14 * beautifyNormalized})`;
+      break;
+    case "Blush":
+      beautifyOverlayColor = `rgba(255,120,150,${0.14 * beautifyNormalized})`;
+      break;
+    case "Contorno":
+      beautifyOverlayColor = `rgba(0,0,0,${0.18 * beautifyNormalized})`;
+      break;
+    case "Ativado":
+    default:
+      beautifyOverlayColor = `rgba(255,255,255,${0.03 + 0.06 * beautifyNormalized})`;
+      break;
+  }
 
   const handleBeautifyValueFromGesture = (evt: any) => {
     if (!beautifyTrackWidth) return;
@@ -528,22 +588,46 @@ const handleToolPress = (key: string) => {
         </View>
       )}
 
-      {quickAdjustment === "bright" && (
+      {quickAdjustment === "bright" && currentAdjustValue > 0 && (
         <View
           pointerEvents="none"
-          style={[styles.adjustmentOverlay, styles.adjustmentBright]}
+          style={[
+            styles.adjustmentOverlay,
+            {
+              backgroundColor: `rgba(255,255,255,${brightAlpha.toFixed(3)})`,
+            },
+          ]}
         />
       )}
-      {quickAdjustment === "dark" && (
+      {quickAdjustment === "dark" && currentAdjustValue > 0 && (
         <View
           pointerEvents="none"
-          style={[styles.adjustmentOverlay, styles.adjustmentDark]}
+          style={[
+            styles.adjustmentOverlay,
+            {
+              backgroundColor: `rgba(0,0,0,${darkAlpha.toFixed(3)})`,
+            },
+          ]}
         />
       )}
-      {quickAdjustment === "punch" && (
+      {quickAdjustment === "punch" && currentAdjustValue > 0 && (
         <View
           pointerEvents="none"
-          style={[styles.adjustmentOverlay, styles.adjustmentPunch]}
+          style={[
+            styles.adjustmentOverlay,
+            {
+              backgroundColor: `rgba(0,0,0,${punchAlpha.toFixed(3)})`,
+              borderWidth: StyleSheet.hairlineWidth,
+              borderColor: "rgba(255,255,255,0.25)",
+            },
+          ]}
+        />
+      )}
+
+      {beautifyOverlayColor && (
+        <View
+          pointerEvents="none"
+          style={[styles.beautifyOverlay, { backgroundColor: beautifyOverlayColor }]}
         />
       )}
 
@@ -750,30 +834,57 @@ const handleToolPress = (key: string) => {
   </View>
 )}
         {effectsOpen && (
-          <View style={styles.quickAdjustRow}>
-            {quickAdjustments.map((item) => {
-              const active = quickAdjustment === item.key;
-              return (
-                <TouchableOpacity
-                  key={item.key}
-                  activeOpacity={0.9}
-                  onPress={() => setQuickAdjustment(item.key as any)}
-                  style={[
-                    styles.quickAdjustChip,
-                    active && styles.quickAdjustChipActive,
-                  ]}
-                >
-                  <Text
+          <View style={styles.quickAdjustContainer}>
+            <View style={styles.quickAdjustRow}>
+              {quickAdjustments.map((item) => {
+                const active = quickAdjustment === item.key;
+                return (
+                  <TouchableOpacity
+                    key={item.key}
+                    activeOpacity={0.9}
+                    onPress={() => setQuickAdjustment(item.key as any)}
                     style={[
-                      styles.quickAdjustText,
-                      active && styles.quickAdjustTextActive,
+                      styles.quickAdjustChip,
+                      active && styles.quickAdjustChipActive,
                     ]}
                   >
-                    {item.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
+                    <Text
+                      style={[
+                        styles.quickAdjustText,
+                        active && styles.quickAdjustTextActive,
+                      ]}
+                    >
+                      {item.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <View style={styles.adjustSliderRow}>
+              <View
+                style={styles.adjustSliderTrack}
+                onLayout={(e) => setAdjustTrackWidth(e.nativeEvent.layout.width)}
+                onStartShouldSetResponder={() => true}
+                onMoveShouldSetResponder={() => true}
+                onResponderGrant={handleAdjustValueFromGesture}
+                onResponderMove={handleAdjustValueFromGesture}
+              >
+                <View
+                  style={[
+                    styles.adjustSliderFill,
+                    { width: `${currentAdjustValue}%` },
+                  ]}
+                />
+                <View
+                  style={[
+                    styles.adjustSliderThumb,
+                    { left: `${currentAdjustValue}%` },
+                  ]}
+                />
+              </View>
+              <Text style={styles.adjustValueLabel}>{currentAdjustValue}</Text>
+            </View>
           </View>
         )}
         <View style={styles.legendRow}>
@@ -1148,6 +1259,13 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.16)",
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(255,255,255,0.25)",
+  },
+  beautifyOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   filterLabel: {
     position: "absolute",
@@ -1608,6 +1726,45 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
   
+  },
+  quickAdjustContainer: {
+    marginBottom: 10,
+    paddingHorizontal: 4,
+  },
+  adjustSliderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 6,
+  },
+  adjustSliderTrack: {
+    flex: 1,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.25)",
+    overflow: "hidden",
+    position: "relative",
+  },
+  adjustSliderFill: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: "#ff3366",
+  },
+  adjustSliderThumb: {
+    position: "absolute",
+    top: -8,
+    width: 22,
+    height: 22,
+    marginLeft: -11,
+    borderRadius: 999,
+    backgroundColor: "#fff",
+  },
+  adjustValueLabel: {
+    marginLeft: 10,
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 13,
   },
   beautifyPanel: {
   marginBottom: 10,
