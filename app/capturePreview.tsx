@@ -344,8 +344,8 @@ const [beautifyTrackWidth, setBeautifyTrackWidth] = useState(0);
     { key: "save", label: "Salvar", icon: "⇣" },
   ] as const;
 
-const beautifyFaceOptions = ["Ativado", "Suavizar", "Contraste", "Dente", "Base"];
-const beautifyMakeupOptions = ["Ativado", "Batom", "Sombra", "Blush", "Contorno"];
+const beautifyFaceOptions = ["Ativado", "Suavizar", "Contraste", "Dente", "Base", "Nariz", "Forma", "Levantar sobrancelha", "Lábios"];
+const beautifyMakeupOptions = ["Ativado", "Batom", "Sombra", "Blush", "Contorno"];  // maquiagem principal já aqui
 
   const quickAdjustments = [
     { key: "none", label: "Normal" },
@@ -388,36 +388,49 @@ const beautifyMakeupOptions = ["Ativado", "Batom", "Sombra", "Blush", "Contorno"
 
   switch (beautifyOption) {
     case "Suavizar":
-      beautifyOverlayColor = `rgba(255,255,255,${0.04 + 0.10 * beautifyNormalized})`;
+      // pele mais lisa e clara
+      beautifyOverlayColor = `rgba(255,255,255,${0.06 + 0.18 * beautifyNormalized})`;
       break;
     case "Contraste":
-      beautifyOverlayColor = `rgba(0,0,0,${0.10 * beautifyNormalized})`;
-      break;
-    case "Dente":
-      beautifyOverlayColor = `rgba(255,255,255,${0.06 * beautifyNormalized})`;
-      break;
-    case "Base":
-      beautifyOverlayColor = `rgba(255,210,150,${0.10 * beautifyNormalized})`;
-      break;
-    case "Batom":
-      beautifyOverlayColor = `rgba(255,80,160,${0.12 * beautifyNormalized})`;
-      break;
-    case "Sombra":
+      // contraste geral
       beautifyOverlayColor = `rgba(0,0,0,${0.14 * beautifyNormalized})`;
       break;
+    case "Dente":
+      beautifyOverlayColor = `rgba(255,255,255,${0.10 * beautifyNormalized})`;
+      break;
+    case "Base":
+      beautifyOverlayColor = `rgba(255,210,150,${0.14 * beautifyNormalized})`;
+      break;
+    case "Batom":
+      beautifyOverlayColor = `rgba(255,80,160,${0.18 * beautifyNormalized})`;
+      break;
+    case "Sombra":
+      beautifyOverlayColor = `rgba(0,0,0,${0.18 * beautifyNormalized})`;
+      break;
     case "Blush":
-      beautifyOverlayColor = `rgba(255,120,150,${0.14 * beautifyNormalized})`;
+      beautifyOverlayColor = `rgba(255,120,150,${0.20 * beautifyNormalized})`;
       break;
     case "Contorno":
-      beautifyOverlayColor = `rgba(0,0,0,${0.18 * beautifyNormalized})`;
+      beautifyOverlayColor = `rgba(0,0,0,${0.22 * beautifyNormalized})`;
+      break;
+    case "Nariz":
+      beautifyOverlayColor = `rgba(0,0,0,${0.12 * beautifyNormalized})`;
+      break;
+    case "Forma":
+      beautifyOverlayColor = `rgba(0,0,0,${0.16 * beautifyNormalized})`;
+      break;
+    case "Levantar sobrancelha":
+      beautifyOverlayColor = `rgba(255,255,255,${0.08 + 0.16 * beautifyNormalized})`;
+      break;
+    case "Lábios":
+      beautifyOverlayColor = `rgba(255,120,160,${0.18 * beautifyNormalized})`;
       break;
     case "Ativado":
     default:
-      beautifyOverlayColor = `rgba(255,255,255,${0.03 + 0.06 * beautifyNormalized})`;
+      beautifyOverlayColor = `rgba(255,255,255,${0.02 + 0.08 * beautifyNormalized})`;
       break;
   }
-
-  const handleBeautifyValueFromGesture = (evt: any) => {
+const handleBeautifyValueFromGesture = (evt: any) => {
     if (!beautifyTrackWidth) return;
     const { locationX } = evt.nativeEvent;
     const ratio = locationX / beautifyTrackWidth;
@@ -648,11 +661,11 @@ const handleToolPress = (key: string) => {
       )}
 
       <LinearGradient
-        colors={["rgba(0,0,0,0.75)", "rgba(0,0,0,0.0)"]}
+        colors={["rgba(0,0,0,0.55)", "rgba(0,0,0,0.0)"]}
         style={styles.topGradient}
       />
       <LinearGradient
-        colors={["rgba(0,0,0,0.0)", "rgba(0,0,0,0.85)"]}
+        colors={["rgba(0,0,0,0.0)", "rgba(0,0,0,0.65)"]}
         style={styles.bottomGradient}
       />
 
@@ -725,8 +738,15 @@ const handleToolPress = (key: string) => {
             { left: `${beautifyValue}%` },
           ]}
         />
+        <View
+          style={[
+            styles.beautifySliderValueBubble,
+            { left: `${beautifyValue}%` },
+          ]}
+        >
+          <Text style={styles.beautifySliderValueText}>{beautifyValue}</Text>
+        </View>
       </View>
-      <Text style={styles.beautifyValueLabel}>{beautifyValue}</Text>
     </View>
 
     <View style={styles.beautifyTabsRow}>
@@ -882,8 +902,15 @@ const handleToolPress = (key: string) => {
                     { left: `${currentAdjustValue}%` },
                   ]}
                 />
+                <View
+                  style={[
+                    styles.adjustSliderValueBubble,
+                    { left: `${currentAdjustValue}%` },
+                  ]}
+                >
+                  <Text style={styles.adjustSliderValueText}>{currentAdjustValue}</Text>
+                </View>
               </View>
-              <Text style={styles.adjustValueLabel}>{currentAdjustValue}</Text>
             </View>
           </View>
         )}
@@ -1760,11 +1787,19 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: "#fff",
   },
-  adjustValueLabel: {
-    marginLeft: 10,
+  adjustSliderValueBubble: {
+    position: "absolute",
+    bottom: 16,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    transform: [{ translateX: -10 }],
+  },
+  adjustSliderValueText: {
     color: "#fff",
+    fontSize: 11,
     fontWeight: "700",
-    fontSize: 13,
   },
   beautifyPanel: {
   marginBottom: 10,
@@ -1799,11 +1834,19 @@ const styles = StyleSheet.create({
   borderRadius: 999,
   backgroundColor: "#fff",
 },
-  beautifyValueLabel: {
-  marginLeft: 10,
+  beautifySliderValueBubble: {
+  position: "absolute",
+  bottom: 16,
+  paddingHorizontal: 6,
+  paddingVertical: 2,
+  borderRadius: 999,
+  backgroundColor: "rgba(0,0,0,0.7)",
+  transform: [{ translateX: -10 }],
+},
+  beautifySliderValueText: {
   color: "#fff",
   fontWeight: "700",
-  fontSize: 13,
+  fontSize: 11,
 },
   beautifyTabsRow: {
   flexDirection: "row",
