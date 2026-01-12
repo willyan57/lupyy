@@ -337,20 +337,13 @@ const performSendWithUri = async (finalUri: string) => {
         return;
       }
 
-      const expiresAt = new Date(
-        Date.now() + 24 * 60 * 60 * 1000
-      ).toISOString();
-
       const { error: dbError } = await supabase.from("stories").insert({
         user_id: currentUserId,
         media_type: mediaType,
         media_path: uploaded.fileName,
-        expires_at: expiresAt,
-        audience: "public",
-        origin: "camera",
-        is_carousel: false,
-        position: 0,
-        filter,
+        thumbnail_path: null,
+        caption: caption || null,
+        has_sound: mediaType === "video",
       });
 
       const ok = !dbError;
