@@ -306,10 +306,10 @@ const performSendWithUri = async (finalUri: string) => {
   if (!finalUri) return;
 
   if (mode === "reel") {
-    router.push({
-      pathname: "/new" as any,
-      params: { source: "camera", uri: finalUri, mediaType, filter },
-    });
+    Alert.alert(
+      "Em breve",
+      "Publicar como Reel estará disponível em uma próxima versão. Por enquanto, use Post ou Story."
+    );
     return;
   }
 
