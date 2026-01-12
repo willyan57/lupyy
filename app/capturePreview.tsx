@@ -306,10 +306,10 @@ const performSendWithUri = async (finalUri: string) => {
   if (!finalUri) return;
 
   if (mode === "reel") {
-    Alert.alert(
-      "Em breve",
-      "Publicar como Reel estará disponível em uma próxima versão. Por enquanto, use Post ou Story."
-    );
+    router.push({
+      pathname: "/new" as any,
+      params: { source: "camera", uri: finalUri, mediaType, filter },
+    });
     return;
   }
 
@@ -337,12 +337,16 @@ const performSendWithUri = async (finalUri: string) => {
         return;
       }
 
+      const expiresAt = new Date(
+        Date.now() + 24 * 60 * 60 * 1000
+      ).toISOString();
+
       const { error: dbError } = await supabase.from("stories").insert({
         user_id: currentUserId,
         media_type: mediaType,
         media_path: uploaded.fileName,
         thumbnail_path: null,
-        caption: caption || null,
+        caption: null,
         has_sound: mediaType === "video",
       });
 
