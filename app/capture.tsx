@@ -34,6 +34,7 @@ export default function CaptureScreen() {
   const [recordSeconds, setRecordSeconds] = useState(0);
   const recordTimerRef = useRef<any>(null);
 
+
   const cameraRef = useRef<CameraView | null>(null);
 
   useEffect(() => {
@@ -41,6 +42,8 @@ export default function CaptureScreen() {
       requestPermission();
     }
   }, [permission, requestPermission]);
+
+
 
   if (!permission) {
     return (
@@ -80,6 +83,11 @@ export default function CaptureScreen() {
   };
 
   const handleShotPress = async () => {
+    if (isWeb) {
+      handleOpenGallery();
+      return;
+    }
+
     if (!cameraRef.current || loadingCapture) return;
 
     if (mode === "reel") {
@@ -245,13 +253,22 @@ export default function CaptureScreen() {
   };
 
   const handleOpenGallery = () => {
-    router.push({
-      pathname: "/mediaPicker" as any,
-      params: {
-        mode,
-        filter,
-      },
-    });
+    if (isWeb) {
+      router.push({
+        pathname: "/new" as any,
+        params: {
+          source: "gallery",
+        },
+      });
+    } else {
+      router.push({
+        pathname: "/mediaPicker" as any,
+        params: {
+          mode,
+          filter,
+        },
+      });
+    }
   };
 
   const formatRecordTime = (total: number) => {
@@ -281,15 +298,19 @@ export default function CaptureScreen() {
 
   return (
     <View style={styles.container}>
-      <CameraView
-        ref={(ref) => {
-          cameraRef.current = ref;
-        }}
-        style={styles.camera}
-        facing={facing}
-        enableTorch={flashOn}
-        mode={mode === "reel" ? "video" : "picture"}
-      />
+      {isWeb ? (
+        <View style={styles.cameraPlaceholder} />
+      ) : (
+        <CameraView
+          ref={(ref) => {
+            cameraRef.current = ref;
+          }}
+          style={styles.camera}
+          facing={facing}
+          enableTorch={flashOn}
+          mode={mode === "reel" ? "video" : "picture"}
+        />
+      )}
 
       <LinearGradient
         colors={["rgba(0,0,0,0.7)", "rgba(0,0,0,0.0)"]}
@@ -384,6 +405,7 @@ export default function CaptureScreen() {
             <Text style={styles.avatarText}>Você</Text>
           </View>
         </View>
+
       </View>
     </View>
   );

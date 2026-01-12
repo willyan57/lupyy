@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   FlatList,
   Image,
+  Platform,
   SafeAreaView,
   StyleSheet,
   Text,
@@ -36,6 +37,7 @@ export default function MediaPickerScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<Params>();
 
+  const isWeb = Platform.OS === "web";
   const [permission, requestPermission] = MediaLibrary.usePermissions();
   const [albums, setAlbums] = useState<MediaLibrary.Album[]>([]);
   const [activeAlbumId, setActiveAlbumId] = useState<string | null>(null);
@@ -177,6 +179,30 @@ export default function MediaPickerScreen() {
   }
 
   if (!permission.granted) {
+    if (isWeb) {
+      return (
+        <SafeAreaView style={[styles.container, { backgroundColor: Colors.background }]}>
+          <View style={styles.center}>
+            <Text style={styles.permissionText}>
+              No navegador, use o botão "Escolher da galeria" na tela Criar conteúdo.
+            </Text>
+            <TouchableOpacity
+              onPress={() =>
+                router.replace({
+                  pathname: "/new" as any,
+                  params: { source: "gallery" } as any,
+                })
+              }
+              activeOpacity={0.8}
+              style={styles.permissionButton}
+            >
+              <Text style={styles.permissionButtonText}>Ir para Criar conteúdo</Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      );
+    }
+
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: Colors.background }]}>
         <View style={styles.center}>

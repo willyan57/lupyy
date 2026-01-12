@@ -6,7 +6,7 @@ import * as FileSystem from "expo-file-system";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams } from "expo-router";
 import { useVideoPlayer, VideoPlayer, VideoView } from "expo-video";
 import * as VideoThumbnails from "expo-video-thumbnails";
 import { useEffect, useState } from "react";
@@ -41,14 +41,11 @@ const MAX_CAPTION_LENGTH = 2200;
 export default function New() {
   const { theme } = useTheme();
 
-  const router = useRouter();
-
   const params = useLocalSearchParams<{
     source?: string;
     uri?: string;
     mediaType?: string;
     filter?: string;
-    mode?: string;
   }>();
 
   const [mediaItems, setMediaItems] = useState<Picked[]>([]);
@@ -103,17 +100,22 @@ export default function New() {
     const uriParam = params.uri;
     const mediaType = params.mediaType;
 
-    if (source === "camera" && typeof uriParam === "string") {
-      router.replace({
-        pathname: "/capturePreview" as any,
-        params: {
+    if (source === "camera" && typeof uriParam === "string" && mediaItems.length === 0) {
+      const kind: "image" | "video" = mediaType === "video" ? "video" : "image";
+
+      setMediaItems([
+        {
           uri: uriParam,
-          mediaType,
-          mode: typeof params.mode === "string" ? params.mode : "post",
-          filter: params.filter,
+          kind,
+          width: null,
+          height: null,
+          duration: null,
+          thumbUri: null,
         },
-      });
-      return;
+      ]);
+      setActiveIndex(0);
+    } else if (source === "gallery" && mediaItems.length === 0 && Platform.OS === "web") {
+      pickMedia();
     }
   }, [params, mediaItems]);
 
@@ -1130,8 +1132,6 @@ function ModeButton({
   onPress: () => void;
 }) {
   const { theme } = useTheme();
-
-  const router = useRouter();
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -1165,8 +1165,6 @@ function ToolButton({
   onPress: () => void;
 }) {
   const { theme } = useTheme();
-
-  const router = useRouter();
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -1194,8 +1192,6 @@ function SmallAdjustButton({
   onPress: () => void;
 }) {
   const { theme } = useTheme();
-
-  const router = useRouter();
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -1232,8 +1228,6 @@ function EffectChip({
   onPress: () => void;
 }) {
   const { theme } = useTheme();
-
-  const router = useRouter();
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -1280,8 +1274,6 @@ function PrivacyButton({
   onPress: () => void;
 }) {
   const { theme } = useTheme();
-
-  const router = useRouter();
   return (
     <TouchableOpacity
       onPress={onPress}
