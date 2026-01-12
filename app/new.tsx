@@ -114,8 +114,6 @@ export default function New() {
         },
       ]);
       setActiveIndex(0);
-    } else if (source === "gallery" && mediaItems.length === 0 && Platform.OS === "web") {
-      pickMedia();
     }
   }, [params, mediaItems]);
 
