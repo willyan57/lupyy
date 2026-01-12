@@ -6,6 +6,7 @@ import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Dimensions,
   Platform,
   StyleSheet,
@@ -30,6 +31,9 @@ export default function CaptureScreen() {
   const [filter] = useState<FilterId>("none");
   const [recording, setRecording] = useState(false);
   const [loadingCapture, setLoadingCapture] = useState(false);
+  const [recordSeconds, setRecordSeconds] = useState(0);
+  const recordTimerRef = useRef<any>(null);
+
 
   const cameraRef = useRef<CameraView | null>(null);
 
@@ -84,23 +88,38 @@ export default function CaptureScreen() {
       return;
     }
 
-    if (!cameraRef.current || loadingCapture || recording) return;
+    if (!cameraRef.current || loadingCapture) return;
 
     if (mode === "reel") {
       if (recording) {
-        cameraRef.current.stopRecording();
+        if (cameraRef.current) {
+          cameraRef.current.stopRecording();
+        }
         return;
       }
+      let timeoutId: any;
       try {
         setRecording(true);
+        setRecordSeconds(0);
+        if (recordTimerRef.current) {
+          clearInterval(recordTimerRef.current);
+        }
+        recordTimerRef.current = setInterval(() => {
+          setRecordSeconds((prev) => prev + 1);
+        }, 1000);
 
-        const video = await cameraRef.current?.recordAsync(
+        const recordPromise = cameraRef.current.recordAsync(
           {
             maxDuration: 60,
             quality: "1080p",
           } as any
         );
-        setRecording(false);
+
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => reject(new Error("timeout")), 61000);
+        });
+
+        const video: any = await Promise.race([recordPromise, timeoutPromise]);
         if (video?.uri) {
           router.push({
             pathname: "/capturePreview" as any,
@@ -113,18 +132,44 @@ export default function CaptureScreen() {
             },
           });
         }
-      } catch {
+      } catch (e) {
+        Alert.alert(
+          "Erro na gravação",
+          "Não foi possível gravar o vídeo. Tente novamente."
+        );
+      } finally {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
+        if (recordTimerRef.current) {
+          clearInterval(recordTimerRef.current);
+          recordTimerRef.current = null;
+        }
         setRecording(false);
+        setRecordSeconds(0);
       }
       return;
     }
 
     try {
       setLoadingCapture(true);
-      const photo = await cameraRef.current.takePictureAsync({
+      let timeoutId: any;
+
+      const shotPromise = cameraRef.current.takePictureAsync({
         quality: 0.8,
         skipProcessing: true,
       });
+
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error("timeout")), 10000);
+      });
+
+      const photo: any = await Promise.race([shotPromise, timeoutPromise]);
+
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+
       setLoadingCapture(false);
       if (photo?.uri) {
         router.push({
@@ -138,8 +183,12 @@ export default function CaptureScreen() {
           },
         });
       }
-    } catch {
+    } catch (e) {
       setLoadingCapture(false);
+      Alert.alert(
+        "Erro na captura",
+        "Não foi possível tirar a foto. Tente novamente."
+      );
     }
   };
 
@@ -150,15 +199,29 @@ export default function CaptureScreen() {
 
     if (!cameraRef.current || mode !== "story" || recording) return;
 
+    let timeoutId: any;
     try {
       setRecording(true);
-      const video = await cameraRef.current.recordAsync(
+      setRecordSeconds(0);
+      if (recordTimerRef.current) {
+        clearInterval(recordTimerRef.current);
+      }
+      recordTimerRef.current = setInterval(() => {
+        setRecordSeconds((prev) => prev + 1);
+      }, 1000);
+
+      const recordPromise = cameraRef.current.recordAsync(
         {
           maxDuration: 30,
           quality: "1080p",
         } as any
       );
-      setRecording(false);
+
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error("timeout")), 31000);
+      });
+
+      const video: any = await Promise.race([recordPromise, timeoutPromise]);
       if (video?.uri) {
         router.push({
           pathname: "/capturePreview" as any,
@@ -171,8 +234,21 @@ export default function CaptureScreen() {
           },
         });
       }
-    } catch {
+    } catch (e) {
+      Alert.alert(
+        "Erro na gravação",
+        "Não foi possível gravar o vídeo. Tente novamente."
+      );
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      if (recordTimerRef.current) {
+        clearInterval(recordTimerRef.current);
+        recordTimerRef.current = null;
+      }
       setRecording(false);
+      setRecordSeconds(0);
     }
   };
 
@@ -186,13 +262,22 @@ export default function CaptureScreen() {
     });
   };
 
+  const formatRecordTime = (total: number) => {
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    const mm = m < 10 ? `0${m}` : String(m);
+    const ss = s < 10 ? `0${s}` : String(s);
+    return `${mm}:${ss}`;
+  };
+
   const renderModeLabel = (value: CaptureMode, label: string) => {
     const active = mode === value;
+    const disabled = recording;
     return (
       <TouchableOpacity
         key={value}
-        onPress={() => setMode(value)}
-        activeOpacity={0.8}
+        onPress={disabled ? undefined : () => setMode(value)}
+        activeOpacity={disabled ? 1 : 0.8}
         style={styles.modeItem}
       >
         <Text style={[styles.modeText, active && styles.modeTextActive]}>
@@ -239,6 +324,14 @@ export default function CaptureScreen() {
         </View>
 
         <View style={styles.topRightIcons}>
+          {recording && (
+            <View style={styles.recBadge}>
+              <View style={styles.recDot} />
+              <Text style={styles.recText}>
+                REC {formatRecordTime(recordSeconds)}
+              </Text>
+            </View>
+          )}
           <Text style={styles.smallIcon}>⧉</Text>
         </View>
       </View>
@@ -270,8 +363,8 @@ export default function CaptureScreen() {
 
         <View style={styles.captureRow}>
           <TouchableOpacity
-            activeOpacity={0.8}
-            onPress={handleOpenGallery}
+            activeOpacity={recording ? 1 : 0.8}
+            onPress={recording ? undefined : handleOpenGallery}
             style={styles.thumbPlaceholder}
           >
             <Text style={styles.thumbText}>Galeria</Text>
@@ -377,6 +470,27 @@ const styles = StyleSheet.create({
   topRightIcons: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 12,
+  },
+  recBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+    backgroundColor: "rgba(0,0,0,0.65)",
+  },
+  recDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+    backgroundColor: "#ff3355",
+    marginRight: 6,
+  },
+  recText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "600",
   },
   smallIcon: {
     color: "#fff",

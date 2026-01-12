@@ -1,391 +1,475 @@
+// app/mediaPicker.tsx
 import Colors from "@/constants/Colors";
-import { Ionicons } from "@expo/vector-icons";
-import * as ImagePicker from "expo-image-picker";
-import { LinearGradient } from "expo-linear-gradient";
+import { useTheme } from "@/contexts/ThemeContext";
 import * as MediaLibrary from "expo-media-library";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Dimensions,
   FlatList,
   Image,
-  Modal,
-  Platform,
-  Pressable,
+  SafeAreaView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
 
-const { width } = Dimensions.get("window");
-const COLS = 3;
-const GAP = 2;
-const TILE = Math.floor((width - GAP * (COLS - 1)) / COLS);
-
 type CaptureMode = "post" | "story" | "reel";
-type FilterId = "none" | "warm" | "cool" | "pink" | "gold" | "night";
 
-type PickerParams = {
-  mode?: CaptureMode;
-  filter?: FilterId;
+type Params = {
+  mode?: string;
+  filter?: string;
 };
 
-type Item = {
+type SimpleAsset = {
   id: string;
   uri: string;
-  mediaType: "photo" | "video";
-  width: number;
-  height: number;
-  duration?: number;
+  mediaType: "image" | "video";
+  width: number | null;
+  height: number | null;
+  duration: number | null;
 };
 
-function formatDuration(seconds?: number) {
-  if (!seconds || seconds <= 0) return "";
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
-
-export default function MediaPicker() {
+export default function MediaPickerScreen() {
+  const { theme } = useTheme();
   const router = useRouter();
-  const params = useLocalSearchParams<PickerParams>();
-  const mode = (params.mode ?? "post") as CaptureMode;
-  const filter = (params.filter ?? "none") as FilterId;
+  const params = useLocalSearchParams<Params>();
 
-  const [hasPermission, setHasPermission] = useState<boolean>(Platform.OS === "web");
-  const [loading, setLoading] = useState(false);
-  const [items, setItems] = useState<Item[]>([]);
-  const [selected, setSelected] = useState<Item | null>(null);
+  const [permission, requestPermission] = MediaLibrary.usePermissions();
   const [albums, setAlbums] = useState<MediaLibrary.Album[]>([]);
-  const [selectedAlbum, setSelectedAlbum] = useState<MediaLibrary.Album | null>(null);
-  const [albumsOpen, setAlbumsOpen] = useState(false);
-  const endCursorRef = useRef<string | null>(null);
-  const hasNextPageRef = useRef(true);
+  const [activeAlbumId, setActiveAlbumId] = useState<string | null>(null);
+  const [assets, setAssets] = useState<SimpleAsset[]>([]);
+  const [loadingAlbums, setLoadingAlbums] = useState(false);
+  const [loadingAssets, setLoadingAssets] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
-  const canShowLibraryGrid = Platform.OS !== "web";
-
-  useEffect(() => {
-    (async () => {
-      if (Platform.OS === "web") return;
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      setHasPermission(status === "granted");
-    })();
-  }, []);
+  const captureMode: CaptureMode =
+    params.mode === "story" || params.mode === "reel" ? (params.mode as CaptureMode) : "post";
 
   useEffect(() => {
-    if (!hasPermission) return;
-    if (Platform.OS === "web") return;
-    (async () => {
-      try {
-        const list = await MediaLibrary.getAlbumsAsync({ includeSmartAlbums: true });
-        setAlbums(list);
-      } catch {}
-    })();
-  }, [hasPermission, selectedAlbum]);
-
-
-  const title = useMemo(() => {
-    if (mode === "story") return "Story";
-    if (mode === "reel") return "Reel";
-    return "Post";
-  }, [mode]);
-
-  const loadMore = async (reset = false) => {
-    if (!canShowLibraryGrid) return;
-    if (!hasPermission) return;
-    if (loading) return;
-    if (!hasNextPageRef.current && !reset) return;
-
-    try {
-      setLoading(true);
-
-      if (reset) {
-        endCursorRef.current = null;
-        hasNextPageRef.current = true;
-        setItems([]);
-        setSelected(null);
-      }
-
-      const res = await MediaLibrary.getAssetsAsync({
-        first: 60,
-        after: reset ? undefined : endCursorRef.current ?? undefined,
-        sortBy: [MediaLibrary.SortBy.creationTime],
-        mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
-        album: selectedAlbum ?? undefined,
-      });
-
-      endCursorRef.current = res.endCursor ?? null;
-      hasNextPageRef.current = !!res.hasNextPage;
-
-      const mapped: Item[] = res.assets.map((a) => ({
-        id: a.id,
-        uri: a.uri,
-        mediaType: a.mediaType === MediaLibrary.MediaType.video ? "video" : "photo",
-        width: a.width ?? 0,
-        height: a.height ?? 0,
-        duration: a.duration ?? undefined,
-      }));
-
-      setItems((prev) => {
-        const next = reset ? mapped : [...prev, ...mapped];
-        if (!selected && next.length > 0) setSelected(next[0]);
-        return next;
-      });
-    } finally {
-      setLoading(false);
+    if (!permission) {
+      requestPermission();
+      return;
     }
-  };
+    if (!permission.granted) return;
+
+    let cancelled = false;
+    async function loadAlbums() {
+      try {
+        setLoadingAlbums(true);
+        const all = await MediaLibrary.getAlbumsAsync({});
+
+        if (cancelled) return;
+
+        setAlbums(all);
+      } finally {
+        if (!cancelled) setLoadingAlbums(false);
+      }
+    }
+
+    loadAlbums();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [permission, requestPermission]);
 
   useEffect(() => {
-    if (!canShowLibraryGrid) return;
-    if (!hasPermission) return;
-    loadMore(true);
-  }, [hasPermission]);
+    if (!permission || !permission.granted) return;
+    if (!activeAlbumId) return;
 
-  const pickWebOrFallback = async () => {
-    const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.All,
-      quality: 1,
-      allowsMultipleSelection: false,
+    let cancelled = false;
+
+    async function loadAssets() {
+      try {
+        setLoadingAssets(true);
+        const album = albums.find((a) => a.id === activeAlbumId);
+        if (!album) return;
+
+        const page = await MediaLibrary.getAssetsAsync({
+          album,
+          mediaType: ["photo", "video"],
+          first: 200,
+          sortBy: [[MediaLibrary.SortBy.creationTime, false]],
+        });
+
+        if (cancelled) return;
+
+        const mapped: SimpleAsset[] = page.assets.map((a) => ({
+          id: a.id,
+          uri: a.uri,
+          mediaType: a.mediaType === "video" ? "video" : "image",
+          width: a.width ?? null,
+          height: a.height ?? null,
+          duration: a.duration ?? null,
+        }));
+
+        setAssets(mapped);
+        setSelectedIds([]);
+      } finally {
+        if (!cancelled) setLoadingAssets(false);
+      }
+    }
+
+    loadAssets();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeAlbumId, albums, permission]);
+
+  const hasSelection = selectedIds.length > 0;
+
+  const orderedAlbums = useMemo(() => {
+    if (albums.length === 0) return [];
+    const current = albums.find((a) => a.id === activeAlbumId);
+    const rest = albums.filter((a) => a.id !== activeAlbumId);
+    return current ? [current, ...rest] : albums;
+  }, [albums, activeAlbumId]);
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      return [...prev, id];
     });
+  }
 
-    if (res.canceled) return;
+  function handleClose() {
+    router.back();
+  }
 
-    const a = res.assets?.[0];
-    if (!a?.uri) return;
+  function handleConfirm() {
+    if (!hasSelection) return;
 
-    const mediaType = a.type === "video" ? "video" : "image";
+    const selectedAssets = assets.filter((a) => selectedIds.includes(a.id));
+    if (selectedAssets.length === 0) return;
+
+    const payload = selectedAssets.map((a) => ({
+      uri: a.uri,
+      kind: a.mediaType,
+      width: a.width,
+      height: a.height,
+      duration: a.duration,
+    }));
+
+    const payloadStr = JSON.stringify(payload);
 
     router.push({
-      pathname: "/capturePreview" as any,
-      params: { uri: a.uri, mediaType, mode, filter },
+      pathname: "/new" as any,
+      params: {
+        source: "gallery",
+        mode: captureMode,
+        filter: typeof params.filter === "string" ? params.filter : undefined,
+        payload: payloadStr,
+      },
     });
-  };
+  }
 
-  const handleUse = () => {
-    if (!selected) return;
-    const mediaType = selected.mediaType === "video" ? "video" : "image";
-    router.push({
-      pathname: "/capturePreview" as any,
-      params: { uri: selected.uri, mediaType, mode, filter },
-    });
-  };
-
-  const handleBack = () => router.back();
-
-  const renderTile = ({ item }: { item: Item }) => {
-    const isActive = selected?.id === item.id;
+  if (!permission) {
     return (
-      <Pressable onPress={() => setSelected(item)} style={[styles.tile, isActive && styles.tileActive]}>
-        <Image source={{ uri: item.uri }} style={styles.tileImg} />
-        {item.mediaType === "video" && (
-          <View style={styles.videoBadge}>
-            <Ionicons name="videocam" size={14} color="#fff" />
-            <Text style={styles.videoBadgeText}>{formatDuration(item.duration)}</Text>
-          </View>
-        )}
-      </Pressable>
+      <SafeAreaView style={[styles.container, { backgroundColor: Colors.background }]}>
+        <View style={styles.center}>
+          <ActivityIndicator />
+        </View>
+      </SafeAreaView>
     );
-  };
+  }
+
+  if (!permission.granted) {
+    return (
+      <SafeAreaView style={[styles.container, { backgroundColor: Colors.background }]}>
+        <View style={styles.center}>
+          <Text style={styles.permissionText}>
+            Precisamos da sua permissão para acessar a galeria.
+          </Text>
+          <TouchableOpacity
+            onPress={requestPermission}
+            activeOpacity={0.8}
+            style={styles.permissionButton}
+          >
+            <Text style={styles.permissionButtonText}>Permitir acesso</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
-    <View style={styles.container}>
-      <LinearGradient colors={["rgba(0,0,0,0.92)", "rgba(0,0,0,0.65)"]} style={styles.topBarBg} />
-      <View style={styles.topBar}>
-        <TouchableOpacity onPress={handleBack} activeOpacity={0.8} style={styles.iconBtn}>
-          <Ionicons name="chevron-back" size={22} color="#fff" />
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={handleClose} activeOpacity={0.8}>
+          <Text style={styles.closeText}>✕</Text>
         </TouchableOpacity>
-        <View style={styles.centerBlock}>
-          <TouchableOpacity
-            onPress={() => setAlbumsOpen(true)}
-            activeOpacity={0.85}
-            style={styles.albumBtn}
-            disabled={Platform.OS === "web"}
-          >
-            <Text style={styles.albumTitle}>{selectedAlbum?.title ?? "Recentes"}</Text>
-            {Platform.OS === "web" ? null : <Ionicons name="chevron-down" size={16} color="#fff" style={{ opacity: 0.9, marginLeft: 6 }} />}
-          </TouchableOpacity>
-          <Text style={styles.modeText}>{title}</Text>
-        </View>
-        <TouchableOpacity onPress={handleUse} activeOpacity={0.85} style={styles.useBtn} disabled={!selected}>
-          <Text style={styles.useBtnText}>Usar</Text>
-        </TouchableOpacity>
+        <Text style={[styles.headerTitle, { color: theme.colors.text }]}>
+          Galeria ({captureMode === "story" ? "Story" : "Post"})
+        </Text>
+        <View style={{ width: 24 }} />
       </View>
 
-      {!canShowLibraryGrid && (
-        <View style={styles.webWrap}>
-          <Text style={styles.webTitle}>Escolha uma mídia</Text>
-          <Text style={styles.webSub}>No navegador, a seleção é feita pelo picker do sistema.</Text>
-          <TouchableOpacity activeOpacity={0.9} onPress={pickWebOrFallback} style={styles.webPickBtn}>
-            <Text style={styles.webPickBtnText}>Escolher da galeria</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {canShowLibraryGrid && !hasPermission && (
-        <View style={styles.permissionWrap}>
-          <Text style={styles.permissionTitle}>Permissão necessária</Text>
-          <Text style={styles.permissionSub}>Permita acesso às suas fotos e vídeos para abrir a galeria.</Text>
-          <TouchableOpacity
-            activeOpacity={0.9}
-            onPress={async () => {
-              const { status } = await MediaLibrary.requestPermissionsAsync();
-              setHasPermission(status === "granted");
-            }}
-            style={styles.permissionBtn}
-          >
-            <Text style={styles.permissionBtnText}>Permitir</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {canShowLibraryGrid && hasPermission && (
-        <>
-          <View style={styles.previewWrap}>
-            {selected ? (
-              <Image source={{ uri: selected.uri }} style={styles.previewImg} />
-            ) : (
-              <View style={styles.previewEmpty}>
-                <ActivityIndicator color="#fff" />
-              </View>
-            )}
-
-            <LinearGradient colors={["rgba(0,0,0,0.75)", "rgba(0,0,0,0)"]} style={styles.previewTopShade} />
-            <LinearGradient colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.85)"]} style={styles.previewBottomShade} />
-
-            <View style={styles.previewMeta}>
-              <Text style={styles.previewMetaText}>
-                {selected?.mediaType === "video" ? "Vídeo" : "Foto"} • {filter.toUpperCase()}
-              </Text>
-              <Text style={styles.previewMetaHint}>Você poderá aplicar o filtro no próximo passo.</Text>
-            </View>
-          </View>
-
+      <View style={styles.albumsRow}>
+        {loadingAlbums ? (
+          <ActivityIndicator />
+        ) : (
           <FlatList
-            data={items}
-            keyExtractor={(i) => i.id}
-            renderItem={renderTile}
-            numColumns={COLS}
-            columnWrapperStyle={{ gap: GAP }}
-            contentContainerStyle={{ gap: GAP, paddingBottom: 18 }}
-            onEndReachedThreshold={0.5}
-            onEndReached={() => loadMore(false)}
-            ListFooterComponent={loading ? <View style={styles.footer}><ActivityIndicator /></View> : <View style={styles.footer} />}
-          />
-        </>
-      )}
-
-      <Modal
-        transparent
-        visible={albumsOpen}
-        animationType="fade"
-        onRequestClose={() => setAlbumsOpen(false)}
-      >
-        <Pressable style={styles.modalBackdrop} onPress={() => setAlbumsOpen(false)}>
-          <Pressable style={styles.albumSheet} onPress={() => {}}>
-            <View style={styles.sheetHandle} />
-            <Text style={styles.sheetTitle}>Escolher álbum</Text>
-
-            <FlatList
-              data={[({ id: "__recent__", title: "Recentes", assetCount: 0 } as any), ...albums]}
-              keyExtractor={(a: any) => a.id}
-              renderItem={({ item }: any) => {
-                const isRecent = item.id === "__recent__";
-                const active = isRecent ? !selectedAlbum : selectedAlbum?.id === item.id;
-
-                return (
-                  <TouchableOpacity
-                    style={[styles.albumItem, active && styles.albumItemActive]}
-                    activeOpacity={0.85}
-                    onPress={() => {
-                      setSelectedAlbum(isRecent ? null : item);
-                      setAlbumsOpen(false);
-                    }}
+            horizontal
+            data={orderedAlbums}
+            keyExtractor={(item) => item.id}
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ gap: 8 }}
+            renderItem={({ item }) => {
+              const active = item.id === activeAlbumId;
+              return (
+                <TouchableOpacity
+                  onPress={() => setActiveAlbumId(item.id)}
+                  activeOpacity={0.8}
+                  style={[
+                    styles.albumChip,
+                    {
+                      backgroundColor: active
+                        ? theme.colors.primary
+                        : theme.colors.surface,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.albumChipText,
+                      {
+                        color: active ? "#fff" : theme.colors.text,
+                      },
+                    ]}
                   >
-                    <Text style={styles.albumItemTitle}>{isRecent ? "Recentes" : item.title}</Text>
-                    {isRecent ? null : <Text style={styles.albumCount}>{item.assetCount ?? 0}</Text>}
-                  </TouchableOpacity>
-                );
-              }}
-            />
-          </Pressable>
-        </Pressable>
-      </Modal>
-    </View>
+                    {item.title || "Álbum"}
+                  </Text>
+                </TouchableOpacity>
+              );
+            }}
+          />
+        )}
+      </View>
+
+      <View style={styles.gridWrapper}>
+        {loadingAssets ? (
+          <View style={styles.center}>
+            <ActivityIndicator />
+          </View>
+        ) : assets.length === 0 ? (
+          <View style={styles.center}>
+            <Text style={{ color: theme.colors.textMuted }}>
+              Nenhuma mídia encontrada neste álbum.
+            </Text>
+          </View>
+        ) : (
+          <FlatList
+            data={assets}
+            numColumns={3}
+            keyExtractor={(item) => item.id}
+            columnWrapperStyle={{ gap: 2 }}
+            contentContainerStyle={{ gap: 2 }}
+            renderItem={({ item }) => {
+              const selectedIndex = selectedIds.indexOf(item.id);
+              const selected = selectedIndex !== -1;
+
+              return (
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  onPress={() => toggleSelect(item.id)}
+                  style={styles.assetItem}
+                >
+                  <Image source={{ uri: item.uri }} style={styles.assetImage} />
+                  {item.mediaType === "video" && (
+                    <View style={styles.badgeVideo}>
+                      <Text style={styles.badgeVideoText}>Vídeo</Text>
+                    </View>
+                  )}
+                  <View
+                    style={[
+                      styles.selectionOverlay,
+                      { opacity: selected ? 0.4 : 0 },
+                    ]}
+                  />
+                  <View
+                    style={[
+                      styles.selectionBadge,
+                      {
+                        borderColor: selected ? theme.colors.primary : "#fff",
+                        backgroundColor: selected
+                          ? theme.colors.primary
+                          : "rgba(0,0,0,0.35)",
+                      },
+                    ]}
+                  >
+                    {selected ? (
+                      <Text style={styles.selectionBadgeText}>
+                        {selectedIndex + 1}
+                      </Text>
+                    ) : (
+                      <View style={styles.selectionBadgeEmptyDot} />
+                    )}
+                  </View>
+                </TouchableOpacity>
+              );
+            }}
+          />
+        )}
+      </View>
+
+      <View style={styles.footer}>
+        <Text style={{ color: theme.colors.textMuted }}>
+          {hasSelection
+            ? `${selectedIds.length} selecionado(s)`
+            : "Selecione até 10 itens da câmera"}
+        </Text>
+        <TouchableOpacity
+          onPress={handleConfirm}
+          activeOpacity={0.9}
+          disabled={!hasSelection}
+          style={[
+            styles.confirmButton,
+            {
+              backgroundColor: hasSelection
+                ? theme.colors.primary
+                : theme.colors.surface,
+              opacity: hasSelection ? 1 : 0.5,
+            },
+          ]}
+        >
+          <Text style={styles.confirmButtonText}>
+            Avançar
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
-  topBarBg: { position: "absolute", top: 0, left: 0, right: 0, height: 110 },
-  topBar: {
-    paddingTop: 44,
-    paddingHorizontal: 14,
-    paddingBottom: 10,
+  container: {
+    flex: 1,
+  },
+  center: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 8,
   },
-  iconBtn: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.06)" },
-  title: { color: "#fff", fontWeight: "900", fontSize: 16, letterSpacing: 0.2 },
-  useBtn: { paddingHorizontal: 14, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,51,85,0.95)" },
-  useBtnText: { color: "#fff", fontWeight: "900" },
-
-  previewWrap: { height: Math.floor(width * 0.92), backgroundColor: "rgba(0,0,0,0.6)" },
-  previewImg: { width: "100%", height: "100%", resizeMode: "cover" },
-  previewEmpty: { flex: 1, alignItems: "center", justifyContent: "center" },
-  previewTopShade: { position: "absolute", top: 0, left: 0, right: 0, height: 70 },
-  previewBottomShade: { position: "absolute", left: 0, right: 0, bottom: 0, height: 120 },
-  previewMeta: { position: "absolute", left: 14, right: 14, bottom: 14 },
-  previewMetaText: { color: "#fff", fontWeight: "900" },
-  previewMetaHint: { color: "rgba(255,255,255,0.75)", marginTop: 4, fontWeight: "600" },
-
-  tile: { width: TILE, height: TILE, backgroundColor: "rgba(255,255,255,0.06)" },
-  tileImg: { width: "100%", height: "100%" },
-  tileActive: { borderWidth: 2, borderColor: "rgba(255,51,85,0.9)" },
-
-  videoBadge: {
+  closeText: {
+    color: "#fff",
+    fontSize: 20,
+  },
+  headerTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  albumsRow: {
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+  },
+  albumChip: {
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+  albumChipText: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  gridWrapper: {
+    flex: 1,
+  },
+  assetItem: {
+    flex: 1 / 3,
+    aspectRatio: 1,
+    position: "relative",
+  },
+  assetImage: {
+    width: "100%",
+    height: "100%",
+  },
+  badgeVideo: {
+    position: "absolute",
+    left: 4,
+    bottom: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: "rgba(0,0,0,0.65)",
+  },
+  badgeVideoText: {
+    color: "#fff",
+    fontSize: 10,
+  },
+  selectionOverlay: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "#000",
+  },
+  selectionBadge: {
     position: "absolute",
     right: 6,
-    bottom: 6,
+    top: 6,
+    width: 20,
+    height: 20,
+    borderRadius: 999,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  selectionBadgeText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  selectionBadgeEmptyDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+    backgroundColor: "#fff",
+  },
+  footer: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 999,
-    backgroundColor: "rgba(0,0,0,0.55)",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(255,255,255,0.1)",
   },
-  videoBadgeText: { color: "#fff", fontWeight: "800", fontSize: 12 },
-
-  footer: { paddingVertical: 12 },
-
-  permissionWrap: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24 },
-  permissionTitle: { color: "#fff", fontWeight: "900", fontSize: 18, marginBottom: 8 },
-  permissionSub: { color: "rgba(255,255,255,0.78)", textAlign: "center", marginBottom: 14, fontWeight: "600" },
-  permissionBtn: { height: 46, paddingHorizontal: 18, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,51,85,0.95)" },
-  permissionBtnText: { color: "#fff", fontWeight: "900" },
-
-  webWrap: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 26 },
-  webTitle: { color: "#fff", fontWeight: "900", fontSize: 18, marginBottom: 8 },
-  webSub: { color: "rgba(255,255,255,0.78)", textAlign: "center", marginBottom: 16, fontWeight: "600" },
-  webPickBtn: { height: 52, paddingHorizontal: 18, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,51,85,0.95)" },
-  webPickBtnText: { color: "#fff", fontWeight: "900" },
-
-  centerBlock: { alignItems: "center" },
-  albumBtn: { flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, backgroundColor: "rgba(0,0,0,0.35)" },
-  albumTitle: { color: "#fff", fontSize: 15, fontWeight: "800" },
-  modeText: { color: "rgba(255,255,255,0.75)", fontSize: 12, marginTop: 2, fontWeight: "700" },
-
-  modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
-  albumSheet: { backgroundColor: "#0b0b0d", borderTopLeftRadius: 18, borderTopRightRadius: 18, paddingTop: 10, paddingBottom: 18, paddingHorizontal: 14, maxHeight: "65%" },
-  sheetHandle: { alignSelf: "center", width: 44, height: 5, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.18)", marginBottom: 10 },
-  sheetTitle: { color: "#fff", fontWeight: "900", fontSize: 14, textAlign: "center", marginBottom: 10, opacity: 0.9 },
-
-  albumItem: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 12, paddingHorizontal: 12, borderRadius: 14, marginBottom: 8, backgroundColor: "rgba(255,255,255,0.04)" },
-  albumItemActive: { backgroundColor: "rgba(255,255,255,0.08)" },
-  albumItemTitle: { color: "#fff", fontSize: 14, fontWeight: "800", flex: 1 },
-  albumCount: { color: "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: "800", marginLeft: 10 },
+  confirmButton: {
+    borderRadius: 999,
+    paddingHorizontal: 22,
+    paddingVertical: 8,
+  },
+  confirmButtonText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  permissionText: {
+    color: Colors.text,
+    fontSize: 14,
+    textAlign: "center",
+    marginBottom: 12,
+  },
+  permissionButton: {
+    backgroundColor: Colors.brandStart,
+    borderRadius: 999,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+  permissionButtonText: {
+    color: "#fff",
+    fontWeight: "700",
+  },
 });

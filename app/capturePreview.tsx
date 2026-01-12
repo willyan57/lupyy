@@ -1,14 +1,17 @@
 import Colors from "@/constants/Colors";
 import { OffscreenLutRenderer } from "@/lib/gl/OffscreenLutRenderer";
+import { compressImage, prepareVideo } from "@/lib/media";
 import { uploadStoryMediaFromUri } from "@/lib/storage";
 import { supabase } from "@/lib/supabase";
 import { ResizeMode, Video } from "expo-av";
 import { BlurView } from "expo-blur";
+import * as FileSystem from "expo-file-system";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Dimensions,
   FlatList,
@@ -235,48 +238,223 @@ const [beautifyTrackWidth, setBeautifyTrackWidth] = useState(0);
 
   const handleBack = () => router.back();
 
-  const performSendWithUri = async (finalUri: string) => {
-    if (!uri) return;
-
-    if (mode === "story") {
-      try {
-        setSending(true);
-        const uploaded = await uploadStoryMediaFromUri(
-          finalUri,
-          mediaType,
-          filter
-        );
-        if (!uploaded) {
-          setSending(false);
-          return;
-        }
-
-        const expiresAt = new Date(
-          Date.now() + 24 * 60 * 60 * 1000
-        ).toISOString();
-
-        const { error: dbError } = await supabase.from("stories").insert({
-          user_id: userId,
-          media_type: mediaType,
-          media_path: uploaded.fileName,
-          expires_at: expiresAt,
-          filter,
+  
+async function uploadToBucket(
+  bucket: "posts" | "stories",
+  path: string,
+  uri: string,
+  contentType: string,
+  maxRetries: number = 3
+) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      if (Platform.OS === "web") {
+        const response = await fetch(uri);
+        const blob = await response.blob();
+        const { error } = await supabase.storage
+          .from(bucket)
+          .upload(path, blob, { contentType, upsert: true });
+        if (error) throw error;
+      } else {
+        const base64 = await FileSystem.readAsStringAsync(uri, {
+          encoding: FileSystem.EncodingType.Base64,
         });
 
-        const ok = !dbError;
-        setSending(false);
-        if (ok) router.replace("/feed");
-      } catch {
-        setSending(false);
+        const binaryString = (global as any).atob
+          ? (global as any).atob(base64)
+          : atob(base64);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        const arrayBuffer = bytes.buffer;
+
+        const { error } = await supabase.storage
+          .from(bucket)
+          .upload(path, arrayBuffer, { contentType, upsert: true });
+        if (error) throw error;
       }
       return;
+    } catch (err) {
+      if (attempt === maxRetries) {
+        throw err;
+      }
     }
+  }
+}
 
+function extractTags(text: string) {
+  const hashtagMatches = text.match(/#(\w+)/g) ?? [];
+  const mentionMatches = text.match(/@(\w+)/g) ?? [];
+
+  const hashtags = Array.from(
+    new Set(
+      hashtagMatches.map((tag) => tag.replace("#", "").trim().toLowerCase())
+    )
+  );
+  const mentions = Array.from(
+    new Set(
+      mentionMatches.map((m) => m.replace("@", "").trim().toLowerCase())
+    )
+  );
+
+  return { hashtags, mentions };
+}
+
+const performSendWithUri = async (finalUri: string) => {
+  if (!finalUri) return;
+
+  if (mode === "reel") {
     router.push({
       pathname: "/new" as any,
       params: { source: "camera", uri: finalUri, mediaType, filter },
     });
-  };
+    return;
+  }
+
+  if (mode === "story") {
+    try {
+      setSending(true);
+
+      let currentUserId = userId;
+      if (!currentUserId) {
+        const { data } = await supabase.auth.getUser();
+        currentUserId = data.user?.id ?? null;
+      }
+      if (!currentUserId) {
+        setSending(false);
+        return;
+      }
+
+      const uploaded = await uploadStoryMediaFromUri(
+        finalUri,
+        mediaType,
+        filter
+      );
+      if (!uploaded) {
+        setSending(false);
+        return;
+      }
+
+      const expiresAt = new Date(
+        Date.now() + 24 * 60 * 60 * 1000
+      ).toISOString();
+
+      const { error: dbError } = await supabase.from("stories").insert({
+        user_id: currentUserId,
+        media_type: mediaType,
+        media_path: uploaded.fileName,
+        expires_at: expiresAt,
+        audience: "public",
+        origin: "camera",
+        is_carousel: false,
+        position: 0,
+        filter,
+      });
+
+      const ok = !dbError;
+      setSending(false);
+      if (ok) router.replace("/feed");
+    } catch {
+      setSending(false);
+    }
+    return;
+  }
+
+  try {
+    setSending(true);
+
+    let currentUserId = userId;
+    if (!currentUserId) {
+      const { data } = await supabase.auth.getUser();
+      currentUserId = data.user?.id ?? null;
+    }
+    if (!currentUserId) {
+      setSending(false);
+      return;
+    }
+
+    const isVideo = mediaType === "video";
+    const timestamp = Date.now();
+
+    let uploadUri = finalUri;
+    let thumbUri: string | null = null;
+
+    if (!isVideo) {
+      uploadUri = await compressImage(finalUri);
+    } else {
+      const prepared = await prepareVideo(finalUri);
+      uploadUri = prepared.videoUri;
+      thumbUri = prepared.thumbUri ?? null;
+    }
+
+    const ext = isVideo ? "mp4" : "jpg";
+    const contentType = isVideo ? "video/mp4" : "image/jpeg";
+    const basePath = `${currentUserId}/${timestamp}`;
+    const mediaPath = `${basePath}.${ext}`;
+
+    await uploadToBucket("posts", mediaPath, uploadUri, contentType);
+
+    let thumbPath: string | null = null;
+    if (isVideo && thumbUri) {
+      thumbPath = `${basePath}.jpg`;
+      await uploadToBucket("posts", thumbPath, thumbUri, "image/jpeg");
+    }
+
+    const { hashtags, mentions } = extractTags(caption);
+
+    const { data: insertedPost, error: postError } = await supabase
+      .from("posts")
+      .insert({
+        user_id: currentUserId,
+        media_type: mediaType,
+        image_path: mediaPath,
+        thumbnail_path: thumbPath,
+        caption: caption || null,
+        width: null,
+        height: null,
+        duration: null,
+        hashtags,
+        mentions,
+        privacy_level: "public",
+        is_carousel: false,
+      })
+      .select("id")
+      .single();
+
+    if (postError || !insertedPost) {
+      throw postError || new Error("Erro ao criar post");
+    }
+
+    const postId = insertedPost.id;
+
+    const { error: mediaError } = await supabase.from("post_media").insert({
+      post_id: postId,
+      media_type: mediaType,
+      media_path: mediaPath,
+      thumbnail_path: thumbPath,
+      width: null,
+      height: null,
+      duration: null,
+      position: 0,
+    });
+
+    if (mediaError) {
+      throw mediaError;
+    }
+
+    setSending(false);
+    router.replace("/feed");
+  } catch (err) {
+    console.log("Erro ao enviar mídia da câmera:", err);
+    setSending(false);
+    Alert.alert(
+      "Erro ao publicar",
+      "Não foi possível publicar o conteúdo. Tente novamente."
+    );
+  }
+};
 
   const handleSend = () => {
     if (!uri || sending || exporting) return;
@@ -291,6 +469,10 @@ const [beautifyTrackWidth, setBeautifyTrackWidth] = useState(0);
 
   const label =
     mode === "story" ? "Publicar Story" : mode === "reel" ? "Avançar" : "Avançar";
+
+  const primaryAudienceLabel =
+    mode === "story" ? "Seus stories" : mode === "reel" ? "Reels" : "Feed";
+  const secondaryAudienceLabel = "Amigos próximos";
 
   const onCarouselMomentumEnd = (e: any) => {
     const x = e.nativeEvent.contentOffset.x;
@@ -344,8 +526,8 @@ const [beautifyTrackWidth, setBeautifyTrackWidth] = useState(0);
     { key: "save", label: "Salvar", icon: "⇣" },
   ] as const;
 
-const beautifyFaceOptions = ["Ativado", "Suavizar", "Contraste", "Dente", "Base", "Nariz", "Forma", "Levantar sobrancelha", "Lábios"];
-const beautifyMakeupOptions = ["Ativado", "Batom", "Sombra", "Blush", "Contorno"];  // maquiagem principal já aqui
+const beautifyFaceOptions = ["Ativado", "Suavizar", "Contraste", "Dente", "Base"];
+const beautifyMakeupOptions = ["Ativado", "Batom", "Sombra", "Blush", "Contorno"];
 
   const quickAdjustments = [
     { key: "none", label: "Normal" },
@@ -354,83 +536,10 @@ const beautifyMakeupOptions = ["Ativado", "Batom", "Sombra", "Blush", "Contorno"
     { key: "punch", label: "Punch" },
   ] as const;
 
-  const [adjustmentsValues, setAdjustmentsValues] = useState<Record<string, number>>({
-    none: 50,
-    bright: 50,
-    dark: 50,
-    punch: 50,
-  });
-  const [adjustTrackWidth, setAdjustTrackWidth] = useState(0);
-
-  const currentAdjustValue = adjustmentsValues[quickAdjustment] ?? 50;
-
-  const handleAdjustValueFromGesture = (evt: any) => {
-    if (!adjustTrackWidth) return;
-    const { locationX } = evt.nativeEvent;
-    const ratio = locationX / adjustTrackWidth;
-    const clampedRatio = Math.max(0, Math.min(1, ratio));
-    const value = Math.round(clampedRatio * 100);
-
-    setAdjustmentsValues((prev) => ({
-      ...prev,
-      [quickAdjustment]: value,
-    }));
-  };
-
-  const quickAdjustIntensity = currentAdjustValue / 50 || 0;
-  const brightAlpha = Math.min(1, 0.08 * quickAdjustIntensity);
-  const darkAlpha = Math.min(1, 0.22 * quickAdjustIntensity);
-  const punchAlpha = Math.min(1, 0.16 * quickAdjustIntensity);
 
   const beautifyValue = beautifyValues[beautifyOption] ?? 60;
-  const beautifyNormalized = Math.min(1, Math.max(0, beautifyValue / 100));
-  let beautifyOverlayColor: string | null = null;
 
-  switch (beautifyOption) {
-    case "Suavizar":
-      // pele mais lisa e clara
-      beautifyOverlayColor = `rgba(255,255,255,${0.06 + 0.18 * beautifyNormalized})`;
-      break;
-    case "Contraste":
-      // contraste geral
-      beautifyOverlayColor = `rgba(0,0,0,${0.14 * beautifyNormalized})`;
-      break;
-    case "Dente":
-      beautifyOverlayColor = `rgba(255,255,255,${0.10 * beautifyNormalized})`;
-      break;
-    case "Base":
-      beautifyOverlayColor = `rgba(255,210,150,${0.14 * beautifyNormalized})`;
-      break;
-    case "Batom":
-      beautifyOverlayColor = `rgba(255,80,160,${0.18 * beautifyNormalized})`;
-      break;
-    case "Sombra":
-      beautifyOverlayColor = `rgba(0,0,0,${0.18 * beautifyNormalized})`;
-      break;
-    case "Blush":
-      beautifyOverlayColor = `rgba(255,120,150,${0.20 * beautifyNormalized})`;
-      break;
-    case "Contorno":
-      beautifyOverlayColor = `rgba(0,0,0,${0.22 * beautifyNormalized})`;
-      break;
-    case "Nariz":
-      beautifyOverlayColor = `rgba(0,0,0,${0.12 * beautifyNormalized})`;
-      break;
-    case "Forma":
-      beautifyOverlayColor = `rgba(0,0,0,${0.16 * beautifyNormalized})`;
-      break;
-    case "Levantar sobrancelha":
-      beautifyOverlayColor = `rgba(255,255,255,${0.08 + 0.16 * beautifyNormalized})`;
-      break;
-    case "Lábios":
-      beautifyOverlayColor = `rgba(255,120,160,${0.18 * beautifyNormalized})`;
-      break;
-    case "Ativado":
-    default:
-      beautifyOverlayColor = `rgba(255,255,255,${0.02 + 0.08 * beautifyNormalized})`;
-      break;
-  }
-const handleBeautifyValueFromGesture = (evt: any) => {
+  const handleBeautifyValueFromGesture = (evt: any) => {
     if (!beautifyTrackWidth) return;
     const { locationX } = evt.nativeEvent;
     const ratio = locationX / beautifyTrackWidth;
@@ -601,46 +710,22 @@ const handleToolPress = (key: string) => {
         </View>
       )}
 
-      {quickAdjustment === "bright" && currentAdjustValue > 0 && (
+      {quickAdjustment === "bright" && (
         <View
           pointerEvents="none"
-          style={[
-            styles.adjustmentOverlay,
-            {
-              backgroundColor: `rgba(255,255,255,${brightAlpha.toFixed(3)})`,
-            },
-          ]}
+          style={[styles.adjustmentOverlay, styles.adjustmentBright]}
         />
       )}
-      {quickAdjustment === "dark" && currentAdjustValue > 0 && (
+      {quickAdjustment === "dark" && (
         <View
           pointerEvents="none"
-          style={[
-            styles.adjustmentOverlay,
-            {
-              backgroundColor: `rgba(0,0,0,${darkAlpha.toFixed(3)})`,
-            },
-          ]}
+          style={[styles.adjustmentOverlay, styles.adjustmentDark]}
         />
       )}
-      {quickAdjustment === "punch" && currentAdjustValue > 0 && (
+      {quickAdjustment === "punch" && (
         <View
           pointerEvents="none"
-          style={[
-            styles.adjustmentOverlay,
-            {
-              backgroundColor: `rgba(0,0,0,${punchAlpha.toFixed(3)})`,
-              borderWidth: StyleSheet.hairlineWidth,
-              borderColor: "rgba(255,255,255,0.25)",
-            },
-          ]}
-        />
-      )}
-
-      {beautifyOverlayColor && (
-        <View
-          pointerEvents="none"
-          style={[styles.beautifyOverlay, { backgroundColor: beautifyOverlayColor }]}
+          style={[styles.adjustmentOverlay, styles.adjustmentPunch]}
         />
       )}
 
@@ -661,11 +746,11 @@ const handleToolPress = (key: string) => {
       )}
 
       <LinearGradient
-        colors={["rgba(0,0,0,0.55)", "rgba(0,0,0,0.0)"]}
+        colors={["rgba(0,0,0,0.75)", "rgba(0,0,0,0.0)"]}
         style={styles.topGradient}
       />
       <LinearGradient
-        colors={["rgba(0,0,0,0.0)", "rgba(0,0,0,0.65)"]}
+        colors={["rgba(0,0,0,0.0)", "rgba(0,0,0,0.85)"]}
         style={styles.bottomGradient}
       />
 
@@ -738,15 +823,8 @@ const handleToolPress = (key: string) => {
             { left: `${beautifyValue}%` },
           ]}
         />
-        <View
-          style={[
-            styles.beautifySliderValueBubble,
-            { left: `${beautifyValue}%` },
-          ]}
-        >
-          <Text style={styles.beautifySliderValueText}>{beautifyValue}</Text>
-        </View>
       </View>
+      <Text style={styles.beautifyValueLabel}>{beautifyValue}</Text>
     </View>
 
     <View style={styles.beautifyTabsRow}>
@@ -854,64 +932,30 @@ const handleToolPress = (key: string) => {
   </View>
 )}
         {effectsOpen && (
-          <View style={styles.quickAdjustContainer}>
-            <View style={styles.quickAdjustRow}>
-              {quickAdjustments.map((item) => {
-                const active = quickAdjustment === item.key;
-                return (
-                  <TouchableOpacity
-                    key={item.key}
-                    activeOpacity={0.9}
-                    onPress={() => setQuickAdjustment(item.key as any)}
-                    style={[
-                      styles.quickAdjustChip,
-                      active && styles.quickAdjustChipActive,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.quickAdjustText,
-                        active && styles.quickAdjustTextActive,
-                      ]}
-                    >
-                      {item.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            <View style={styles.adjustSliderRow}>
-              <View
-                style={styles.adjustSliderTrack}
-                onLayout={(e) => setAdjustTrackWidth(e.nativeEvent.layout.width)}
-                onStartShouldSetResponder={() => true}
-                onMoveShouldSetResponder={() => true}
-                onResponderGrant={handleAdjustValueFromGesture}
-                onResponderMove={handleAdjustValueFromGesture}
-              >
-                <View
+          <View style={styles.quickAdjustRow}>
+            {quickAdjustments.map((item) => {
+              const active = quickAdjustment === item.key;
+              return (
+                <TouchableOpacity
+                  key={item.key}
+                  activeOpacity={0.9}
+                  onPress={() => setQuickAdjustment(item.key as any)}
                   style={[
-                    styles.adjustSliderFill,
-                    { width: `${currentAdjustValue}%` },
-                  ]}
-                />
-                <View
-                  style={[
-                    styles.adjustSliderThumb,
-                    { left: `${currentAdjustValue}%` },
-                  ]}
-                />
-                <View
-                  style={[
-                    styles.adjustSliderValueBubble,
-                    { left: `${currentAdjustValue}%` },
+                    styles.quickAdjustChip,
+                    active && styles.quickAdjustChipActive,
                   ]}
                 >
-                  <Text style={styles.adjustSliderValueText}>{currentAdjustValue}</Text>
-                </View>
-              </View>
-            </View>
+                  <Text
+                    style={[
+                      styles.quickAdjustText,
+                      active && styles.quickAdjustTextActive,
+                    ]}
+                  >
+                    {item.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
         )}
         <View style={styles.legendRow}>
@@ -927,11 +971,11 @@ const handleToolPress = (key: string) => {
 
         <View style={styles.audienceRow}>
           <TouchableOpacity activeOpacity={0.9} style={styles.audienceChip}>
-            <Text style={styles.audienceChipText}>Seus stories</Text>
+            <Text style={styles.audienceChipText}>{primaryAudienceLabel}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity activeOpacity={0.9} style={styles.audienceChipAlt}>
-            <Text style={styles.audienceChipAltText}>Amigos próximos</Text>
+            <Text style={styles.audienceChipAltText}>{secondaryAudienceLabel}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -1286,13 +1330,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.16)",
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(255,255,255,0.25)",
-  },
-  beautifyOverlay: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
   },
   filterLabel: {
     position: "absolute",
@@ -1754,61 +1791,6 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   
   },
-  quickAdjustContainer: {
-    marginBottom: 10,
-    paddingHorizontal: 4,
-  },
-  adjustSliderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 6,
-  },
-  adjustSliderStaticValue: {
-    marginLeft: 8,
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "700",
-    minWidth: 28,
-    textAlign: "right",
-  },
-  adjustSliderTrack: {
-    flex: 1,
-    height: 4,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.25)",
-    overflow: "hidden",
-    position: "relative",
-  },
-  adjustSliderFill: {
-    position: "absolute",
-    left: 0,
-    top: 0,
-    bottom: 0,
-    backgroundColor: "#ff3366",
-  },
-  adjustSliderThumb: {
-    position: "absolute",
-    top: -8,
-    width: 22,
-    height: 22,
-    marginLeft: -11,
-    borderRadius: 999,
-    backgroundColor: "#fff",
-  },
-  adjustSliderValueBubble: {
-    position: "absolute",
-    bottom: 16,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 999,
-    backgroundColor: "rgba(0,0,0,0.7)",
-    transform: [{ translateX: -10 }],
-  },
-  adjustSliderValueText: {
-    color: "#fff",
-    fontSize: 11,
-    fontWeight: "700",
-  },
   beautifyPanel: {
   marginBottom: 10,
   paddingHorizontal: 4,
@@ -1842,19 +1824,11 @@ const styles = StyleSheet.create({
   borderRadius: 999,
   backgroundColor: "#fff",
 },
-  beautifySliderValueBubble: {
-  position: "absolute",
-  bottom: 16,
-  paddingHorizontal: 6,
-  paddingVertical: 2,
-  borderRadius: 999,
-  backgroundColor: "rgba(0,0,0,0.7)",
-  transform: [{ translateX: -10 }],
-},
-  beautifySliderValueText: {
+  beautifyValueLabel: {
+  marginLeft: 10,
   color: "#fff",
   fontWeight: "700",
-  fontSize: 11,
+  fontSize: 13,
 },
   beautifyTabsRow: {
   flexDirection: "row",
