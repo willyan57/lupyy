@@ -1,7 +1,6 @@
 import Colors from "@/constants/Colors";
 import { OffscreenLutRenderer } from "@/lib/gl/OffscreenLutRenderer";
 import { compressImage, prepareVideo } from "@/lib/media";
-import { uploadStoryMediaFromUri } from "@/lib/storage";
 import { supabase } from "@/lib/supabase";
 import { ResizeMode, Video } from "expo-av";
 import { BlurView } from "expo-blur";
@@ -326,6 +325,7 @@ export default function CapturePreview() {
       return;
     }
 
+    
     if (mode === "story") {
       try {
         setSending(true);
@@ -340,37 +340,57 @@ export default function CapturePreview() {
           return;
         }
 
-        const uploaded = await uploadStoryMediaFromUri(
-          finalUri,
-          mediaType,
-          filter
-        );
-        if (!uploaded) {
-          setSending(false);
-          return;
+        const isVideo = mediaType === "video";
+
+        let uploadUri = finalUri;
+        let thumbUploadUri: string | null = null;
+
+        if (!isVideo) {
+          uploadUri = await compressImage(finalUri);
+        } else {
+          const prepared = await prepareVideo(finalUri);
+          uploadUri = prepared.videoUri;
+          thumbUploadUri = prepared.thumbUri ?? null;
         }
 
-        const expiresAt = new Date(
-          Date.now() + 24 * 60 * 60 * 1000
-        ).toISOString();
+        const timestamp = Date.now();
+        const basePath = `${currentUserId}/${timestamp}`;
+        const ext = isVideo ? "mp4" : "jpg";
+        const contentType = isVideo ? "video/mp4" : "image/jpeg";
+        const mediaPath = `${basePath}.${ext}`;
+
+        await uploadToBucket("stories", mediaPath, uploadUri, contentType);
+
+        let thumbPath: string | null = null;
+        if (isVideo && thumbUploadUri) {
+          thumbPath = `${basePath}.jpg`;
+          await uploadToBucket("stories", thumbPath, thumbUploadUri, "image/jpeg");
+        }
 
         const { error: dbError } = await supabase.from("stories").insert({
           user_id: currentUserId,
           media_type: mediaType,
-          media_path: uploaded.fileName,
-          thumbnail_path: null,
-          caption: null,
-          has_sound: mediaType === "video",
+          media_path: mediaPath,
+          thumbnail_path: thumbPath,
+          caption: caption || null,
+          has_sound: isVideo,
         });
 
-        const ok = !dbError;
         setSending(false);
-        if (ok) router.replace("/feed");
-      } catch {
+        if (!dbError) {
+          router.replace("/feed");
+        }
+      } catch (err) {
+        console.log("Erro ao enviar story da câmera:", err);
         setSending(false);
+        Alert.alert(
+          "Erro ao publicar story",
+          "Não foi possível publicar seu story. Tente novamente."
+        );
       }
       return;
     }
+
 
     try {
       setSending(true);
