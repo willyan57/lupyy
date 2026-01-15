@@ -116,7 +116,6 @@ export default function CapturePreview() {
   const [mediaLoaded, setMediaLoaded] = useState(false);
   const [exporting, setExporting] = useState(false);
 
-  // começa COLAPSADO por padrão, igual Instagram
   const [toolsCollapsed, setToolsCollapsed] = useState(true);
   const [caption, setCaption] = useState("");
   const [activeToolSheet, setActiveToolSheet] = useState<
@@ -134,30 +133,37 @@ export default function CapturePreview() {
   >("none");
   const [effectsOpen, setEffectsOpen] = useState(false);
 
-const [showBeautifyPanel, setShowBeautifyPanel] = useState(false);
-const [beautifyTab, setBeautifyTab] = useState<"face" | "makeup">("face");
-const [beautifyOption, setBeautifyOption] = useState("Ativado");
-const [beautifyValues, setBeautifyValues] = useState<Record<string, number>>(() => {
-  const allOptions = [
-    "Ativado",
-    "Suavizar",
-    "Contraste",
-    "Dente",
-    "Base",
-    "Batom",
-    "Sombra",
-    "Blush",
-    "Contorno",
-  ];
-  const initial: Record<string, number> = {};
-  allOptions.forEach((opt) => {
-    initial[opt] = 60;
-  });
-  return initial;
-});
-const [beautifyTrackWidth, setBeautifyTrackWidth] = useState(0);
+  const [showBeautifyPanel, setShowBeautifyPanel] = useState(false);
+  const [beautifyTab, setBeautifyTab] = useState<"face" | "makeup">("face");
+  const [beautifyOption, setBeautifyOption] = useState("Ativado");
+  const [beautifyValues, setBeautifyValues] = useState<Record<string, number>>(
+    () => {
+      const allOptions = [
+        "Ativado",
+        "Suavizar",
+        "Contraste",
+        "Dente",
+        "Base",
+        "Batom",
+        "Sombra",
+        "Blush",
+        "Contorno",
+      ];
+      const initial: Record<string, number> = {};
+      allOptions.forEach((opt) => {
+        initial[opt] = 60;
+      });
+      return initial;
+    }
+  );
+  const [beautifyTrackWidth, setBeautifyTrackWidth] = useState(0);
 
+  const [aiProcessing, setAiProcessing] = useState(false);
+  const [aiTempUri, setAiTempUri] = useState<string | null>(null);
 
+  const effectiveUri = aiTempUri || uri;
+  const shouldExportWithLut =
+    mediaType === "image" && filter !== "none" && !aiTempUri;
 
   useEffect(() => {
     setMediaLoaded(false);
@@ -236,84 +242,136 @@ const [beautifyTrackWidth, setBeautifyTrackWidth] = useState(0);
     setMediaLoaded(false);
   }, [uri, nonce]);
 
+  useEffect(() => {
+    return () => {
+      if (aiTempUri) {
+        FileSystem.deleteAsync(aiTempUri, { idempotent: true }).catch(() => {});
+      }
+    };
+  }, [aiTempUri]);
+
   const handleBack = () => router.back();
 
-  
-async function uploadToBucket(
-  bucket: "posts" | "stories",
-  path: string,
-  uri: string,
-  contentType: string,
-  maxRetries: number = 3
-) {
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      if (Platform.OS === "web") {
-        const response = await fetch(uri);
-        const blob = await response.blob();
-        const { error } = await supabase.storage
-          .from(bucket)
-          .upload(path, blob, { contentType, upsert: true });
-        if (error) throw error;
-      } else {
-        const base64 = await FileSystem.readAsStringAsync(uri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
+  async function uploadToBucket(
+    bucket: "posts" | "stories",
+    path: string,
+    uriToUpload: string,
+    contentType: string,
+    maxRetries: number = 3
+  ) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        if (Platform.OS === "web") {
+          const response = await fetch(uriToUpload);
+          const blob = await response.blob();
+          const { error } = await supabase.storage
+            .from(bucket)
+            .upload(path, blob, { contentType, upsert: true });
+          if (error) throw error;
+        } else {
+          const base64 = await FileSystem.readAsStringAsync(uriToUpload, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
 
-        const binaryString = (global as any).atob
-          ? (global as any).atob(base64)
-          : atob(base64);
-        const len = binaryString.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
+          const binaryString = (global as any).atob
+            ? (global as any).atob(base64)
+            : atob(base64);
+          const len = binaryString.length;
+          const bytes = new Uint8Array(len);
+          for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          const arrayBuffer = bytes.buffer;
+
+          const { error } = await supabase.storage
+            .from(bucket)
+            .upload(path, arrayBuffer, { contentType, upsert: true });
+          if (error) throw error;
         }
-        const arrayBuffer = bytes.buffer;
-
-        const { error } = await supabase.storage
-          .from(bucket)
-          .upload(path, arrayBuffer, { contentType, upsert: true });
-        if (error) throw error;
-      }
-      return;
-    } catch (err) {
-      if (attempt === maxRetries) {
-        throw err;
+        return;
+      } catch (err) {
+        if (attempt === maxRetries) {
+          throw err;
+        }
       }
     }
   }
-}
 
-function extractTags(text: string) {
-  const hashtagMatches = text.match(/#(\w+)/g) ?? [];
-  const mentionMatches = text.match(/@(\w+)/g) ?? [];
+  function extractTags(text: string) {
+    const hashtagMatches = text.match(/#(\w+)/g) ?? [];
+    const mentionMatches = text.match(/@(\w+)/g) ?? [];
 
-  const hashtags = Array.from(
-    new Set(
-      hashtagMatches.map((tag) => tag.replace("#", "").trim().toLowerCase())
-    )
-  );
-  const mentions = Array.from(
-    new Set(
-      mentionMatches.map((m) => m.replace("@", "").trim().toLowerCase())
-    )
-  );
+    const hashtags = Array.from(
+      new Set(
+        hashtagMatches.map((tag) => tag.replace("#", "").trim().toLowerCase())
+      )
+    );
+    const mentions = Array.from(
+      new Set(
+        mentionMatches.map((m) => m.replace("@", "").trim().toLowerCase())
+      )
+    );
 
-  return { hashtags, mentions };
-}
-
-const performSendWithUri = async (finalUri: string) => {
-  if (!finalUri) return;
-
-  if (mode === "reel") {
-    router.push({
-      pathname: "/new" as any,
-      params: { source: "camera", uri: finalUri, mediaType, filter },
-    });
-    return;
+    return { hashtags, mentions };
   }
 
-  if (mode === "story") {
+  const performSendWithUri = async (finalUri: string) => {
+    if (!finalUri) return;
+
+    if (mode === "reel") {
+      router.push({
+        pathname: "/new" as any,
+        params: { source: "camera", uri: finalUri, mediaType, filter },
+      });
+      return;
+    }
+
+    if (mode === "story") {
+      try {
+        setSending(true);
+
+        let currentUserId = userId;
+        if (!currentUserId) {
+          const { data } = await supabase.auth.getUser();
+          currentUserId = data.user?.id ?? null;
+        }
+        if (!currentUserId) {
+          setSending(false);
+          return;
+        }
+
+        const uploaded = await uploadStoryMediaFromUri(
+          finalUri,
+          mediaType,
+          filter
+        );
+        if (!uploaded) {
+          setSending(false);
+          return;
+        }
+
+        const expiresAt = new Date(
+          Date.now() + 24 * 60 * 60 * 1000
+        ).toISOString();
+
+        const { error: dbError } = await supabase.from("stories").insert({
+          user_id: currentUserId,
+          media_type: mediaType,
+          media_path: uploaded.fileName,
+          thumbnail_path: null,
+          caption: null,
+          has_sound: mediaType === "video",
+        });
+
+        const ok = !dbError;
+        setSending(false);
+        if (ok) router.replace("/feed");
+      } catch {
+        setSending(false);
+      }
+      return;
+    }
+
     try {
       setSending(true);
 
@@ -327,141 +385,209 @@ const performSendWithUri = async (finalUri: string) => {
         return;
       }
 
-      const uploaded = await uploadStoryMediaFromUri(
-        finalUri,
-        mediaType,
-        filter
-      );
-      if (!uploaded) {
-        setSending(false);
-        return;
+      const isVideo = mediaType === "video";
+      const timestamp = Date.now();
+
+      let uploadUri = finalUri;
+      let thumbUri: string | null = null;
+
+      if (!isVideo) {
+        uploadUri = await compressImage(finalUri);
+      } else {
+        const prepared = await prepareVideo(finalUri);
+        uploadUri = prepared.videoUri;
+        thumbUri = prepared.thumbUri ?? null;
       }
 
-      const expiresAt = new Date(
-        Date.now() + 24 * 60 * 60 * 1000
-      ).toISOString();
+      const ext = isVideo ? "mp4" : "jpg";
+      const contentType = isVideo ? "video/mp4" : "image/jpeg";
+      const basePath = `${currentUserId}/${timestamp}`;
+      const mediaPath = `${basePath}.${ext}`;
 
-      const { error: dbError } = await supabase.from("stories").insert({
-        user_id: currentUserId,
+      await uploadToBucket("posts", mediaPath, uploadUri, contentType);
+
+      let thumbPath: string | null = null;
+      if (isVideo && thumbUri) {
+        thumbPath = `${basePath}.jpg`;
+        await uploadToBucket("posts", thumbPath, thumbUri, "image/jpeg");
+      }
+
+      const { hashtags, mentions } = extractTags(caption);
+
+      const { data: insertedPost, error: postError } = await supabase
+        .from("posts")
+        .insert({
+          user_id: currentUserId,
+          media_type: mediaType,
+          image_path: mediaPath,
+          thumbnail_path: thumbPath,
+          caption: caption || null,
+          width: null,
+          height: null,
+          duration: null,
+          hashtags,
+          mentions,
+          privacy_level: "public",
+          is_carousel: false,
+        })
+        .select("id")
+        .single();
+
+      if (postError || !insertedPost) {
+        throw postError || new Error("Erro ao criar post");
+      }
+
+      const postId = insertedPost.id;
+
+      const { error: mediaError } = await supabase.from("post_media").insert({
+        post_id: postId,
         media_type: mediaType,
-        media_path: uploaded.fileName,
-        thumbnail_path: null,
-        caption: null,
-        has_sound: mediaType === "video",
-      });
-
-      const ok = !dbError;
-      setSending(false);
-      if (ok) router.replace("/feed");
-    } catch {
-      setSending(false);
-    }
-    return;
-  }
-
-  try {
-    setSending(true);
-
-    let currentUserId = userId;
-    if (!currentUserId) {
-      const { data } = await supabase.auth.getUser();
-      currentUserId = data.user?.id ?? null;
-    }
-    if (!currentUserId) {
-      setSending(false);
-      return;
-    }
-
-    const isVideo = mediaType === "video";
-    const timestamp = Date.now();
-
-    let uploadUri = finalUri;
-    let thumbUri: string | null = null;
-
-    if (!isVideo) {
-      uploadUri = await compressImage(finalUri);
-    } else {
-      const prepared = await prepareVideo(finalUri);
-      uploadUri = prepared.videoUri;
-      thumbUri = prepared.thumbUri ?? null;
-    }
-
-    const ext = isVideo ? "mp4" : "jpg";
-    const contentType = isVideo ? "video/mp4" : "image/jpeg";
-    const basePath = `${currentUserId}/${timestamp}`;
-    const mediaPath = `${basePath}.${ext}`;
-
-    await uploadToBucket("posts", mediaPath, uploadUri, contentType);
-
-    let thumbPath: string | null = null;
-    if (isVideo && thumbUri) {
-      thumbPath = `${basePath}.jpg`;
-      await uploadToBucket("posts", thumbPath, thumbUri, "image/jpeg");
-    }
-
-    const { hashtags, mentions } = extractTags(caption);
-
-    const { data: insertedPost, error: postError } = await supabase
-      .from("posts")
-      .insert({
-        user_id: currentUserId,
-        media_type: mediaType,
-        image_path: mediaPath,
+        media_path: mediaPath,
         thumbnail_path: thumbPath,
-        caption: caption || null,
         width: null,
         height: null,
         duration: null,
-        hashtags,
-        mentions,
-        privacy_level: "public",
-        is_carousel: false,
-      })
-      .select("id")
-      .single();
+        position: 0,
+      });
 
-    if (postError || !insertedPost) {
-      throw postError || new Error("Erro ao criar post");
+      if (mediaError) {
+        throw mediaError;
+      }
+
+      setSending(false);
+      router.replace("/feed");
+    } catch (err) {
+      console.log("Erro ao enviar mídia da câmera:", err);
+      setSending(false);
+      Alert.alert(
+        "Erro ao publicar",
+        "Não foi possível publicar o conteúdo. Tente novamente."
+      );
     }
+  };
 
-    const postId = insertedPost.id;
-
-    const { error: mediaError } = await supabase.from("post_media").insert({
-      post_id: postId,
-      media_type: mediaType,
-      media_path: mediaPath,
-      thumbnail_path: thumbPath,
-      width: null,
-      height: null,
-      duration: null,
-      position: 0,
-    });
-
-    if (mediaError) {
-      throw mediaError;
+  function getAiPresetFromFilter() {
+    switch (filter) {
+      case "warm":
+        return "cinematic";
+      case "cool":
+        return "realistic";
+      case "pink":
+        return "anime";
+      case "gold":
+        return "vintage";
+      case "night":
+        return "cinematic";
+      default:
+        return "realistic";
     }
-
-    setSending(false);
-    router.replace("/feed");
-  } catch (err) {
-    console.log("Erro ao enviar mídia da câmera:", err);
-    setSending(false);
-    Alert.alert(
-      "Erro ao publicar",
-      "Não foi possível publicar o conteúdo. Tente novamente."
-    );
   }
-};
+
+  function getAiPresetFromBeautify() {
+    if (beautifyTab === "face") {
+      if (beautifyOption === "Dente") return "whiten_teeth";
+      return "soft_skin";
+    }
+    if (beautifyTab === "makeup") {
+      if (
+        beautifyOption === "Batom" ||
+        beautifyOption === "Blush" ||
+        beautifyOption === "Contorno"
+      ) {
+        return "makeup_glam";
+      }
+      return "makeup_natural";
+    }
+    return "soft_skin";
+  }
+
+  async function applyAiTransform(mode: "filter" | "beautify", preset: string) {
+    if (mediaType !== "image" || !uri) return;
+    if (aiProcessing) return;
+
+    try {
+      setAiProcessing(true);
+
+      const { data, error } = await supabase.functions.invoke(
+        "ai-image-flux",
+        {
+          body: {
+            mode,
+            preset,
+          },
+        }
+      );
+
+      if (error || !data || typeof data !== "object") {
+        Alert.alert("Erro", "Não foi possível aplicar IA. Tente novamente.");
+        return;
+      }
+
+      const outputImageUrl = (data as any).outputImageUrl as string | undefined;
+
+      if (!outputImageUrl) {
+        Alert.alert("Erro", "IA não retornou imagem.");
+        return;
+      }
+
+      const localPath =
+        (FileSystem.documentDirectory ?? "") +
+        `ai-${Date.now().toString()}.webp`;
+
+      const download = await FileSystem.downloadAsync(
+        outputImageUrl,
+        localPath
+      );
+
+      if (!download || !download.uri) {
+        Alert.alert("Erro", "Falha ao baixar imagem da IA.");
+        return;
+      }
+
+      if (aiTempUri && aiTempUri !== download.uri) {
+        try {
+          await FileSystem.deleteAsync(aiTempUri, { idempotent: true });
+        } catch {}
+      }
+
+      setMediaLoaded(false);
+      setAiTempUri(download.uri);
+    } catch (err) {
+      Alert.alert("Erro", "Falha ao aplicar IA. Tente novamente.");
+    } finally {
+      setAiProcessing(false);
+    }
+  }
+
+
+  async function handleRevertAi() {
+    if (!aiTempUri) return;
+    try {
+      await FileSystem.deleteAsync(aiTempUri, { idempotent: true });
+    } catch {}
+    setAiTempUri(null);
+    setMediaLoaded(false);
+  }
+
+  const handleApplyFilterAi = () => {
+    const preset = getAiPresetFromFilter();
+    void applyAiTransform("filter", preset);
+  };
+
+  const handleApplyBeautifyAi = () => {
+    const preset = getAiPresetFromBeautify();
+    void applyAiTransform("beautify", preset);
+  };
 
   const handleSend = () => {
-    if (!uri || sending || exporting) return;
+    if (!effectiveUri || sending || exporting || aiProcessing) return;
 
-    if (mediaType === "image" && filter !== "none") {
+    if (shouldExportWithLut) {
       setExporting(true);
       return;
     }
 
-    void performSendWithUri(uri);
+    void performSendWithUri(effectiveUri);
   };
 
   const label =
@@ -510,10 +636,8 @@ const performSendWithUri = async (finalUri: string) => {
   });
   const nextOpacity = transition;
 
-  // lista base de ferramentas (todas, sem "Mais/Menos")
   const baseTools = [
     { key: "text", label: "Texto", icon: "Aa" },
-    // ícone sem emoji colorido, para ficar branco como os outros
     { key: "stickers", label: "Figurinhas", icon: "☻" },
     { key: "music", label: "Músicas", icon: "♫" },
     { key: "beautify", label: "Embelezar", icon: "✧" },
@@ -523,8 +647,20 @@ const performSendWithUri = async (finalUri: string) => {
     { key: "save", label: "Salvar", icon: "⇣" },
   ] as const;
 
-const beautifyFaceOptions = ["Ativado", "Suavizar", "Contraste", "Dente", "Base"];
-const beautifyMakeupOptions = ["Ativado", "Batom", "Sombra", "Blush", "Contorno"];
+  const beautifyFaceOptions = [
+    "Ativado",
+    "Suavizar",
+    "Contraste",
+    "Dente",
+    "Base",
+  ];
+  const beautifyMakeupOptions = [
+    "Ativado",
+    "Batom",
+    "Sombra",
+    "Blush",
+    "Contorno",
+  ];
 
   const quickAdjustments = [
     { key: "none", label: "Normal" },
@@ -532,7 +668,6 @@ const beautifyMakeupOptions = ["Ativado", "Batom", "Sombra", "Blush", "Contorno"
     { key: "dark", label: "Escuro" },
     { key: "punch", label: "Punch" },
   ] as const;
-
 
   const beautifyValue = beautifyValues[beautifyOption] ?? 60;
 
@@ -549,9 +684,6 @@ const beautifyMakeupOptions = ["Ativado", "Batom", "Sombra", "Blush", "Contorno"
     }));
   };
 
-
-  // quando estiver colapsado: mostra só as 4 primeiras + botão de expandir
-  // quando expandido: mostra todas + botão de recolher
   const tools = toolsCollapsed
     ? [
         ...baseTools.slice(0, 4),
@@ -562,64 +694,61 @@ const beautifyMakeupOptions = ["Ativado", "Batom", "Sombra", "Blush", "Contorno"
         { key: "more", label: "Menos", icon: "⋮" },
       ];
 
-  
-const handleToolPress = (key: string) => {
-  if (key === "beautify") {
-    setShowBeautifyPanel((prev) => !prev);
-    setShowInlineFilters(false);
+  const handleToolPress = (key: string) => {
+    if (key === "beautify") {
+      setShowBeautifyPanel((prev) => !prev);
+      setShowInlineFilters(false);
+      setEffectsOpen(false);
+      setActiveToolSheet(null);
+      setToolsCollapsed(true);
+      return;
+    }
+
+    if (key === "effects") {
+      setEffectsOpen((prev) => !prev);
+      setShowBeautifyPanel(false);
+      setActiveToolSheet(null);
+      setShowInlineFilters(false);
+      setToolsCollapsed(true);
+      return;
+    }
+
+    if (key === "more") {
+      setToolsCollapsed((prev) => !prev);
+      setEffectsOpen(false);
+      setShowBeautifyPanel(false);
+      setShowInlineFilters(false);
+      setActiveToolSheet(null);
+      return;
+    }
+
     setEffectsOpen(false);
-    setActiveToolSheet(null);
-    setToolsCollapsed(true);
-    return;
-  }
-
-  if (key === "effects") {
-    setEffectsOpen((prev) => !prev);
-    setShowBeautifyPanel(false);
-    setActiveToolSheet(null);
-    setShowInlineFilters(false);
-    setToolsCollapsed(true);
-    return;
-  }
-
-  if (key === "more") {
-    setToolsCollapsed((prev) => !prev);
-    setEffectsOpen(false);
     setShowBeautifyPanel(false);
     setShowInlineFilters(false);
-    setActiveToolSheet(null);
-    return;
-  }
+    setToolsCollapsed(true);
 
-  // Para outros botões, abrimos/fechamos o bottom sheet padrão
-  setEffectsOpen(false);
-  setShowBeautifyPanel(false);
-  setShowInlineFilters(false);
-  setToolsCollapsed(true);
+    if (
+      key === "text" ||
+      key === "stickers" ||
+      key === "music" ||
+      key === "mention" ||
+      key === "draw" ||
+      key === "save"
+    ) {
+      setActiveToolSheet((prev) => (prev === key ? null : (key as any)));
+      return;
+    }
+  };
 
-  if (
-    key === "text" ||
-    key === "stickers" ||
-    key === "music" ||
-    key === "mention" ||
-    key === "draw" ||
-    key === "save"
-  ) {
-    setActiveToolSheet((prev) => (prev === key ? null : (key as any)));
-    return;
-  }
-
-  // outros botões podem ser tratados aqui no futuro
-};
   return (
     <View style={styles.container}>
-      {exporting && mediaType === "image" && uri ? (
+      {exporting && shouldExportWithLut && effectiveUri ? (
         <OffscreenLutRenderer
-          sourceUri={uri}
+          sourceUri={effectiveUri}
           filter={filter}
           onFinish={(processedUri) => {
             setExporting(false);
-            const finalUri = processedUri || uri;
+            const finalUri = processedUri || effectiveUri;
             void performSendWithUri(finalUri);
           }}
         />
@@ -627,8 +756,8 @@ const handleToolPress = (key: string) => {
 
       {mediaType === "image" ? (
         <Image
-          key={`${uri}::${nonce}::${filter}`}
-          source={{ uri }}
+          key={`${effectiveUri}::${nonce}::${filter}`}
+          source={{ uri: effectiveUri }}
           style={styles.preview}
           resizeMode="cover"
           onLoadEnd={() => setMediaLoaded(true)}
@@ -736,7 +865,7 @@ const handleToolPress = (key: string) => {
         <Text style={styles.filterLabelText}>{activeFilter.name}</Text>
       </Animated.View>
 
-      {!mediaLoaded && !exporting && (
+      {((!mediaLoaded && !exporting) || aiProcessing) && (
         <View style={styles.loadingOverlay}>
           <ActivityIndicator color="#fff" />
         </View>
@@ -771,7 +900,6 @@ const handleToolPress = (key: string) => {
         </TouchableOpacity>
       </View>
 
-      {/* Ferramentas laterais estilo Instagram */}
       <View style={styles.rightTools}>
         {tools.map((tool) => (
           <TouchableOpacity
@@ -780,7 +908,6 @@ const handleToolPress = (key: string) => {
             onPress={() => handleToolPress(tool.key)}
             style={styles.rightToolButton}
           >
-            {/* texto primeiro, bolinha depois */}
             {!toolsCollapsed && tool.key !== "more" && (
               <Text style={styles.rightToolLabel}>{tool.label}</Text>
             )}
@@ -796,138 +923,151 @@ const handleToolPress = (key: string) => {
       </View>
 
       <View style={styles.bottomPanel}>
-
-{showBeautifyPanel && (
-  <View style={styles.beautifyPanel}>
-    <View style={styles.beautifySliderRow}>
-      <View
-        style={styles.beautifySliderTrack}
-        onLayout={(e) => setBeautifyTrackWidth(e.nativeEvent.layout.width)}
-        onStartShouldSetResponder={() => true}
-        onMoveShouldSetResponder={() => true}
-        onResponderGrant={handleBeautifyValueFromGesture}
-        onResponderMove={handleBeautifyValueFromGesture}
-      >
-        <View
-          style={[
-            styles.beautifySliderFill,
-            { width: `${beautifyValue}%` },
-          ]}
-        />
-        <View
-          style={[
-            styles.beautifySliderThumb,
-            { left: `${beautifyValue}%` },
-          ]}
-        />
-      </View>
-      <Text style={styles.beautifyValueLabel}>{beautifyValue}</Text>
-    </View>
-
-    <View style={styles.beautifyTabsRow}>
-      <View style={styles.beautifyTabsLeft}>
-        <TouchableOpacity
-          activeOpacity={0.9}
-          onPress={() => {
-            setBeautifyTab("face");
-            setBeautifyOption(beautifyFaceOptions[0]);
-          }}
-          style={[
-            styles.beautifyTabButton,
-            beautifyTab === "face" && styles.beautifyTabButtonActive,
-          ]}
-        >
-          <Text
-            style={[
-              styles.beautifyTabText,
-              beautifyTab === "face" && styles.beautifyTabTextActive,
-            ]}
-          >
-            Rosto
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          activeOpacity={0.9}
-          onPress={() => {
-            setBeautifyTab("makeup");
-            setBeautifyOption(beautifyMakeupOptions[0]);
-          }}
-          style={[
-            styles.beautifyTabButton,
-            beautifyTab === "makeup" && styles.beautifyTabButtonActive,
-          ]}
-        >
-          <Text
-            style={[
-              styles.beautifyTabText,
-              beautifyTab === "makeup" && styles.beautifyTabTextActive,
-            ]}
-          >
-            Maquiagem
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      <TouchableOpacity
-        activeOpacity={0.8}
-        onPress={() => {
-          setBeautifyValues((prev) => ({
-            ...prev,
-            [beautifyOption]: 60,
-          }));
-          setBeautifyOption("Ativado");
-        }}
-      >
-        <Text style={styles.beautifyResetText}>Redefinir</Text>
-      </TouchableOpacity>
-    </View>
-
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.beautifyOptionsRow}
-    >
-      {(beautifyTab === "face"
-        ? beautifyFaceOptions
-        : beautifyMakeupOptions
-      ).map((option) => {
-        const active = beautifyOption === option;
-        return (
-          <TouchableOpacity
-            key={option}
-            activeOpacity={0.9}
-            onPress={() => setBeautifyOption(option)}
-            style={styles.beautifyOptionItem}
-          >
-            <View
-              style={[
-                styles.beautifyOptionCircle,
-                active && styles.beautifyOptionCircleActive,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.beautifyOptionIcon,
-                  active && styles.beautifyOptionIconActive,
-                ]}
+        {showBeautifyPanel && (
+          <View style={styles.beautifyPanel}>
+            <View style={styles.beautifySliderRow}>
+              <View
+                style={styles.beautifySliderTrack}
+                onLayout={(e) =>
+                  setBeautifyTrackWidth(e.nativeEvent.layout.width)
+                }
+                onStartShouldSetResponder={() => true}
+                onMoveShouldSetResponder={() => true}
+                onResponderGrant={handleBeautifyValueFromGesture}
+                onResponderMove={handleBeautifyValueFromGesture}
               >
-                ●
-              </Text>
+                <View
+                  style={[
+                    styles.beautifySliderFill,
+                    { width: `${beautifyValue}%` },
+                  ]}
+                />
+                <View
+                  style={[
+                    styles.beautifySliderThumb,
+                    { left: `${beautifyValue}%` },
+                  ]}
+                />
+              </View>
+              <Text style={styles.beautifyValueLabel}>{beautifyValue}</Text>
             </View>
-            <Text
-              style={[
-                styles.beautifyOptionLabel,
-                active && styles.beautifyOptionLabelActive,
-              ]}
+
+            <View style={styles.beautifyTabsRow}>
+              <View style={styles.beautifyTabsLeft}>
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  onPress={() => {
+                    setBeautifyTab("face");
+                    setBeautifyOption(beautifyFaceOptions[0]);
+                  }}
+                  style={[
+                    styles.beautifyTabButton,
+                    beautifyTab === "face" && styles.beautifyTabButtonActive,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.beautifyTabText,
+                      beautifyTab === "face" && styles.beautifyTabTextActive,
+                    ]}
+                  >
+                    Rosto
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  onPress={() => {
+                    setBeautifyTab("makeup");
+                    setBeautifyOption(beautifyMakeupOptions[0]);
+                  }}
+                  style={[
+                    styles.beautifyTabButton,
+                    beautifyTab === "makeup" && styles.beautifyTabButtonActive,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.beautifyTabText,
+                      beautifyTab === "makeup" && styles.beautifyTabTextActive,
+                    ]}
+                  >
+                    Maquiagem
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.beautifyTabsRight}>
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    setBeautifyValues((prev) => ({
+                      ...prev,
+                      [beautifyOption]: 60,
+                    }));
+                    setBeautifyOption("Ativado");
+                  }}
+                >
+                  <Text style={styles.beautifyResetText}>Redefinir</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  onPress={handleApplyBeautifyAi}
+                  disabled={aiProcessing || mediaType !== "image"}
+                >
+                  <Text style={styles.beautifyApplyText}>
+                    {aiProcessing ? "IA..." : "Aplicar IA"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.beautifyOptionsRow}
             >
-              {option}
-            </Text>
-          </TouchableOpacity>
-        );
-      })}
-    </ScrollView>
-  </View>
-)}
+              {(beautifyTab === "face"
+                ? beautifyFaceOptions
+                : beautifyMakeupOptions
+              ).map((option) => {
+                const active = beautifyOption === option;
+                return (
+                  <TouchableOpacity
+                    key={option}
+                    activeOpacity={0.9}
+                    onPress={() => setBeautifyOption(option)}
+                    style={styles.beautifyOptionItem}
+                  >
+                    <View
+                      style={[
+                        styles.beautifyOptionCircle,
+                        active && styles.beautifyOptionCircleActive,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.beautifyOptionIcon,
+                          active && styles.beautifyOptionIconActive,
+                        ]}
+                      >
+                        ●
+                      </Text>
+                    </View>
+                    <Text
+                      style={[
+                        styles.beautifyOptionLabel,
+                        active && styles.beautifyOptionLabelActive,
+                      ]}
+                    >
+                      {option}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        )}
         {effectsOpen && (
           <View style={styles.quickAdjustRow}>
             {quickAdjustments.map((item) => {
@@ -953,6 +1093,19 @@ const handleToolPress = (key: string) => {
                 </TouchableOpacity>
               );
             })}
+
+            <TouchableOpacity
+              activeOpacity={0.9}
+              style={styles.aiApplyButton}
+              onPress={handleApplyFilterAi}
+              disabled={aiProcessing || mediaType !== "image"}
+            >
+              {aiProcessing ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.aiApplyButtonText}>IA</Text>
+              )}
+            </TouchableOpacity>
           </View>
         )}
         <View style={styles.legendRow}>
@@ -972,16 +1125,28 @@ const handleToolPress = (key: string) => {
           </TouchableOpacity>
 
           <TouchableOpacity activeOpacity={0.9} style={styles.audienceChipAlt}>
-            <Text style={styles.audienceChipAltText}>{secondaryAudienceLabel}</Text>
+            <Text style={styles.audienceChipAltText}>
+              {secondaryAudienceLabel}
+            </Text>
           </TouchableOpacity>
+
+          {aiTempUri ? (
+            <TouchableOpacity
+              activeOpacity={0.9}
+              onPress={handleRevertAi}
+              style={styles.aiRevertButton}
+            >
+              <Text style={styles.aiRevertButtonText}>Reverter</Text>
+            </TouchableOpacity>
+          ) : null}
 
           <TouchableOpacity
             activeOpacity={0.9}
             onPress={handleSend}
             style={styles.sendButton}
-            disabled={sending || exporting}
+            disabled={sending || exporting || aiProcessing}
           >
-            {sending || exporting ? (
+            {sending || exporting || aiProcessing ? (
               <ActivityIndicator color="#fff" />
             ) : (
               <Text style={styles.sendIcon}>➜</Text>
@@ -990,7 +1155,6 @@ const handleToolPress = (key: string) => {
         </View>
       </View>
 
-      {/* Carrossel de filtros inline ao tocar em Reestilizar */}
       <View
         style={[styles.carouselWrap, !showInlineFilters && { opacity: 0 }]}
         pointerEvents={showInlineFilters ? "auto" : "none"}
@@ -1018,9 +1182,6 @@ const handleToolPress = (key: string) => {
         />
       </View>
 
-      {/* Modal de filtros completo */}
-
-      {/* Modais de ferramentas (Etapa 1) */}
       <Modal
         visible={activeToolSheet === "text"}
         transparent
@@ -1028,7 +1189,12 @@ const handleToolPress = (key: string) => {
         onRequestClose={() => setActiveToolSheet(null)}
       >
         <View style={styles.toolModalOverlay}>
-          <View style={[styles.textToolContainer, { paddingBottom: insets.bottom + 24 }]}>
+          <View
+            style={[
+              styles.textToolContainer,
+              { paddingBottom: insets.bottom + 24 },
+            ]}
+          >
             <View style={styles.textToolHeader}>
               <TouchableOpacity onPress={() => setActiveToolSheet(null)}>
                 <Text style={styles.textToolHeaderButton}>Cancelar</Text>
@@ -1091,7 +1257,6 @@ const handleToolPress = (key: string) => {
               </TouchableOpacity>
             </View>
 
-            {/* Barra de busca genérica */}
             <View style={styles.searchBar}>
               <Text style={styles.searchIcon}>🔍</Text>
               <TextInput
@@ -1101,7 +1266,6 @@ const handleToolPress = (key: string) => {
               />
             </View>
 
-            {/* Conteúdo de exemplo por ferramenta (Etapa 1 - estático) */}
             {activeToolSheet === "stickers" && (
               <View style={styles.stickersGrid}>
                 {[
@@ -1167,8 +1331,8 @@ const handleToolPress = (key: string) => {
                   Em breve aqui vão os recursos completos de{" "}
                   {activeToolSheet === "effects" && "efeitos"}
                   {activeToolSheet === "draw" && "desenho"}
-                  {activeToolSheet === "save" && "salvar / rascunho"}{" "}
-                  do seu Story.
+                  {activeToolSheet === "save" && "salvar / rascunho"} do seu
+                  Story.
                 </Text>
               </View>
             )}
@@ -1384,7 +1548,7 @@ const styles = StyleSheet.create({
     top: height * 0.16,
   },
   rightToolButton: {
-    flexDirection: "row-reverse", // texto primeiro, ícone depois
+    flexDirection: "row-reverse",
     alignItems: "center",
     marginBottom: 10,
   },
@@ -1482,6 +1646,22 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   audienceChipAltText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 13,
+  },
+  aiRevertButton: {
+    height: 40,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.7)",
+    backgroundColor: "rgba(0,0,0,0.6)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 8,
+  },
+  aiRevertButtonText: {
     color: "#fff",
     fontWeight: "700",
     fontSize: 13,
@@ -1603,7 +1783,6 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     letterSpacing: 0.4,
   },
-
   toolModalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.55)",
@@ -1786,113 +1965,135 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.8)",
     fontSize: 13,
     lineHeight: 18,
-  
   },
   beautifyPanel: {
-  marginBottom: 10,
-  paddingHorizontal: 4,
-},
+    marginBottom: 10,
+    paddingHorizontal: 4,
+  },
   beautifySliderRow: {
-  flexDirection: "row",
-  alignItems: "center",
-  marginBottom: 10,
-},
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 10,
+  },
   beautifySliderTrack: {
-  flex: 1,
-  height: 4,
-  borderRadius: 999,
-  backgroundColor: "rgba(255,255,255,0.25)",
-  overflow: "hidden",
-  position: "relative",
-},
+    flex: 1,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.25)",
+    overflow: "hidden",
+    position: "relative",
+  },
   beautifySliderFill: {
-  position: "absolute",
-  left: 0,
-  top: 0,
-  bottom: 0,
-  backgroundColor: "#ff3366",
-},
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: "#ff3366",
+  },
   beautifySliderThumb: {
-  position: "absolute",
-  top: -8,
-  width: 22,
-  height: 22,
-  marginLeft: -11,
-  borderRadius: 999,
-  backgroundColor: "#fff",
-},
+    position: "absolute",
+    top: -8,
+    width: 22,
+    height: 22,
+    marginLeft: -11,
+    borderRadius: 999,
+    backgroundColor: "#fff",
+  },
   beautifyValueLabel: {
-  marginLeft: 10,
-  color: "#fff",
-  fontWeight: "700",
-  fontSize: 13,
-},
+    marginLeft: 10,
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 13,
+  },
   beautifyTabsRow: {
-  flexDirection: "row",
-  alignItems: "center",
-  justifyContent: "space-between",
-  marginBottom: 8,
-},
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
   beautifyTabsLeft: {
-  flexDirection: "row",
-  gap: 8,
-},
+    flexDirection: "row",
+    gap: 8,
+  },
   beautifyTabButton: {
-  paddingHorizontal: 10,
-  paddingVertical: 4,
-  borderRadius: 999,
-  backgroundColor: "rgba(0,0,0,0.6)",
-},
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: "rgba(0,0,0,0.6)",
+  },
   beautifyTabButtonActive: {
-  backgroundColor: "rgba(255,51,85,0.22)",
-},
+    backgroundColor: "rgba(255,51,85,0.22)",
+  },
   beautifyTabText: {
-  color: "rgba(255,255,255,0.8)",
-  fontSize: 13,
-  fontWeight: "600",
-},
+    color: "rgba(255,255,255,0.8)",
+    fontSize: 13,
+    fontWeight: "600",
+  },
   beautifyTabTextActive: {
-  color: "#fff",
-},
+    color: "#fff",
+  },
   beautifyResetText: {
-  color: "rgba(255,255,255,0.85)",
-  fontSize: 13,
-  fontWeight: "600",
-},
+    color: "rgba(255,255,255,0.85)",
+    fontSize: 13,
+    fontWeight: "600",
+  },
   beautifyOptionsRow: {
-  paddingTop: 6,
-  paddingBottom: 2,
-},
+    paddingTop: 6,
+    paddingBottom: 2,
+  },
   beautifyOptionItem: {
-  alignItems: "center",
-  marginRight: 18,
-},
+    alignItems: "center",
+    marginRight: 18,
+  },
   beautifyOptionCircle: {
-  width: 52,
-  height: 52,
-  borderRadius: 26,
-  backgroundColor: "rgba(0,0,0,0.6)",
-  alignItems: "center",
-  justifyContent: "center",
-  marginBottom: 4,
-},
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 4,
+  },
   beautifyOptionCircleActive: {
-  backgroundColor: "rgba(255,51,85,0.28)",
-},
+    backgroundColor: "rgba(255,51,85,0.28)",
+  },
   beautifyOptionIcon: {
-  color: "rgba(255,255,255,0.85)",
-  fontSize: 18,
-},
+    color: "rgba(255,255,255,0.85)",
+    fontSize: 18,
+  },
   beautifyOptionIconActive: {
-  color: "#fff",
-},
+    color: "#fff",
+  },
   beautifyOptionLabel: {
-  color: "rgba(255,255,255,0.85)",
-  fontSize: 12,
-},
+    color: "rgba(255,255,255,0.85)",
+    fontSize: 12,
+  },
   beautifyOptionLabelActive: {
     color: "#fff",
     fontWeight: "700",
   },
-},
-);
+  aiApplyButton: {
+    height: 32,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    backgroundColor: "rgba(0,149,246,0.9)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 6,
+  },
+  aiApplyButtonText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  beautifyTabsRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  beautifyApplyText: {
+    color: "#0095F6",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+});
