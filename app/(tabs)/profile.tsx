@@ -1813,7 +1813,7 @@ const handleChangeAvatar = useCallback(async () => {
               <Text
                 style={[styles.statLabel, { color: theme.colors.textMuted }]}
               >
-                CRUSH
+                Crush
               </Text>
             </TouchableOpacity>
           </View>
