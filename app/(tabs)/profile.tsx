@@ -1090,7 +1090,7 @@ const handleChangeAvatar = useCallback(async () => {
               .maybeSingle();
 
             if (!reciprocalErr && reciprocal) {
-              setSilentModalTitle("✨ SPARK!");
+              setSilentModalTitle("✨ CRUSH!");
               setSilentModalMessage(
                 "A faísca bateu — vocês se escolheram no silencioso. Que comecem os papos."
               );
@@ -1369,7 +1369,7 @@ const handleChangeAvatar = useCallback(async () => {
                       { color: theme.colors.textMuted },
                     ]}
                   >
-                    Drops
+                    Posts
                   </Text>
                 </View>
                 <View style={styles.statItem}>
@@ -1384,7 +1384,7 @@ const handleChangeAvatar = useCallback(async () => {
                       { color: theme.colors.textMuted },
                     ]}
                   >
-                    Conexões
+                    Seguidores
                   </Text>
                 </View>
                 <View style={styles.statItem}>
@@ -1399,7 +1399,7 @@ const handleChangeAvatar = useCallback(async () => {
                       { color: theme.colors.textMuted },
                     ]}
                   >
-                    Círculos
+                    Seguindo
                   </Text>
                 </View>
                 <View style={styles.statItem}>
@@ -1414,7 +1414,7 @@ const handleChangeAvatar = useCallback(async () => {
                       { color: theme.colors.textMuted },
                     ]}
                   >
-                    Sparks
+                    Crush
                   </Text>
                 </View>
               </View>
@@ -1771,7 +1771,7 @@ const handleChangeAvatar = useCallback(async () => {
               <Text
                 style={[styles.statLabel, { color: theme.colors.textMuted }]}
               >
-                Drops
+                Posts
               </Text>
             </View>
             <TouchableOpacity
@@ -1785,7 +1785,7 @@ const handleChangeAvatar = useCallback(async () => {
               <Text
                 style={[styles.statLabel, { color: theme.colors.textMuted }]}
               >
-                Conexões
+                Seguidores
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -1799,7 +1799,7 @@ const handleChangeAvatar = useCallback(async () => {
               <Text
                 style={[styles.statLabel, { color: theme.colors.textMuted }]}
               >
-                Círculos
+                Seguindo
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -1813,7 +1813,7 @@ const handleChangeAvatar = useCallback(async () => {
               <Text
                 style={[styles.statLabel, { color: theme.colors.textMuted }]}
               >
-                Sparks
+                CRUSH
               </Text>
             </TouchableOpacity>
           </View>

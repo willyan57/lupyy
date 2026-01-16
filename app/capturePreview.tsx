@@ -1,5 +1,4 @@
 import Colors from "@/constants/Colors";
-import { OffscreenLutRenderer } from "@/lib/gl/OffscreenLutRenderer";
 import { compressImage, prepareVideo } from "@/lib/media";
 import { supabase } from "@/lib/supabase";
 import { ResizeMode, Video } from "expo-av";
@@ -30,32 +29,48 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 const { width, height } = Dimensions.get("window");
 
 type CaptureMode = "post" | "story" | "reel";
-type FilterId = "none" | "warm" | "cool" | "pink" | "gold" | "night";
+type FilterId = "face_enhance" | "studio_glow" | "cartoon_soft" | "bw_art";
 
 const FILTERS: {
   id: FilterId;
   name: string;
+  description: string;
   overlay?: string;
   blur?: number;
   vignette?: boolean;
   glow?: boolean;
 }[] = [
-  { id: "none", name: "Normal" },
-  { id: "warm", name: "Quente", overlay: "rgba(255,140,90,0.18)", glow: true },
-  { id: "cool", name: "Frio", overlay: "rgba(70,150,255,0.18)", glow: true },
-  { id: "pink", name: "Rosé", overlay: "rgba(255,80,160,0.16)", glow: true },
   {
-    id: "gold",
-    name: "Dourado",
-    overlay: "rgba(255,220,120,0.16)",
+    id: "face_enhance",
+    name: "Realçar rosto",
+    description:
+      "Suaviza pele, reduz olheiras e dá brilho suave, mantendo o rosto natural e pronto para story.",
+    overlay: "rgba(255,188,160,0.18)",
+    glow: true,
+  },
+  {
+    id: "studio_glow",
+    name: "Foto profissional",
+    description:
+      "Simula luz de estúdio, aumenta contraste e nitidez para parecer foto feita em câmera profissional.",
+    overlay: "rgba(255,255,255,0.12)",
     glow: true,
     vignette: true,
   },
   {
-    id: "night",
-    name: "Night",
-    overlay: "rgba(0,0,0,0.28)",
-    blur: 18,
+    id: "cartoon_soft",
+    name: "Cartoon leve",
+    description:
+      "Transforma a foto em um desenho suave, com cores mais vivas e contornos discretos, sem perder sua identidade.",
+    overlay: "rgba(255,120,180,0.16)",
+    glow: true,
+  },
+  {
+    id: "bw_art",
+    name: "P&B artístico",
+    description:
+      "Converte em preto e branco com contraste alto e clima de filme antigo, deixando tudo mais dramático.",
+    overlay: "rgba(0,0,0,0.26)",
     vignette: true,
   },
 ];
@@ -79,10 +94,11 @@ export default function CapturePreview() {
 
   const insets = useSafeAreaInsets();
 
-  const initialFilter = useMemo(
-    () => String(params.filter ?? "none") as FilterId,
-    [params.filter]
-  );
+  const initialFilter = useMemo(() => {
+    const raw = String(params.filter ?? "face_enhance");
+    const allowed: FilterId[] = ["face_enhance", "studio_glow", "cartoon_soft", "bw_art"];
+    return (allowed.includes(raw as FilterId) ? (raw as FilterId) : "face_enhance");
+  }, [params.filter]);
   const [filter, setFilter] = useState<FilterId>(initialFilter);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [showInlineFilters, setShowInlineFilters] = useState(false);
@@ -113,7 +129,6 @@ export default function CapturePreview() {
   const [userId, setUserId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [mediaLoaded, setMediaLoaded] = useState(false);
-  const [exporting, setExporting] = useState(false);
 
   const [toolsCollapsed, setToolsCollapsed] = useState(true);
   const [caption, setCaption] = useState("");
@@ -161,8 +176,6 @@ export default function CapturePreview() {
   const [aiTempUri, setAiTempUri] = useState<string | null>(null);
 
   const effectiveUri = aiTempUri || uri;
-  const shouldExportWithLut =
-    mediaType === "image" && filter !== "none" && !aiTempUri;
 
   useEffect(() => {
     setMediaLoaded(false);
@@ -488,18 +501,16 @@ export default function CapturePreview() {
 
   function getAiPresetFromFilter() {
     switch (filter) {
-      case "warm":
-        return "cinematic";
-      case "cool":
-        return "realistic";
-      case "pink":
-        return "anime";
-      case "gold":
-        return "vintage";
-      case "night":
-        return "cinematic";
+      case "face_enhance":
+        return "face_enhance_soft";
+      case "studio_glow":
+        return "studio_portrait";
+      case "cartoon_soft":
+        return "cartoon_soft";
+      case "bw_art":
+        return "bw_artistic";
       default:
-        return "realistic";
+        return "face_enhance_soft";
     }
   }
 
@@ -600,12 +611,7 @@ export default function CapturePreview() {
   };
 
   const handleSend = () => {
-    if (!effectiveUri || sending || exporting || aiProcessing) return;
-
-    if (shouldExportWithLut) {
-      setExporting(true);
-      return;
-    }
+    if (!effectiveUri || sending || aiProcessing) return;
 
     void performSendWithUri(effectiveUri);
   };
@@ -691,6 +697,18 @@ export default function CapturePreview() {
 
   const beautifyValue = beautifyValues[beautifyOption] ?? 60;
 
+  const softBlurIntensity = useMemo(() => {
+    const raw = beautifyValues["Suavizar"] ?? 0;
+    return Math.round((raw / 100) * 18);
+  }, [beautifyValues]);
+
+  const beautyBrightOverlay = useMemo(() => {
+    const contrast = beautifyValues["Contraste"] ?? 0;
+    const base = contrast / 100;
+    const opacity = 0.06 + base * 0.12;
+    return `rgba(255,255,255,${opacity.toFixed(2)})`;
+  }, [beautifyValues]);
+
   const handleBeautifyValueFromGesture = (evt: any) => {
     if (!beautifyTrackWidth) return;
     const { locationX } = evt.nativeEvent;
@@ -760,20 +778,33 @@ export default function CapturePreview() {
     }
   };
 
+  function getBeautifyIcon(option: string) {
+    switch (option) {
+      case "Ativado":
+        return "✨";
+      case "Suavizar":
+        return "💧";
+      case "Contraste":
+        return "☀️";
+      case "Dente":
+        return "😁";
+      case "Base":
+        return "🧴";
+      case "Batom":
+        return "💄";
+      case "Sombra":
+        return "👁️";
+      case "Blush":
+        return "🌸";
+      case "Contorno":
+        return "🎭";
+      default:
+        return "●";
+    }
+  }
+
   return (
     <View style={styles.container}>
-      {exporting && shouldExportWithLut && effectiveUri ? (
-        <OffscreenLutRenderer
-          sourceUri={effectiveUri}
-          filter={filter}
-          onFinish={(processedUri) => {
-            setExporting(false);
-            const finalUri = processedUri || effectiveUri;
-            void performSendWithUri(finalUri);
-          }}
-        />
-      ) : null}
-
       {mediaType === "image" ? (
         <Image
           key={`${effectiveUri}::${nonce}::${filter}`}
@@ -875,6 +906,21 @@ export default function CapturePreview() {
         />
       )}
 
+      {softBlurIntensity > 0 && Platform.OS !== "web" && (
+        <View pointerEvents="none" style={styles.beautifySoftWrap}>
+          <BlurView
+            intensity={softBlurIntensity}
+            tint="dark"
+            style={StyleSheet.absoluteFill}
+          />
+        </View>
+      )}
+
+      <View
+        pointerEvents="none"
+        style={[styles.beautifyLightOverlay, { backgroundColor: beautyBrightOverlay }]}
+      />
+
       <Animated.View
         pointerEvents="none"
         style={[
@@ -885,7 +931,7 @@ export default function CapturePreview() {
         <Text style={styles.filterLabelText}>{activeFilter.name}</Text>
       </Animated.View>
 
-      {((!mediaLoaded && !exporting) || aiProcessing) && (
+      {((!mediaLoaded) || aiProcessing) && (
         <View style={styles.loadingOverlay}>
           <ActivityIndicator color="#fff" />
         </View>
@@ -1071,7 +1117,7 @@ export default function CapturePreview() {
                           active && styles.beautifyOptionIconActive,
                         ]}
                       >
-                        ●
+                        {getBeautifyIcon(option)}
                       </Text>
                     </View>
                     <Text
@@ -1164,9 +1210,9 @@ export default function CapturePreview() {
             activeOpacity={0.9}
             onPress={handleSend}
             style={styles.sendButton}
-            disabled={sending || exporting || aiProcessing}
+            disabled={sending || aiProcessing}
           >
-            {sending || exporting || aiProcessing ? (
+            {sending || aiProcessing ? (
               <ActivityIndicator color="#fff" />
             ) : (
               <Text style={styles.sendIcon}>➜</Text>
@@ -1371,7 +1417,7 @@ export default function CapturePreview() {
         >
           <Pressable style={styles.sheet} onPress={() => {}}>
             <View style={styles.sheetHandle} />
-            <Text style={styles.sheetTitle}>Filtros</Text>
+            <Text style={styles.sheetTitle}>IA Criativa</Text>
 
             <View style={styles.filtersGrid}>
               {FILTERS.map((f) => {
@@ -1399,6 +1445,9 @@ export default function CapturePreview() {
                       ]}
                     >
                       {f.name}
+                    </Text>
+                    <Text style={styles.filterChipDescription} numberOfLines={2}>
+                      {f.description}
                     </Text>
                   </TouchableOpacity>
                 );
@@ -1511,6 +1560,20 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.16)",
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(255,255,255,0.25)",
+  },
+  beautifySoftWrap: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  beautifyLightOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   filterLabel: {
     position: "absolute",
@@ -1790,6 +1853,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   filterChipTextActive: { color: "#fff" },
+  filterChipDescription: {
+    color: "rgba(255,255,255,0.7)",
+    fontSize: 11,
+    marginTop: 2,
+    textAlign: "center",
+  },
   sheetDone: {
     marginTop: 16,
     height: 52,

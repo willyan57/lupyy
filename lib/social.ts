@@ -17,7 +17,7 @@ export type FollowState = {
 
 export type FollowUpdateResult = {
   interestType: InterestType;
-  spark: boolean;
+  crush: boolean;
 };
 
 export async function fetchSocialStats(userId: string): Promise<SocialStats | null> {
@@ -79,7 +79,7 @@ export async function setFollowInterestType(
   interestType: InterestType
 ): Promise<FollowUpdateResult> {
   if (!followerId || !followingId || followerId === followingId) {
-    return { interestType, spark: false };
+    return { interestType, crush: false };
   }
 
   const { data, error } = await supabase
@@ -99,7 +99,7 @@ export async function setFollowInterestType(
     throw error;
   }
 
-  let spark = false;
+  let crush = false;
 
   if (interestType === "crush" || interestType === "silent_crush") {
     const { data: reciprocal, error: reciprocalErr } = await supabase
@@ -111,7 +111,7 @@ export async function setFollowInterestType(
       .maybeSingle();
 
     if (!reciprocalErr && reciprocal) {
-      spark = true;
+      crush = true;
     }
   }
 
@@ -119,7 +119,7 @@ export async function setFollowInterestType(
 
   return {
     interestType: row.interest_type,
-    spark,
+    crush,
   };
 }
 
