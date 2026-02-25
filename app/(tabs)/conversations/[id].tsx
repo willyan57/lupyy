@@ -90,7 +90,7 @@ export default function ConversationScreen() {
 const handleOpenProfileFromHeader = () => {
   if (!otherUserId) return;
   router.push({
-    pathname: "/profile",
+    pathname: "/(tabs)/profile",
     params: { userId: otherUserId },
   });
 };

@@ -202,7 +202,7 @@ export default function ConversationsScreen() {
   useFocusEffect(
     useCallback(() => {
       const onBackPress = () => {
-        router.replace("/feed");
+        router.replace("/(tabs)/feed");
         return true;
       };
 
