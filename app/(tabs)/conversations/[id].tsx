@@ -3,6 +3,7 @@ import { touchUserPresence, useUserPresence } from "@/lib/presence";
 import { supabase } from "@/lib/supabase";
 import { useTypingIndicator } from "@/lib/useTypingIndicator";
 import * as Clipboard from "expo-clipboard";
+import * as FileSystem from "expo-file-system";
 import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
@@ -86,6 +87,18 @@ export default function ConversationScreen() {
 
   const isWeb = Platform.OS === "web";
   const isCrush = conversationType === "crush";
+
+  async function ensureLocalFileUri(inputUri: string): Promise<string> {
+    if (!inputUri) return inputUri;
+    if (Platform.OS === "web") return inputUri;
+    if (inputUri.startsWith("file://")) return inputUri;
+    if (inputUri.startsWith("content://")) {
+      const dest = `${FileSystem.cacheDirectory}lupyy_chat_${Date.now()}.jpg`;
+      await FileSystem.copyAsync({ from: inputUri, to: dest });
+      return dest;
+    }
+    return inputUri;
+  }
 
 const handleOpenProfileFromHeader = () => {
   if (!otherUserId) return;
@@ -326,42 +339,24 @@ const handleOpenProfileFromHeader = () => {
       const asset = result.assets[0];
       setUploadingMedia(true);
 
-      const uri = asset.uri;
+      const uri = await ensureLocalFileUri(asset.uri);
       const guessedName =
         (asset as any).fileName ?? uri.split("/").pop() ?? "image";
       const fileExt = guessedName.split(".").pop() ?? "jpg";
       const filePath = `${conversationId}/${Date.now()}-${authUserId}.${fileExt}`;
 
-      let uploadError: any = null;
+      // Upload unificado (Web + Native) via blob.
+      // Evita bug clássico no Android quando o picker retorna content://
+      // e o arquivo não é lido corretamente pelo storage SDK.
+      const response = await fetch(uri);
+      const blob = await response.blob();
 
-      if (Platform.OS === "web") {
-        const response = await fetch(uri);
-        const blob = await response.blob();
-
-        const { error } = await supabase.storage
-          .from("conversation_media")
-          .upload(filePath, blob, {
-            contentType: asset.mimeType ?? "image/jpeg",
-            upsert: false,
-          });
-
-        uploadError = error;
-      } else {
-        const file = {
-          uri,
-          name: guessedName,
-          type: asset.mimeType ?? "image/jpeg",
-        } as any;
-
-        const { error } = await supabase.storage
-          .from("conversation_media")
-          .upload(filePath, file, {
-            contentType: asset.mimeType ?? "image/jpeg",
-            upsert: false,
-          });
-
-        uploadError = error;
-      }
+      const { error: uploadError } = await supabase.storage
+        .from("conversation_media")
+        .upload(filePath, blob, {
+          contentType: asset.mimeType ?? "image/jpeg",
+          upsert: false,
+        });
 
       if (uploadError) {
         setUploadingMedia(false);
