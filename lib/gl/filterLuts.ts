@@ -2,39 +2,24 @@
 import type { FilterId } from "@/lib/mediaFilters/applyFilterAndExport";
 
 /**
- * Fonte genérica de LUT: pode ser um require() estático ou um URI.
- * No seu LutRenderer atual você já usa algo assim.
+ * Fonte de LUT:
+ * - number: require("...png") (Metro bundler)
+ * - string: URI (se você quiser carregar remoto no futuro)
  */
 export type LutSource = number | string | null;
 
-/**
- * Retorna a LUT correspondente ao filtro selecionado.
- * Por enquanto está com `null` como placeholder para não quebrar nada.
- * Na próxima mini-etapa a gente pluga aqui os requires reais dos PNGs.
- */
 export function getLutForFilter(filter: FilterId): LutSource {
   switch (filter) {
     case "warm":
-      // TODO: substituir pelo asset real
-      // ex: return require("@/assets/luts/warm.png");
-      return null;
-
+      return require("@/assets/luts/warm.png");
     case "cool":
-      // ex: return require("@/assets/luts/cool.png");
-      return null;
-
+      return require("@/assets/luts/cool.png");
     case "pink":
-      // ex: return require("@/assets/luts/pink.png");
-      return null;
-
+      return require("@/assets/luts/pink.png");
     case "gold":
-      // ex: return require("@/assets/luts/gold.png");
-      return null;
-
+      return require("@/assets/luts/gold.png");
     case "night":
-      // ex: return require("@/assets/luts/night.png");
-      return null;
-
+      return require("@/assets/luts/night.png");
     case "none":
     default:
       return null;

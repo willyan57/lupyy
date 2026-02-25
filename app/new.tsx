@@ -6,7 +6,7 @@ import * as FileSystem from "expo-file-system";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useVideoPlayer, VideoPlayer, VideoView } from "expo-video";
 import * as VideoThumbnails from "expo-video-thumbnails";
 import { useEffect, useState } from "react";
@@ -40,6 +40,8 @@ const MAX_CAPTION_LENGTH = 2200;
 
 export default function New() {
   const { theme } = useTheme();
+
+  const router = useRouter();
 
   const params = useLocalSearchParams<{
     source?: string;
@@ -143,6 +145,27 @@ export default function New() {
         selectionLimit: 10,
       });
       if (result.canceled) return;
+
+      // Web/desktop: depois de escolher a mídia, vamos direto para o editor CapturePreview
+      if (Platform.OS === "web") {
+        const asset = result.assets?.[0];
+        if (!asset) return;
+
+        const kind: "image" | "video" =
+          asset.type === "video" ? "video" : "image";
+
+        router.push({
+          pathname: "/capturePreview" as any,
+          params: {
+            uri: asset.uri,
+            mediaType: kind,
+            mode: composerMode,
+            nonce: String(Date.now()),
+          },
+        });
+
+        return;
+      }
 
       const picked: Picked[] = [];
 
@@ -635,6 +658,8 @@ export default function New() {
   const gradStart = theme.colors.primary;
   const gradEnd = theme.colors.accent ?? theme.colors.primary;
 
+  const isWebComposer = Platform.OS === "web";
+
   const captionLength = caption.length;
 
   function handleCaptionChange(text: string) {
@@ -673,7 +698,69 @@ export default function New() {
         .join(" · ")
     : "Nenhum ajuste de luz e cor";
 
-  return (
+  
+  if (isWebComposer) {
+    return (
+      <ScrollView
+        style={{ flex: 1, backgroundColor: theme.colors.background }}
+        contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
+      >
+        <Text style={[styles.title, { color: theme.colors.text }]}>
+          Criar conteúdo
+        </Text>
+
+        <View style={styles.modeSwitcher}>
+          <ModeButton
+            label="Post"
+            active={composerMode === "post"}
+            onPress={() => setComposerMode("post")}
+          />
+          <ModeButton
+            label="Story"
+            active={composerMode === "story"}
+            onPress={() => setComposerMode("story")}
+          />
+          <ModeButton
+            label="Reel"
+            active={composerMode === "reel"}
+            onPress={() => setComposerMode("reel")}
+          />
+        </View>
+
+        <View
+          style={[
+            styles.placeholder,
+            {
+              borderColor: theme.colors.border,
+              backgroundColor: theme.colors.surface,
+            },
+          ]}
+        >
+          <Text style={{ color: theme.colors.textMuted }}>
+            Nenhuma mídia selecionada
+          </Text>
+        </View>
+
+        <TouchableOpacity onPress={pickMedia} style={styles.pickBtn}>
+          <LinearGradient colors={[gradStart, gradEnd]} style={styles.pickBtnBg}>
+            <Text style={styles.pickBtnText}>Escolher da galeria</Text>
+          </LinearGradient>
+        </TouchableOpacity>
+
+        <Text
+          style={{
+            color: theme.colors.textMuted,
+            fontSize: 12,
+            marginTop: 4,
+          }}
+        >
+          Depois de escolher a mídia, você fará todos os ajustes na próxima tela.
+        </Text>
+      </ScrollView>
+    );
+  }
+
+return (
     <ScrollView
       style={{ flex: 1, backgroundColor: theme.colors.background }}
       contentContainerStyle={{ padding: 16, paddingBottom: 32 }}

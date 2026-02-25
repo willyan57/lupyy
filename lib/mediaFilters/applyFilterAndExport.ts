@@ -3,56 +3,74 @@ import * as ImageManipulator from "expo-image-manipulator";
 export type FilterId = "none" | "warm" | "cool" | "pink" | "gold" | "night";
 export type MediaType = "image" | "video";
 
-/**
- * Nesta etapa, só reprocessamos/comprimimos a FOTO de forma uniforme.
- * O "efeito" ainda não muda cor/brilho de verdade; isso entra depois com LUT/GL.
- */
+export type QuickAdjustmentId = "none" | "brighten" | "darken" | "vivid";
 
-function buildActions(filter: FilterId): ImageManipulator.Action[] {
-  // rotate: 0 é uma operação "no-op" válida, só pra acionar o manipulateAsync.
-  switch (filter) {
-    case "warm":
-    case "cool":
-    case "pink":
-    case "gold":
-    case "night":
-      return [{ rotate: 0 }];
-    case "none":
-    default:
-      return [];
-  }
+export type ExportEffects = {
+  filter: FilterId;
+  quickAdjustment: QuickAdjustmentId;
+  beautify: Record<string, number>;
+};
+
+export type ApplyFilterArgs = {
+  uri: string;
+  mediaType: MediaType;
+  effects: ExportEffects;
+};
+
+/**
+ * Export "base" (re-encode) para garantir arquivo estável.
+ * - LUT/GL acontece fora daqui (OffscreenLutRenderer), porque ImageManipulator não aplica cor/LUT.
+ * - Aqui só fazemos um no-op controlado quando existe qualquer efeito selecionado.
+ */
+function shouldReencode(effects: ExportEffects) {
+  if (effects.filter !== "none") return true;
+  if (effects.quickAdjustment !== "none") return true;
+  // Qualquer ajuste de embelezar != 60 dispara reencode
+  return Object.values(effects.beautify || {}).some((v) => typeof v === "number" && v !== 60);
 }
 
 export async function applyFilterAndExport(
-  uri: string,
-  mediaType: MediaType,
-  filter: FilterId
+  argsOrUri: ApplyFilterArgs | string,
+  mediaType?: MediaType,
+  filter?: FilterId
 ): Promise<string> {
-  if (!uri) return uri;
+  // Compat: assinatura antiga applyFilterAndExport(uri, mediaType, filter)
+  const args: ApplyFilterArgs =
+    typeof argsOrUri === "string"
+      ? {
+          uri: argsOrUri,
+          mediaType: (mediaType ?? "image") as MediaType,
+          effects: {
+            filter: (filter ?? "none") as FilterId,
+            quickAdjustment: "none",
+            beautify: {},
+          },
+        }
+      : argsOrUri;
 
-  // Só tratamos foto por enquanto
-  if (mediaType !== "image") {
-    return uri;
-  }
+  if (!args.uri) return args.uri;
 
-  const actions = buildActions(filter);
+  // Só tratamos foto aqui
+  if (args.mediaType !== "image") return args.uri;
 
-  if (!actions.length) {
-    return uri;
+  const effects = args.effects ?? { filter: "none", quickAdjustment: "none", beautify: {} };
+
+  if (!shouldReencode(effects)) {
+    return args.uri;
   }
 
   try {
-    const result = await ImageManipulator.manipulateAsync(uri, actions, {
-      compress: 0.92,
-      format: ImageManipulator.SaveFormat.JPEG,
-    });
+    const result = await ImageManipulator.manipulateAsync(
+      args.uri,
+      [{ rotate: 0 }], // no-op que força export
+      {
+        compress: 0.92,
+        format: ImageManipulator.SaveFormat.JPEG,
+      }
+    );
 
-    if (!result || !result.uri) {
-      return uri;
-    }
-
-    return result.uri;
+    return result?.uri || args.uri;
   } catch {
-    return uri;
+    return args.uri;
   }
 }
