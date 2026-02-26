@@ -2,7 +2,6 @@ import Colors from "@/constants/Colors";
 import { touchUserPresence, useUserPresence } from "@/lib/presence";
 import { supabase } from "@/lib/supabase";
 import { useTypingIndicator } from "@/lib/useTypingIndicator";
-import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import * as Clipboard from "expo-clipboard";
 import * as FileSystem from "expo-file-system";
 import * as ImagePicker from "expo-image-picker";
@@ -13,6 +12,7 @@ import {
   Alert,
   FlatList,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -76,10 +76,11 @@ export default function ConversationScreen() {
     {}
   );
 
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
   const listRef = useRef<FlatList<DbMessage>>(null);
   const inputRef = useRef<TextInput | null>(null);
   const insets = useSafeAreaInsets();
-  const tabBarHeight = useBottomTabBarHeight();
 
   const { label: presenceLabel, isOnline } = useUserPresence(otherUserId);
   const { isSomeoneTyping, reportTyping } = useTypingIndicator({
@@ -102,55 +103,6 @@ export default function ConversationScreen() {
     return inputUri;
   }
 
-  function base64ToUint8Array(base64: string) {
-    const chars =
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    const lookup: Record<string, number> = {};
-    for (let i = 0; i < chars.length; i++) lookup[chars[i]] = i;
-
-    let bufferLength = base64.length * 0.75;
-    if (base64.endsWith("==")) bufferLength -= 2;
-    else if (base64.endsWith("=")) bufferLength -= 1;
-
-    const bytes = new Uint8Array(bufferLength);
-    let p = 0;
-
-    for (let i = 0; i < base64.length; i += 4) {
-      const encoded1 = lookup[base64[i]];
-      const encoded2 = lookup[base64[i + 1]];
-      const encoded3 = lookup[base64[i + 2]];
-      const encoded4 = lookup[base64[i + 3]];
-
-      const chunk =
-        (encoded1 << 18) |
-        (encoded2 << 12) |
-        ((encoded3 & 63) << 6) |
-        (encoded4 & 63);
-
-      if (p < bufferLength) bytes[p++] = (chunk >> 16) & 255;
-      if (p < bufferLength) bytes[p++] = (chunk >> 8) & 255;
-      if (p < bufferLength) bytes[p++] = chunk & 255;
-    }
-
-    return bytes;
-  }
-
-  async function getUploadBodyFromUri(uri: string): Promise<Blob | Uint8Array> {
-    if (Platform.OS === "web") {
-      const res = await fetch(uri);
-      return await res.blob();
-    }
-
-    const localUri = await ensureLocalFileUri(uri);
-    const base64 = await FileSystem.readAsStringAsync(localUri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-
-    return base64ToUint8Array(base64);
-  }
-
-
-
 const handleOpenProfileFromHeader = () => {
   if (!otherUserId) return;
   router.push({
@@ -168,6 +120,21 @@ const handleOpenProfileFromHeader = () => {
     if (!messages.length) return;
     listRef.current?.scrollToEnd({ animated: true });
   }, [messages.length]);
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener("keyboardDidShow", (e) => {
+      const h = e?.endCoordinates?.height ?? 0;
+      setKeyboardHeight(h);
+    });
+    const hideSub = Keyboard.addListener("keyboardDidHide", () => {
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -399,11 +366,12 @@ const handleOpenProfileFromHeader = () => {
       // Upload unificado (Web + Native) via blob.
       // Evita bug clássico no Android quando o picker retorna content://
       // e o arquivo não é lido corretamente pelo storage SDK.
-      const body = await getUploadBodyFromUri(uri);
+      const response = await fetch(uri);
+      const blob = await response.blob();
 
       const { error: uploadError } = await supabase.storage
         .from("conversation_media")
-        .upload(filePath, body as any, {
+        .upload(filePath, blob, {
           contentType: asset.mimeType ?? "image/jpeg",
           upsert: false,
         });
@@ -649,12 +617,12 @@ const handleOpenProfileFromHeader = () => {
   return (
     <SafeAreaView
       style={[styles.safe, isCrush && styles.safeCrush]}
-      edges={["top", "right", "left"]}
+      edges={["top", "right", "left", "bottom"]}
     >
       <KeyboardAvoidingView
         style={styles.safe}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        keyboardVerticalOffset={Platform.OS === "ios" ? tabBarHeight : 0}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 80 : insets.bottom}
       >
         <View style={[styles.header, isCrush && styles.headerCrush]}>
           <TouchableOpacity
@@ -757,7 +725,11 @@ const handleOpenProfileFromHeader = () => {
             <View
               style={[
                 styles.inputBar,
-                { paddingBottom: 10 + (Platform.OS === "android" ? Math.min(insets.bottom, 8) : insets.bottom) },
+                {
+                  paddingBottom:
+                    10 + (keyboardHeight > 0 ? 0 : insets.bottom),
+                  marginBottom: keyboardHeight,
+                },
               ]}
             >
               <TouchableOpacity
