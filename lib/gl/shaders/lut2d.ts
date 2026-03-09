@@ -17,6 +17,13 @@ uniform float uSaturation;
 uniform float uSmoothing;
 uniform float uWhitenTeeth;
 uniform float uBaseGlow;
+uniform float uSharpness;
+uniform float uTemperature;
+uniform float uVignette;
+uniform float uGrain;
+uniform float uFade;
+uniform float uHighlights;
+uniform float uShadows;
 
 vec3 applyLut2D(vec3 color) {
   float size = 64.0;
@@ -52,21 +59,60 @@ vec3 sampleSmoothed(vec2 uv, float radius) {
   return sum / count;
 }
 
+float rand(vec2 co) {
+  return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453);
+}
+
 void main() {
   vec4 src = texture2D(uImage, vUv);
   vec3 color = src.rgb;
 
+  // Smoothing (skin softening)
   if (uSmoothing > 0.01) {
     vec3 smoothed = sampleSmoothed(vUv, uSmoothing * 3.0);
     color = mix(color, smoothed, uSmoothing * 0.7);
   }
 
+  // Sharpness (unsharp mask)
+  if (uSharpness > 0.01) {
+    vec3 blurred = sampleSmoothed(vUv, 1.5);
+    vec3 sharp = color + (color - blurred) * uSharpness * 2.0;
+    color = clamp(sharp, 0.0, 1.0);
+  }
+
+  // Brightness
   color += uBrightness;
+
+  // Contrast
   color = (color - 0.5) * uContrast + 0.5;
 
+  // Highlights & Shadows
+  if (abs(uHighlights) > 0.01 || abs(uShadows) > 0.01) {
+    float lum = dot(color, vec3(0.299, 0.587, 0.114));
+    float highlightMask = smoothstep(0.5, 1.0, lum);
+    float shadowMask = 1.0 - smoothstep(0.0, 0.5, lum);
+    color += uHighlights * highlightMask * 0.15;
+    color += uShadows * shadowMask * 0.15;
+  }
+
+  // Saturation
   float luminance = dot(color, vec3(0.299, 0.587, 0.114));
   color = mix(vec3(luminance), color, uSaturation);
 
+  // Temperature (warm/cool shift)
+  if (abs(uTemperature) > 0.01) {
+    color.r += uTemperature * 0.06;
+    color.b -= uTemperature * 0.06;
+    color.g += uTemperature * 0.02;
+  }
+
+  // Fade (lift blacks)
+  if (uFade > 0.01) {
+    color = mix(color, color + vec3(uFade * 0.15), 1.0 - smoothstep(0.0, 0.3, luminance));
+    color = max(color, vec3(uFade * 0.08));
+  }
+
+  // Whiten teeth
   if (uWhitenTeeth > 0.01) {
     float yellowish = max(0.0, color.r + color.g - 2.0 * color.b) * 0.25;
     float skinLike = step(0.15, color.r) * step(color.r, 0.95);
@@ -75,14 +121,30 @@ void main() {
     color = mix(color, vec3(luminance + 0.05), whitenAmount * 0.3);
   }
 
+  // Base glow
   if (uBaseGlow > 0.01) {
     float glowAmount = uBaseGlow * 0.12;
     color += glowAmount;
     color = mix(color, smoothstep(0.0, 1.0, color), uBaseGlow * 0.3);
   }
 
+  // Vignette (shader-based, much smoother than overlay)
+  if (uVignette > 0.01) {
+    vec2 center = vUv - 0.5;
+    float dist = length(center) * 1.414;
+    float vig = smoothstep(0.4, 1.2, dist);
+    color *= 1.0 - vig * uVignette * 0.6;
+  }
+
+  // Film grain
+  if (uGrain > 0.01) {
+    float noise = rand(vUv * 800.0 + fract(uGrain * 100.0)) - 0.5;
+    color += noise * uGrain * 0.12;
+  }
+
   color = clamp(color, 0.0, 1.0);
 
+  // LUT
   vec3 lutColor = applyLut2D(color);
   vec3 finalColor = mix(color, lutColor, uIntensity);
 
@@ -100,6 +162,13 @@ uniform float uSaturation;
 uniform float uSmoothing;
 uniform float uWhitenTeeth;
 uniform float uBaseGlow;
+uniform float uSharpness;
+uniform float uTemperature;
+uniform float uVignette;
+uniform float uGrain;
+uniform float uFade;
+uniform float uHighlights;
+uniform float uShadows;
 
 vec3 applyLut2D(vec3 color) {
   float size = 64.0;
@@ -120,10 +189,15 @@ vec3 applyLut2D(vec3 color) {
   return mix(c0, c1, z);
 }
 
+float rand(vec2 co) {
+  return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453);
+}
+
 void main() {
   vec4 src = texture2D(uImage, vUv);
   vec3 color = src.rgb;
 
+  // Smoothing
   if (uSmoothing > 0.01) {
     vec2 step = vec2(uSmoothing * 3.0 / 512.0);
     vec3 sum = vec3(0.0);
@@ -138,12 +212,55 @@ void main() {
     color = mix(color, smoothed, uSmoothing * 0.7);
   }
 
+  // Sharpness
+  if (uSharpness > 0.01) {
+    vec2 step = vec2(1.5 / 512.0);
+    vec3 blurSum = vec3(0.0);
+    float blurCount = 0.0;
+    for (float dx = -2.0; dx <= 2.0; dx += 1.0) {
+      for (float dy = -2.0; dy <= 2.0; dy += 1.0) {
+        blurSum += texture2D(uImage, vUv + vec2(dx, dy) * step).rgb;
+        blurCount += 1.0;
+      }
+    }
+    vec3 blurred = blurSum / blurCount;
+    vec3 sharp = color + (color - blurred) * uSharpness * 2.0;
+    color = clamp(sharp, 0.0, 1.0);
+  }
+
+  // Brightness
   color += uBrightness;
+
+  // Contrast
   color = (color - 0.5) * uContrast + 0.5;
 
+  // Highlights & Shadows
+  if (abs(uHighlights) > 0.01 || abs(uShadows) > 0.01) {
+    float lum = dot(color, vec3(0.299, 0.587, 0.114));
+    float highlightMask = smoothstep(0.5, 1.0, lum);
+    float shadowMask = 1.0 - smoothstep(0.0, 0.5, lum);
+    color += uHighlights * highlightMask * 0.15;
+    color += uShadows * shadowMask * 0.15;
+  }
+
+  // Saturation
   float luminance = dot(color, vec3(0.299, 0.587, 0.114));
   color = mix(vec3(luminance), color, uSaturation);
 
+  // Temperature
+  if (abs(uTemperature) > 0.01) {
+    color.r += uTemperature * 0.06;
+    color.b -= uTemperature * 0.06;
+    color.g += uTemperature * 0.02;
+  }
+
+  // Fade
+  if (uFade > 0.01) {
+    color = mix(color, color + vec3(uFade * 0.15), 1.0 - smoothstep(0.0, 0.3, luminance));
+    color = max(color, vec3(uFade * 0.08));
+  }
+
+  // Whiten teeth
   if (uWhitenTeeth > 0.01) {
     float yellowish = max(0.0, color.r + color.g - 2.0 * color.b) * 0.25;
     float skinLike = step(0.15, color.r) * step(color.r, 0.95);
@@ -152,10 +269,25 @@ void main() {
     color = mix(color, vec3(luminance + 0.05), whitenAmount * 0.3);
   }
 
+  // Base glow
   if (uBaseGlow > 0.01) {
     float glowAmount = uBaseGlow * 0.12;
     color += glowAmount;
     color = mix(color, smoothstep(0.0, 1.0, color), uBaseGlow * 0.3);
+  }
+
+  // Vignette
+  if (uVignette > 0.01) {
+    vec2 center = vUv - 0.5;
+    float dist = length(center) * 1.414;
+    float vig = smoothstep(0.4, 1.2, dist);
+    color *= 1.0 - vig * uVignette * 0.6;
+  }
+
+  // Film grain
+  if (uGrain > 0.01) {
+    float noise = rand(vUv * 800.0 + fract(uGrain * 100.0)) - 0.5;
+    color += noise * uGrain * 0.12;
   }
 
   color = clamp(color, 0.0, 1.0);

@@ -81,6 +81,13 @@ export function OffscreenLutRenderer({
         const uSmoothing = gl.getUniformLocation(program, "uSmoothing");
         const uWhitenTeeth = gl.getUniformLocation(program, "uWhitenTeeth");
         const uBaseGlow = gl.getUniformLocation(program, "uBaseGlow");
+        const uSharpness = gl.getUniformLocation(program, "uSharpness");
+        const uTemperature = gl.getUniformLocation(program, "uTemperature");
+        const uVignette = gl.getUniformLocation(program, "uVignette");
+        const uGrain = gl.getUniformLocation(program, "uGrain");
+        const uFade = gl.getUniformLocation(program, "uFade");
+        const uHighlights = gl.getUniformLocation(program, "uHighlights");
+        const uShadows = gl.getUniformLocation(program, "uShadows");
 
         const loadAsset = async (input: number | string) => {
           const asset =
@@ -138,6 +145,13 @@ export function OffscreenLutRenderer({
         gl.uniform1f(uSmoothing, b.smoothing ?? 0.0);
         gl.uniform1f(uWhitenTeeth, b.whitenTeeth ?? 0.0);
         gl.uniform1f(uBaseGlow, b.baseGlow ?? 0.0);
+        gl.uniform1f(uSharpness, b.sharpness ?? 0.0);
+        gl.uniform1f(uTemperature, b.temperature ?? 0.0);
+        gl.uniform1f(uVignette, b.vignette ?? 0.0);
+        gl.uniform1f(uGrain, b.grain ?? 0.0);
+        gl.uniform1f(uFade, b.fade ?? 0.0);
+        gl.uniform1f(uHighlights, b.highlights ?? 0.0);
+        gl.uniform1f(uShadows, b.shadows ?? 0.0);
 
         gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
         gl.clearColor(0, 0, 0, 1);
@@ -145,11 +159,11 @@ export function OffscreenLutRenderer({
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
         gl.flush();
 
-        // Snapshot ANTES de endFrameEXP (que limpa o framebuffer e causava foto preta)
+        // Snapshot ANTES de endFrameEXP (senao fica preto)
         const snapshot = await GLView.takeSnapshotAsync(gl, {
           format: "jpeg",
           result: "file",
-          flip: false, // false para nao inverter a foto de ponta cabeca
+          flip: false, // false = nao inverte de ponta cabeca
         } as any);
 
         gl.endFrameEXP?.();

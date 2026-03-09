@@ -12,6 +12,13 @@ export type BeautifyParams = {
   smoothing?: number;
   whitenTeeth?: number;
   baseGlow?: number;
+  sharpness?: number;
+  temperature?: number;
+  vignette?: number;
+  grain?: number;
+  fade?: number;
+  highlights?: number;
+  shadows?: number;
 };
 
 export default function LutRenderer({
@@ -89,6 +96,13 @@ export default function LutRenderer({
           const uSmoothing = gl.getUniformLocation(prog, "uSmoothing");
           const uWhitenTeeth = gl.getUniformLocation(prog, "uWhitenTeeth");
           const uBaseGlow = gl.getUniformLocation(prog, "uBaseGlow");
+          const uSharpness = gl.getUniformLocation(prog, "uSharpness");
+          const uTemperature = gl.getUniformLocation(prog, "uTemperature");
+          const uVignette = gl.getUniformLocation(prog, "uVignette");
+          const uGrain = gl.getUniformLocation(prog, "uGrain");
+          const uFade = gl.getUniformLocation(prog, "uFade");
+          const uHighlights = gl.getUniformLocation(prog, "uHighlights");
+          const uShadows = gl.getUniformLocation(prog, "uShadows");
 
           const loadAsset = async (src: LutSource) => {
             const a =
@@ -143,6 +157,13 @@ export default function LutRenderer({
           gl.uniform1f(uSmoothing, b.smoothing ?? 0.0);
           gl.uniform1f(uWhitenTeeth, b.whitenTeeth ?? 0.0);
           gl.uniform1f(uBaseGlow, b.baseGlow ?? 0.0);
+          gl.uniform1f(uSharpness, b.sharpness ?? 0.0);
+          gl.uniform1f(uTemperature, b.temperature ?? 0.0);
+          gl.uniform1f(uVignette, b.vignette ?? 0.0);
+          gl.uniform1f(uGrain, b.grain ?? 0.0);
+          gl.uniform1f(uFade, b.fade ?? 0.0);
+          gl.uniform1f(uHighlights, b.highlights ?? 0.0);
+          gl.uniform1f(uShadows, b.shadows ?? 0.0);
 
           gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
           gl.clearColor(0, 0, 0, 1);

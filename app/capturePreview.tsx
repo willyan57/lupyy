@@ -5,12 +5,15 @@
 // 3. OffscreenLutRenderer recebe beautify + tamanho real na exportacao
 // 4. Slider com Animated para feedback mais suave
 // 5. Consistencia preview <-> exportacao garantida
+// 6. Swipe horizontal para trocar filtro
+// 7. Slider de intensidade do filtro
+// 8. Painel de ajustes avancados (sharpness, temperature, vignette, grain, fade, highlights, shadows)
 
 import Colors from "@/constants/Colors";
 import type { BeautifyParams } from "@/lib/gl/LutRenderer";
 import LutRenderer from "@/lib/gl/LutRenderer";
 import { OffscreenLutRenderer } from "@/lib/gl/OffscreenLutRenderer";
-import { getLutForFilter } from "@/lib/gl/filterLuts";
+import { getFilterShaderParams, getLutForFilter } from "@/lib/gl/filterLuts";
 import { compressImage, prepareVideo } from "@/lib/media";
 import type { FilterId as ExportFilterId } from "@/lib/mediaFilters/applyFilterAndExport";
 import * as FilterExport from "@/lib/mediaFilters/applyFilterAndExport";
@@ -29,6 +32,7 @@ import {
   FlatList,
   Image,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -278,7 +282,6 @@ const FILTERS: {
 ];
 
 const ITEM_W = 92;
-
 export default function CapturePreview() {
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -304,6 +307,16 @@ export default function CapturePreview() {
   const [filter, setFilter] = useState<FilterId>(initialFilter);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [showInlineFilters, setShowInlineFilters] = useState(false);
+
+  // ─── NOVO: intensidade do filtro ───
+  const [filterIntensity, setFilterIntensity] = useState(1.0);
+
+  // ─── NOVO: painel de ajustes avancados ───
+  const [showAdjustPanel, setShowAdjustPanel] = useState(false);
+  const [adjustValues, setAdjustValues] = useState({
+    sharpness: 0, temperature: 0, vignette: 0,
+    grain: 0, fade: 0, highlights: 0, shadows: 0,
+  });
 
   const [bakeJob, setBakeJob] = useState<{
     uri: string;
@@ -388,7 +401,38 @@ export default function CapturePreview() {
 
   const effectiveUri = aiTempUri || uri;
 
-  // BeautifyParams para o shader
+  // ─── NOVO: swipe gesture para trocar filtro ───
+  const swipeAnim = useRef(new Animated.Value(0)).current;
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => false,
+        onMoveShouldSetPanResponder: (_, gs) =>
+          Math.abs(gs.dx) > 15 && Math.abs(gs.dx) > Math.abs(gs.dy * 1.5),
+        onPanResponderMove: (_, gs) => {
+          swipeAnim.setValue(gs.dx);
+        },
+        onPanResponderRelease: (_, gs) => {
+          const threshold = width * 0.18;
+          if (gs.dx < -threshold) {
+            const newIdx = Math.min(filterIndex + 1, FILTERS.length - 1);
+            setFilter(FILTERS[newIdx].id);
+            setFilterIntensity(1.0);
+          } else if (gs.dx > threshold) {
+            const newIdx = Math.max(filterIndex - 1, 0);
+            setFilter(FILTERS[newIdx].id);
+            setFilterIntensity(1.0);
+          }
+          Animated.spring(swipeAnim, {
+            toValue: 0,
+            useNativeDriver: true,
+          }).start();
+        },
+      }),
+    [filterIndex]
+  );
+
+  // BeautifyParams para o shader — ATUALIZADO com campos avancados
   const beautifyParams = useMemo<BeautifyParams>(() => {
     const smoothRaw = (beautifyValues["Suavizar"] ?? 60) / 100;
     const contrastRaw = (beautifyValues["Contraste"] ?? 60) / 100;
@@ -408,15 +452,27 @@ export default function CapturePreview() {
       : quickAdjustment === "bright" ? 1.02
       : 1.0;
 
+    // Buscar parametros extras do filtro selecionado
+    const fp = typeof getFilterShaderParams === "function"
+      ? getFilterShaderParams(mapPreviewFilterToExport(filter))
+      : {};
+
     return {
-      brightness: quickBrightness,
-      contrast: quickContrast * (0.5 + contrastRaw),
-      saturation: quickSaturation,
-      smoothing: Math.max(0, smoothRaw - 0.6) * 2.5,
+      brightness: quickBrightness + (fp.brightness ?? 0),
+      contrast: quickContrast * (0.5 + contrastRaw) * (fp.contrast ?? 1),
+      saturation: quickSaturation * (fp.saturation ?? 1),
+      smoothing: Math.max(0, smoothRaw - 0.6) * 2.5 + (fp.smoothing ?? 0),
       whitenTeeth: Math.max(0, teethRaw - 0.6) * 2.5,
       baseGlow: Math.max(0, baseRaw - 0.6) * 2.5,
+      sharpness: adjustValues.sharpness + (fp.sharpness ?? 0),
+      temperature: adjustValues.temperature + (fp.temperature ?? 0),
+      vignette: adjustValues.vignette + (fp.vignette ?? 0) + (activeFilter.vignette ? 0.3 : 0),
+      grain: adjustValues.grain + (fp.grain ?? 0),
+      fade: adjustValues.fade + (fp.fade ?? 0),
+      highlights: adjustValues.highlights + (fp.highlights ?? 0),
+      shadows: adjustValues.shadows + (fp.shadows ?? 0),
     };
-  }, [beautifyValues, quickAdjustment]);
+  }, [beautifyValues, quickAdjustment, filter, adjustValues, activeFilter]);
 
   // LUT source para o preview
   const previewLutSource = useMemo(() => {
@@ -424,15 +480,23 @@ export default function CapturePreview() {
     return getLutForFilter(exportId);
   }, [filter]);
 
-  // Flag: precisamos do GL renderer no preview?
+  // Flag: precisamos do GL renderer no preview? — ATUALIZADO
   const needsGlPreview = useMemo(() => {
     if (mediaType !== "image") return false;
     if (previewLutSource !== null) return true;
-    if (beautifyParams.smoothing && beautifyParams.smoothing > 0.01) return true;
-    if (beautifyParams.brightness && beautifyParams.brightness !== 0) return true;
-    if (beautifyParams.contrast && Math.abs(beautifyParams.contrast - 1.0) > 0.01) return true;
-    if (beautifyParams.whitenTeeth && beautifyParams.whitenTeeth > 0.01) return true;
-    if (beautifyParams.baseGlow && beautifyParams.baseGlow > 0.01) return true;
+    const bp = beautifyParams;
+    if (bp.smoothing && bp.smoothing > 0.01) return true;
+    if (bp.brightness && bp.brightness !== 0) return true;
+    if (bp.contrast && Math.abs(bp.contrast - 1.0) > 0.01) return true;
+    if (bp.whitenTeeth && bp.whitenTeeth > 0.01) return true;
+    if (bp.baseGlow && bp.baseGlow > 0.01) return true;
+    if (bp.sharpness && bp.sharpness > 0.01) return true;
+    if (bp.temperature && Math.abs(bp.temperature) > 0.01) return true;
+    if (bp.vignette && bp.vignette > 0.01) return true;
+    if (bp.grain && bp.grain > 0.01) return true;
+    if (bp.fade && bp.fade > 0.01) return true;
+    if (bp.highlights && Math.abs(bp.highlights) > 0.01) return true;
+    if (bp.shadows && Math.abs(bp.shadows) > 0.01) return true;
     return false;
   }, [mediaType, previewLutSource, beautifyParams]);
 
@@ -476,8 +540,11 @@ export default function CapturePreview() {
     if ((beautifyValues["Contraste"] ?? 60) !== 60) return true;
     if ((beautifyValues["Dente"] ?? 60) !== 60) return true;
     if ((beautifyValues["Base"] ?? 60) !== 60) return true;
+    if (adjustValues.sharpness !== 0 || adjustValues.temperature !== 0) return true;
+    if (adjustValues.vignette !== 0 || adjustValues.grain !== 0) return true;
+    if (adjustValues.fade !== 0 || adjustValues.highlights !== 0 || adjustValues.shadows !== 0) return true;
     return false;
-  }, [mediaType, aiTempUri, filter, quickAdjustment, beautifyValues]);
+  }, [mediaType, aiTempUri, filter, quickAdjustment, beautifyValues, adjustValues]);
 
   const bakeImageWithLut = useCallback(
     (uri: string, filterId: ExportFilterId, bParams: BeautifyParams) => {
@@ -684,8 +751,6 @@ export default function CapturePreview() {
     let bakedUri = finalUri;
     bakedUri = await maybeBakeMedia(bakedUri);
 
-
-    
     if (mode === "story") {
       try {
         setSending(true);
@@ -750,7 +815,6 @@ export default function CapturePreview() {
       }
       return;
     }
-
 
     try {
       setSending(true);
@@ -845,6 +909,7 @@ export default function CapturePreview() {
       );
     }
   };
+
   function getAiPresetFromFilter() {
     switch (filter) {
       case "face_enhance":
@@ -940,7 +1005,6 @@ export default function CapturePreview() {
     }
   }
 
-
   async function handleRevertAi() {
     if (!aiTempUri) return;
     try {
@@ -962,7 +1026,6 @@ export default function CapturePreview() {
 
   const handleSend = () => {
     if (!effectiveUri || sending || aiProcessing) return;
-
     void performSendWithUri(effectiveUri);
   };
 
@@ -979,6 +1042,7 @@ export default function CapturePreview() {
     const safe = Math.max(0, Math.min(FILTERS.length - 1, idx));
     syncScrollRef.current = true;
     setFilter(FILTERS[safe].id);
+    setFilterIntensity(1.0);
     setTimeout(() => (syncScrollRef.current = false), 0);
   };
 
@@ -987,7 +1051,7 @@ export default function CapturePreview() {
     return (
       <TouchableOpacity
         activeOpacity={0.9}
-        onPress={() => setFilter(item.id)}
+        onPress={() => { setFilter(item.id); setFilterIntensity(1.0); }}
         style={[styles.carouselItem, active && styles.carouselItemActive]}
       >
         <View
@@ -1012,11 +1076,13 @@ export default function CapturePreview() {
   });
   const nextOpacity = transition;
 
+  // ─── ATUALIZADO: adicionado "adjust" na toolbar ───
   const baseTools = [
     { key: "text", label: "Texto", icon: "Aa" },
     { key: "stickers", label: "Figurinhas", icon: "☻" },
     { key: "music", label: "Musicas", icon: "♫" },
     { key: "beautify", label: "Embelezar", icon: "✧" },
+    { key: "adjust", label: "Ajustes", icon: "⚙" },
     { key: "mention", label: "Mencionar", icon: "@" },
     { key: "effects", label: "Efeitos", icon: "✺" },
     { key: "draw", label: "Desenhar", icon: "✎" },
@@ -1044,6 +1110,20 @@ export default function CapturePreview() {
     { key: "dark", label: "Escuro" },
     { key: "punch", label: "Punch" },
   ] as const;
+
+  // ─── NOVO: itens do painel de ajustes avancados ───
+  const adjustItems: {
+    key: keyof typeof adjustValues; label: string; icon: string;
+    min: number; max: number; step: number;
+  }[] = [
+    { key: "sharpness", label: "Nitidez", icon: "△", min: 0, max: 1.0, step: 0.01 },
+    { key: "temperature", label: "Temperatura", icon: "🌡", min: -0.5, max: 0.5, step: 0.01 },
+    { key: "vignette", label: "Vinheta", icon: "⬡", min: 0, max: 1.0, step: 0.01 },
+    { key: "grain", label: "Grao", icon: "▤", min: 0, max: 0.5, step: 0.01 },
+    { key: "fade", label: "Fade", icon: "▨", min: 0, max: 0.5, step: 0.01 },
+    { key: "highlights", label: "Realces", icon: "▲", min: -0.5, max: 0.5, step: 0.01 },
+    { key: "shadows", label: "Sombras", icon: "▼", min: -0.5, max: 0.5, step: 0.01 },
+  ];
 
   const beautifyValue = beautifyValues[beautifyOption] ?? 60;
 
@@ -1075,7 +1155,7 @@ export default function CapturePreview() {
 
   const tools = toolsCollapsed
     ? [
-        ...baseTools.slice(0, 4),
+        ...baseTools.slice(0, 5),
         { key: "more", label: "Mais", icon: "⋮" },
       ]
     : [
@@ -1083,11 +1163,23 @@ export default function CapturePreview() {
         { key: "more", label: "Menos", icon: "⋮" },
       ];
 
+  // ─── ATUALIZADO: handleToolPress com "adjust" ───
   const handleToolPress = (key: string) => {
     if (key === "beautify") {
       setShowBeautifyPanel((prev) => !prev);
       setShowInlineFilters(false);
       setEffectsOpen(false);
+      setShowAdjustPanel(false);
+      setActiveToolSheet(null);
+      setToolsCollapsed(true);
+      return;
+    }
+
+    if (key === "adjust") {
+      setShowAdjustPanel((prev) => !prev);
+      setShowBeautifyPanel(false);
+      setEffectsOpen(false);
+      setShowInlineFilters(false);
       setActiveToolSheet(null);
       setToolsCollapsed(true);
       return;
@@ -1096,6 +1188,7 @@ export default function CapturePreview() {
     if (key === "effects") {
       setEffectsOpen((prev) => !prev);
       setShowBeautifyPanel(false);
+      setShowAdjustPanel(false);
       setActiveToolSheet(null);
       setShowInlineFilters(false);
       setToolsCollapsed(true);
@@ -1106,6 +1199,7 @@ export default function CapturePreview() {
       setToolsCollapsed((prev) => !prev);
       setEffectsOpen(false);
       setShowBeautifyPanel(false);
+      setShowAdjustPanel(false);
       setShowInlineFilters(false);
       setActiveToolSheet(null);
       return;
@@ -1113,6 +1207,7 @@ export default function CapturePreview() {
 
     setEffectsOpen(false);
     setShowBeautifyPanel(false);
+    setShowAdjustPanel(false);
     setShowInlineFilters(false);
     setToolsCollapsed(true);
 
@@ -1162,7 +1257,6 @@ export default function CapturePreview() {
     inputRange: [0, 1],
     outputRange: ["0%", "100%"],
   });
-
   return (
     <View style={styles.container}>
       {/* OffscreenLutRenderer para exportacao com beautify */}
@@ -1182,36 +1276,41 @@ export default function CapturePreview() {
         />
       ) : null}
 
-      {/* Preview com LutRenderer (GL real) quando necessario */}
-      {mediaType === "image" && needsGlPreview ? (
-        <LutRenderer
-          key={`gl-${effectiveUri}-${filter}-${JSON.stringify(beautifyParams)}`}
-          sourceUri={effectiveUri}
-          lut={previewLutSource}
-          intensity={1}
-          beautify={beautifyParams}
-          style={styles.preview}
-          onReady={() => setMediaLoaded(true)}
-        />
-      ) : mediaType === "image" ? (
-        <Image
-          key={`${effectiveUri}::${nonce}::${filter}`}
-          source={{ uri: effectiveUri }}
-          style={styles.preview}
-          resizeMode={isWeb ? "contain" : "cover"}
-          onLoadEnd={() => setMediaLoaded(true)}
-        />
-      ) : (
-        <Video
-          key={`${uri}::${nonce}`}
-          source={{ uri }}
-          style={styles.preview}
-          resizeMode={isWeb ? ResizeMode.CONTAIN : ResizeMode.COVER}
-          shouldPlay
-          isLooping
-          onLoad={() => setMediaLoaded(true)}
-        />
-      )}
+      {/* ─── ATUALIZADO: Preview com swipe gesture ─── */}
+      <Animated.View
+        style={{ flex: 1, transform: [{ translateX: swipeAnim }] }}
+        {...panResponder.panHandlers}
+      >
+        {mediaType === "image" && needsGlPreview ? (
+          <LutRenderer
+            key={`gl-${effectiveUri}-${filter}-${filterIntensity}-${JSON.stringify(beautifyParams)}`}
+            sourceUri={effectiveUri}
+            lut={previewLutSource}
+            intensity={filterIntensity}
+            beautify={beautifyParams}
+            style={styles.preview}
+            onReady={() => setMediaLoaded(true)}
+          />
+        ) : mediaType === "image" ? (
+          <Image
+            key={`${effectiveUri}::${nonce}::${filter}`}
+            source={{ uri: effectiveUri }}
+            style={styles.preview}
+            resizeMode={isWeb ? "contain" : "cover"}
+            onLoadEnd={() => setMediaLoaded(true)}
+          />
+        ) : (
+          <Video
+            key={`${uri}::${nonce}`}
+            source={{ uri }}
+            style={styles.preview}
+            resizeMode={isWeb ? ResizeMode.CONTAIN : ResizeMode.COVER}
+            shouldPlay
+            isLooping
+            onLoad={() => setMediaLoaded(true)}
+          />
+        )}
+      </Animated.View>
 
       {/* Overlays visuais (vignette, glow) */}
       {!needsGlPreview && prevOverlay && (
@@ -1303,7 +1402,10 @@ export default function CapturePreview() {
           { opacity: labelOpacity, transform: [{ scale: labelScale }] },
         ]}
       >
-        <Text style={styles.filterLabelText}>{activeFilter.name}</Text>
+        <Text style={styles.filterLabelText}>
+          {activeFilter.name}
+          {filterIntensity < 1 ? ` ${Math.round(filterIntensity * 100)}%` : ""}
+        </Text>
       </Animated.View>
 
       {((!mediaLoaded) || aiProcessing) && (
@@ -1341,6 +1443,11 @@ export default function CapturePreview() {
         </TouchableOpacity>
       </View>
 
+      {/* ─── Swipe hint ─── */}
+      <View pointerEvents="none" style={styles.swipeHint}>
+        <Text style={styles.swipeHintText}>◀ Deslize para trocar filtro ▶</Text>
+      </View>
+
       <View style={styles.rightTools}>
         {tools.map((tool) => (
           <TouchableOpacity
@@ -1362,6 +1469,49 @@ export default function CapturePreview() {
           </TouchableOpacity>
         ))}
       </View>
+
+      {/* ─── NOVO: Slider de intensidade do filtro ─── */}
+      {filter !== "none" && (
+        <View style={styles.intensityBar}>
+          <Text style={styles.intensityLabel}>
+            Intensidade: {Math.round(filterIntensity * 100)}%
+          </Text>
+          <View style={styles.intensitySliderRow}>
+            <Text style={styles.intensityMinMax}>0</Text>
+            <View style={styles.intensityTrack}>
+              <View
+                onStartShouldSetResponder={() => true}
+                onMoveShouldSetResponder={() => true}
+                onResponderGrant={(e) => {
+                  const px = e.nativeEvent.locationX;
+                  const w = width - 100;
+                  setFilterIntensity(Math.max(0, Math.min(1, px / w)));
+                }}
+                onResponderMove={(e) => {
+                  const px = e.nativeEvent.locationX;
+                  const w = width - 100;
+                  setFilterIntensity(Math.max(0, Math.min(1, px / w)));
+                }}
+                style={styles.intensityTrackInner}
+              >
+                <View
+                  style={[
+                    styles.intensityFill,
+                    { width: `${filterIntensity * 100}%` as any },
+                  ]}
+                />
+                <View
+                  style={[
+                    styles.intensityThumb,
+                    { left: `${filterIntensity * 100}%` as any },
+                  ]}
+                />
+              </View>
+            </View>
+            <Text style={styles.intensityMinMax}>100</Text>
+          </View>
+        </View>
+      )}
 
       <View style={styles.bottomPanel}>
         {showBeautifyPanel && (
@@ -1516,6 +1666,65 @@ export default function CapturePreview() {
             </ScrollView>
           </View>
         )}
+
+        {/* ─── NOVO: Painel de ajustes avancados ─── */}
+        {showAdjustPanel && (
+          <View style={styles.adjustPanelContainer}>
+            <View style={styles.adjustPanelHeader}>
+              <Text style={styles.adjustPanelTitle}>Ajustes Avancados</Text>
+              <TouchableOpacity
+                onPress={() => setAdjustValues({
+                  sharpness: 0, temperature: 0, vignette: 0,
+                  grain: 0, fade: 0, highlights: 0, shadows: 0,
+                })}
+              >
+                <Text style={styles.beautifyResetText}>Redefinir</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: height * 0.3 }}>
+              {adjustItems.map((item) => (
+                <View key={item.key} style={styles.adjustRow}>
+                  <Text style={styles.adjustIcon}>{item.icon}</Text>
+                  <Text style={styles.adjustLabel}>{item.label}</Text>
+                  <View style={styles.adjustSliderWrap}>
+                    <View
+                      style={styles.adjustSliderTrack}
+                      onStartShouldSetResponder={() => true}
+                      onMoveShouldSetResponder={() => true}
+                      onResponderGrant={(e) => {
+                        const px = e.nativeEvent.locationX;
+                        const trackW = width - 180;
+                        const ratio = Math.max(0, Math.min(1, px / trackW));
+                        const val = item.min + ratio * (item.max - item.min);
+                        setAdjustValues((prev) => ({ ...prev, [item.key]: Math.round(val * 100) / 100 }));
+                      }}
+                      onResponderMove={(e) => {
+                        const px = e.nativeEvent.locationX;
+                        const trackW = width - 180;
+                        const ratio = Math.max(0, Math.min(1, px / trackW));
+                        const val = item.min + ratio * (item.max - item.min);
+                        setAdjustValues((prev) => ({ ...prev, [item.key]: Math.round(val * 100) / 100 }));
+                      }}
+                    >
+                      <View
+                        style={[
+                          styles.adjustSliderFill,
+                          {
+                            width: `${((adjustValues[item.key] - item.min) / (item.max - item.min)) * 100}%` as any,
+                          },
+                        ]}
+                      />
+                    </View>
+                  </View>
+                  <Text style={styles.adjustValue}>
+                    {adjustValues[item.key].toFixed(2)}
+                  </Text>
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
         {effectsOpen && (
           <View style={styles.quickAdjustRow}>
             {quickAdjustments.map((item) => {
@@ -1808,7 +2017,7 @@ export default function CapturePreview() {
                   <TouchableOpacity
                     key={f.id}
                     activeOpacity={0.9}
-                    onPress={() => setFilter(f.id)}
+                    onPress={() => { setFilter(f.id); setFilterIntensity(1.0); }}
                     style={[styles.filterChip, active && styles.filterChipActive]}
                   >
                     <View
@@ -1849,7 +2058,6 @@ export default function CapturePreview() {
     </View>
   );
 }
-
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   preview: { width, height: previewHeight, position: "absolute", top: 0, left: 0 },
@@ -1861,76 +2069,39 @@ const styles = StyleSheet.create({
   },
   filterOverlay: {
     position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    top: 0, left: 0, right: 0, bottom: 0,
   },
   blurWrap: {
     position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    top: 0, left: 0, right: 0, bottom: 0,
   },
   vignetteWrap: {
     position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    top: 0, left: 0, right: 0, bottom: 0,
   },
   vTop: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 160,
+    position: "absolute", top: 0, left: 0, right: 0, height: 160,
   },
   vBottom: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 200,
+    position: "absolute", bottom: 0, left: 0, right: 0, height: 200,
     transform: [{ rotate: "180deg" }],
   },
   vLeft: {
-    position: "absolute",
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: 140,
+    position: "absolute", left: 0, top: 0, bottom: 0, width: 140,
     transform: [{ rotate: "90deg" }],
   },
   vRight: {
-    position: "absolute",
-    right: 0,
-    top: 0,
-    bottom: 0,
-    width: 140,
+    position: "absolute", right: 0, top: 0, bottom: 0, width: 140,
     transform: [{ rotate: "-90deg" }],
   },
   glowWrap: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 220,
+    position: "absolute", top: 0, left: 0, right: 0, height: 220,
   },
   glowTop: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 220,
+    position: "absolute", top: 0, left: 0, right: 0, height: 220,
   },
   adjustmentOverlay: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
   },
   adjustmentBright: {
     backgroundColor: "rgba(255,255,255,0.08)",
@@ -1956,92 +2127,102 @@ const styles = StyleSheet.create({
   },
   filterLabelText: { color: "#fff", fontWeight: "900", letterSpacing: 0.3 },
   topGradient: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    height: height * 0.25,
+    position: "absolute", top: 0, left: 0, right: 0, height: height * 0.25,
   },
   bottomGradient: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: height * 0.42,
+    position: "absolute", bottom: 0, left: 0, right: 0, height: height * 0.42,
   },
   topBar: {
-    position: "absolute",
-    top: 26,
-    left: 16,
-    right: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    position: "absolute", top: 26, left: 16, right: 16,
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
   },
   topIcon: { color: "#fff", fontSize: 26, fontWeight: "700" },
   topBadge: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 999,
-    backgroundColor: "rgba(0,0,0,0.55)",
+    paddingHorizontal: 16, paddingVertical: 8,
+    borderRadius: 999, backgroundColor: "rgba(0,0,0,0.55)",
   },
   topBadgeText: {
-    color: "#fff",
-    fontSize: 13,
-    fontWeight: "800",
-    letterSpacing: 0.5,
+    color: "#fff", fontSize: 13, fontWeight: "800", letterSpacing: 0.5,
   },
   topRight: { width: 40, alignItems: "flex-end" },
   topRightIcon: { color: "#fff", fontSize: 22 },
+
+  // ─── NOVO: swipe hint ───
+  swipeHint: {
+    position: "absolute", top: height * 0.24, alignSelf: "center",
+  },
+  swipeHintText: {
+    color: "rgba(255,255,255,0.35)", fontSize: 11, fontWeight: "500",
+  },
+
   rightTools: {
-    position: "absolute",
-    right: 12,
-    top: height * 0.16,
+    position: "absolute", right: 12, top: height * 0.16,
   },
   rightToolButton: {
-    flexDirection: "row-reverse",
-    alignItems: "center",
-    marginBottom: 10,
+    flexDirection: "row-reverse", alignItems: "center", marginBottom: 10,
   },
   rightToolCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 999,
+    width: 40, height: 40, borderRadius: 999,
     backgroundColor: "rgba(0,0,0,0.65)",
-    alignItems: "center",
-    justifyContent: "center",
-    marginLeft: 8,
+    alignItems: "center", justifyContent: "center", marginLeft: 8,
   },
   rightToolIcon: { color: "#fff", fontSize: 18, fontWeight: "800" },
   rightToolLabel: {
-    color: "#fff",
-    fontSize: 13,
-    fontWeight: "700",
+    color: "#fff", fontSize: 13, fontWeight: "700",
   },
-  bottomPanel: {
+
+  // ─── NOVO: intensity slider ───
+  intensityBar: {
     position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    paddingHorizontal: 18,
-    paddingBottom: 22,
+    bottom: 220,
+    left: 18, right: 18,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    borderRadius: 14,
+    paddingHorizontal: 14, paddingVertical: 10,
+  },
+  intensityLabel: {
+    color: "#fff", fontSize: 12, fontWeight: "600", textAlign: "center", marginBottom: 6,
+  },
+  intensitySliderRow: {
+    flexDirection: "row", alignItems: "center",
+  },
+  intensityMinMax: {
+    color: "rgba(255,255,255,0.5)", fontSize: 10, fontWeight: "600", width: 24, textAlign: "center",
+  },
+  intensityTrack: {
+    flex: 1, marginHorizontal: 4,
+  },
+  intensityTrackInner: {
+    height: 6, borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.20)",
+    position: "relative",
+  },
+  intensityFill: {
+    position: "absolute", left: 0, top: 0, bottom: 0,
+    borderRadius: 999, backgroundColor: "#ff3366",
+  },
+  intensityThumb: {
+    position: "absolute", top: -9,
+    width: 24, height: 24, borderRadius: 999,
+    backgroundColor: "#fff",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3, shadowRadius: 4, elevation: 4,
+    transform: [{ translateX: -12 }],
+  },
+
+  bottomPanel: {
+    position: "absolute", left: 0, right: 0, bottom: 0,
+    paddingHorizontal: 18, paddingBottom: 22,
   },
   quickAdjustRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 10,
-    paddingHorizontal: 4,
+    flexDirection: "row", alignItems: "center",
+    justifyContent: "space-between", marginBottom: 10, paddingHorizontal: 4,
   },
   quickAdjustChip: {
-    flex: 1,
-    height: 32,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.18)",
-    marginHorizontal: 4,
-    alignItems: "center",
-    justifyContent: "center",
+    flex: 1, height: 32, borderRadius: 999,
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.18)",
+    marginHorizontal: 4, alignItems: "center", justifyContent: "center",
     backgroundColor: "rgba(0,0,0,0.45)",
   },
   quickAdjustChipActive: {
@@ -2049,514 +2230,334 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,51,85,0.6)",
   },
   quickAdjustText: {
-    color: "rgba(255,255,255,0.8)",
-    fontSize: 12,
-    fontWeight: "700",
+    color: "rgba(255,255,255,0.8)", fontSize: 12, fontWeight: "700",
   },
-  quickAdjustTextActive: {
-    color: "#fff",
-  },
+  quickAdjustTextActive: { color: "#fff" },
   legendRow: {
-    borderRadius: 18,
-    backgroundColor: "rgba(0,0,0,0.6)",
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    marginBottom: 10,
+    borderRadius: 18, backgroundColor: "rgba(0,0,0,0.6)",
+    paddingHorizontal: 14, paddingVertical: 8, marginBottom: 10,
   },
   legendInput: {
-    color: "#fff",
-    fontSize: 14,
-    maxHeight: 70,
+    color: "#fff", fontSize: 14, maxHeight: 70,
   },
   audienceRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
   },
   audienceChip: {
-    flex: 1,
-    height: 40,
-    borderRadius: 999,
-    backgroundColor: "#fff",
-    alignItems: "center",
-    justifyContent: "center",
+    flex: 1, height: 40, borderRadius: 999,
+    backgroundColor: "#fff", alignItems: "center", justifyContent: "center",
     marginRight: 8,
   },
   audienceChipText: {
-    color: "#000",
-    fontWeight: "800",
-    fontSize: 13,
+    color: "#000", fontWeight: "800", fontSize: 13,
   },
   audienceChipAlt: {
-    flex: 1,
-    height: 40,
-    borderRadius: 999,
-    backgroundColor: "rgba(0,0,0,0.6)",
-    alignItems: "center",
-    justifyContent: "center",
+    flex: 1, height: 40, borderRadius: 999,
+    backgroundColor: "rgba(0,0,0,0.6)", alignItems: "center", justifyContent: "center",
     marginRight: 8,
   },
   audienceChipAltText: {
-    color: "#fff",
-    fontWeight: "700",
-    fontSize: 13,
+    color: "#fff", fontWeight: "700", fontSize: 13,
   },
   aiRevertButton: {
-    height: 40,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.7)",
-    backgroundColor: "rgba(0,0,0,0.6)",
-    alignItems: "center",
-    justifyContent: "center",
+    height: 40, paddingHorizontal: 14, borderRadius: 999,
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.7)",
+    backgroundColor: "rgba(0,0,0,0.6)", alignItems: "center", justifyContent: "center",
     marginRight: 8,
   },
   aiRevertButtonText: {
-    color: "#fff",
-    fontWeight: "700",
-    fontSize: 13,
+    color: "#fff", fontWeight: "700", fontSize: 13,
   },
   sendButton: {
-    width: 46,
-    height: 46,
-    borderRadius: 999,
+    width: 46, height: 46, borderRadius: 999,
     backgroundColor: "rgba(0,149,246,0.95)",
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: "center", justifyContent: "center",
   },
   sendIcon: { color: "#fff", fontSize: 20, fontWeight: "900" },
   carouselWrap: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 110,
-    height: 86,
+    position: "absolute", left: 0, right: 0, bottom: 110, height: 86,
   },
   carouselItem: {
-    width: ITEM_W,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingTop: 10,
-    paddingBottom: 12,
-    borderRadius: 18,
+    width: ITEM_W, alignItems: "center", justifyContent: "center",
+    paddingTop: 10, paddingBottom: 12, borderRadius: 18,
     backgroundColor: "rgba(0,0,0,0.38)",
   },
   carouselItemActive: {
     backgroundColor: "rgba(255,51,85,0.16)",
-    borderWidth: 1,
-    borderColor: "rgba(255,51,85,0.45)",
+    borderWidth: 1, borderColor: "rgba(255,51,85,0.45)",
   },
   carouselThumb: {
-    width: 46,
-    height: 46,
-    borderRadius: 14,
-    marginBottom: 8,
+    width: 46, height: 46, borderRadius: 14, marginBottom: 8,
   },
   carouselText: {
-    color: "rgba(255,255,255,0.78)",
-    fontWeight: "900",
-    fontSize: 12,
-    maxWidth: 80,
-    textAlign: "center",
+    color: "rgba(255,255,255,0.78)", fontWeight: "900", fontSize: 12,
+    maxWidth: 80, textAlign: "center",
   },
   carouselTextActive: { color: "#fff" },
   modalBackdrop: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.45)",
-    justifyContent: "flex-end",
+    flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end",
   },
   sheet: {
-    paddingHorizontal: 18,
-    paddingTop: 10,
-    paddingBottom: 22,
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
+    paddingHorizontal: 18, paddingTop: 10, paddingBottom: 22,
+    borderTopLeftRadius: 22, borderTopRightRadius: 22,
     backgroundColor: "rgba(18,18,18,0.98)",
   },
   sheetHandle: {
-    width: 46,
-    height: 5,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.18)",
-    alignSelf: "center",
-    marginBottom: 10,
+    width: 46, height: 5, borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.18)", alignSelf: "center", marginBottom: 10,
   },
   sheetTitle: {
-    color: "#fff",
-    fontWeight: "900",
-    fontSize: 16,
-    marginBottom: 14,
-    alignSelf: "center",
+    color: "#fff", fontWeight: "900", fontSize: 16,
+    marginBottom: 14, alignSelf: "center",
   },
   filtersGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-    justifyContent: "center",
+    flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "center",
   },
   filterChip: {
     width: (width - 18 * 2 - 10 * 2) / 3,
-    paddingVertical: 12,
-    borderRadius: 16,
+    paddingVertical: 12, borderRadius: 16,
     backgroundColor: "rgba(255,255,255,0.06)",
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
+    alignItems: "center", justifyContent: "center",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.06)",
   },
   filterChipActive: {
     backgroundColor: "rgba(255,51,85,0.18)",
     borderColor: "rgba(255,51,85,0.45)",
   },
   filterThumb: {
-    width: 46,
-    height: 46,
-    borderRadius: 14,
-    marginBottom: 8,
+    width: 46, height: 46, borderRadius: 14, marginBottom: 8,
   },
   filterChipText: {
-    color: "rgba(255,255,255,0.82)",
-    fontWeight: "800",
-    fontSize: 12,
+    color: "rgba(255,255,255,0.82)", fontWeight: "800", fontSize: 12,
   },
   filterChipTextActive: { color: "#fff" },
   filterChipDescription: {
-    color: "rgba(255,255,255,0.7)",
-    fontSize: 11,
-    marginTop: 2,
-    textAlign: "center",
+    color: "rgba(255,255,255,0.7)", fontSize: 11, marginTop: 2, textAlign: "center",
   },
   sheetDone: {
-    marginTop: 16,
-    height: 52,
-    borderRadius: 16,
-    backgroundColor: "rgba(255,51,85,0.95)",
-    alignItems: "center",
-    justifyContent: "center",
+    marginTop: 16, height: 52, borderRadius: 16,
+    backgroundColor: "rgba(255,51,85,0.95)", alignItems: "center", justifyContent: "center",
   },
   sheetDoneText: {
-    color: "#fff",
-    fontWeight: "900",
-    letterSpacing: 0.4,
+    color: "#fff", fontWeight: "900", letterSpacing: 0.4,
   },
   toolModalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.55)",
-    justifyContent: "flex-end",
+    flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end",
   },
   textToolContainer: {
-    backgroundColor: "#000",
-    paddingTop: 24,
-    paddingHorizontal: 16,
-    paddingBottom: 24,
+    backgroundColor: "#000", paddingTop: 24, paddingHorizontal: 16, paddingBottom: 24,
   },
   textToolHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 16,
+    flexDirection: "row", alignItems: "center",
+    justifyContent: "space-between", marginBottom: 16,
   },
   textToolHeaderTitle: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "600",
+    color: "#fff", fontSize: 16, fontWeight: "600",
   },
   textToolHeaderButton: {
-    color: "#0095F6",
-    fontSize: 14,
-    fontWeight: "600",
+    color: "#0095F6", fontSize: 14, fontWeight: "600",
   },
   textToolFormattingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 12,
+    flexDirection: "row", alignItems: "center",
+    justifyContent: "space-between", marginBottom: 12,
   },
   textToolFormattingLabel: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "700",
+    color: "#fff", fontSize: 18, fontWeight: "700",
   },
   textToolColorDotRow: {
-    flexDirection: "row",
-    gap: 8,
+    flexDirection: "row", gap: 8,
   },
   textToolColorDot: {
-    width: 16,
-    height: 16,
-    borderRadius: 999,
-    backgroundColor: "#fff",
+    width: 16, height: 16, borderRadius: 999, backgroundColor: "#fff",
   },
   textToolInput: {
-    minHeight: 120,
-    color: "#fff",
-    fontSize: 18,
-    textAlignVertical: "top",
+    minHeight: 120, color: "#fff", fontSize: 18, textAlignVertical: "top",
   },
   bottomSheet: {
     backgroundColor: Colors.surface,
-    paddingTop: 8,
-    paddingBottom: 12,
-    paddingHorizontal: 16,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    paddingTop: 8, paddingBottom: 12, paddingHorizontal: 16,
+    borderTopLeftRadius: 20, borderTopRightRadius: 20,
   },
   bottomSheetHandle: {
-    alignSelf: "center",
-    width: 40,
-    height: 4,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.28)",
-    marginBottom: 12,
+    alignSelf: "center", width: 40, height: 4, borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.28)", marginBottom: 12,
   },
   bottomSheetHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 12,
+    flexDirection: "row", alignItems: "center",
+    justifyContent: "space-between", marginBottom: 12,
   },
   bottomSheetTitle: {
-    color: Colors.text,
-    fontSize: 16,
-    fontWeight: "700",
+    color: Colors.text, fontSize: 16, fontWeight: "700",
   },
   bottomSheetClose: {
-    color: "#0095F6",
-    fontSize: 14,
-    fontWeight: "600",
+    color: "#0095F6", fontSize: 14, fontWeight: "600",
   },
   searchBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginBottom: 12,
+    flexDirection: "row", alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.06)", borderRadius: 12,
+    paddingHorizontal: 12, paddingVertical: 8, marginBottom: 12,
   },
   searchIcon: {
-    fontSize: 14,
-    marginRight: 6,
-    color: "#888",
+    fontSize: 14, marginRight: 6, color: "#888",
   },
   searchInput: {
-    flex: 1,
-    color: Colors.text,
-    fontSize: 14,
+    flex: 1, color: Colors.text, fontSize: 14,
   },
   stickersGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-    rowGap: 8,
-    marginTop: 4,
+    flexDirection: "row", flexWrap: "wrap",
+    justifyContent: "space-between", rowGap: 8, marginTop: 4,
   },
   stickerChip: {
-    backgroundColor: "#fff",
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    marginBottom: 4,
+    backgroundColor: "#fff", borderRadius: 999,
+    paddingHorizontal: 10, paddingVertical: 6, marginBottom: 4,
   },
   stickerChipText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#111",
+    fontSize: 12, fontWeight: "700", color: "#111",
   },
-  musicList: {
-    maxHeight: 260,
-    marginTop: 4,
-  },
+  musicList: { maxHeight: 260, marginTop: 4 },
   musicRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 8,
+    flexDirection: "row", alignItems: "center", paddingVertical: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "rgba(255,255,255,0.1)",
   },
   musicThumb: {
-    width: 40,
-    height: 40,
-    borderRadius: 6,
-    backgroundColor: "rgba(255,255,255,0.08)",
-    marginRight: 10,
+    width: 40, height: 40, borderRadius: 6,
+    backgroundColor: "rgba(255,255,255,0.08)", marginRight: 10,
   },
-  musicInfo: {
-    flex: 1,
-  },
+  musicInfo: { flex: 1 },
   musicTitle: {
-    color: Colors.text,
-    fontSize: 14,
-    marginBottom: 2,
+    color: Colors.text, fontSize: 14, marginBottom: 2,
   },
   musicSubtitle: {
-    color: "rgba(255,255,255,0.5)",
-    fontSize: 12,
+    color: "rgba(255,255,255,0.5)", fontSize: 12,
   },
-  mentionList: {
-    maxHeight: 260,
-    marginTop: 4,
-  },
+  mentionList: { maxHeight: 260, marginTop: 4 },
   mentionRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 8,
+    flexDirection: "row", alignItems: "center", paddingVertical: 8,
   },
   mentionAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "rgba(255,255,255,0.15)",
-    marginRight: 10,
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.15)", marginRight: 10,
   },
-  mentionName: {
-    color: Colors.text,
-    fontSize: 14,
-  },
-  placeholderContent: {
-    marginTop: 16,
-    paddingVertical: 16,
-  },
+  mentionName: { color: Colors.text, fontSize: 14 },
+  placeholderContent: { marginTop: 16, paddingVertical: 16 },
   placeholderText: {
-    color: "rgba(255,255,255,0.8)",
-    fontSize: 13,
-    lineHeight: 18,
+    color: "rgba(255,255,255,0.8)", fontSize: 13, lineHeight: 18,
   },
-  beautifyPanel: {
-    marginBottom: 10,
-    paddingHorizontal: 4,
-  },
+  beautifyPanel: { marginBottom: 10, paddingHorizontal: 4 },
   beautifySliderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 10,
+    flexDirection: "row", alignItems: "center", marginBottom: 10,
   },
   beautifySliderTrack: {
-    flex: 1,
-    height: 6,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.20)",
-    position: "relative",
+    flex: 1, height: 6, borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.20)", position: "relative",
   },
   beautifySliderFill: {
-    position: "absolute",
-    left: 0,
-    top: 0,
-    bottom: 0,
-    borderRadius: 999,
-    backgroundColor: "#ff3366",
+    position: "absolute", left: 0, top: 0, bottom: 0,
+    borderRadius: 999, backgroundColor: "#ff3366",
   },
   beautifySliderThumb: {
-    position: "absolute",
-    top: -9,
-    width: 24,
-    height: 24,
-    borderRadius: 999,
-    backgroundColor: "#fff",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 4,
+    position: "absolute", top: -9, width: 24, height: 24,
+    borderRadius: 999, backgroundColor: "#fff",
+    shadowColor: "#000", shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3, shadowRadius: 4, elevation: 4,
   },
   beautifyValueLabel: {
-    marginLeft: 12,
-    color: "#fff",
-    fontWeight: "700",
-    fontSize: 14,
-    minWidth: 30,
-    textAlign: "right",
+    marginLeft: 12, color: "#fff", fontWeight: "700", fontSize: 14,
+    minWidth: 30, textAlign: "right",
   },
   beautifyTabsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 8,
+    flexDirection: "row", alignItems: "center",
+    justifyContent: "space-between", marginBottom: 8,
   },
-  beautifyTabsLeft: {
-    flexDirection: "row",
-    gap: 8,
-  },
+  beautifyTabsLeft: { flexDirection: "row", gap: 8 },
   beautifyTabButton: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-    backgroundColor: "rgba(0,0,0,0.6)",
+    paddingHorizontal: 10, paddingVertical: 4,
+    borderRadius: 999, backgroundColor: "rgba(0,0,0,0.6)",
   },
   beautifyTabButtonActive: {
     backgroundColor: "rgba(255,51,85,0.22)",
   },
   beautifyTabText: {
-    color: "rgba(255,255,255,0.8)",
-    fontSize: 13,
-    fontWeight: "600",
+    color: "rgba(255,255,255,0.8)", fontSize: 13, fontWeight: "600",
   },
-  beautifyTabTextActive: {
-    color: "#fff",
-  },
+  beautifyTabTextActive: { color: "#fff" },
   beautifyResetText: {
-    color: "rgba(255,255,255,0.85)",
-    fontSize: 13,
-    fontWeight: "600",
+    color: "rgba(255,255,255,0.85)", fontSize: 13, fontWeight: "600",
   },
-  beautifyOptionsRow: {
-    paddingTop: 6,
-    paddingBottom: 2,
-  },
-  beautifyOptionItem: {
-    alignItems: "center",
-    marginRight: 18,
-  },
+  beautifyOptionsRow: { paddingTop: 6, paddingBottom: 2 },
+  beautifyOptionItem: { alignItems: "center", marginRight: 18 },
   beautifyOptionCircle: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 52, height: 52, borderRadius: 26,
     backgroundColor: "rgba(0,0,0,0.6)",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 4,
+    alignItems: "center", justifyContent: "center", marginBottom: 4,
   },
   beautifyOptionCircleActive: {
     backgroundColor: "rgba(255,51,85,0.28)",
   },
   beautifyOptionIcon: {
-    color: "rgba(255,255,255,0.85)",
-    fontSize: 18,
+    color: "rgba(255,255,255,0.85)", fontSize: 18,
   },
-  beautifyOptionIconActive: {
-    color: "#fff",
-  },
+  beautifyOptionIconActive: { color: "#fff" },
   beautifyOptionLabel: {
-    color: "rgba(255,255,255,0.85)",
-    fontSize: 12,
+    color: "rgba(255,255,255,0.85)", fontSize: 12,
   },
   beautifyOptionLabelActive: {
-    color: "#fff",
-    fontWeight: "700",
+    color: "#fff", fontWeight: "700",
   },
   aiApplyButton: {
-    height: 32,
-    paddingHorizontal: 12,
-    borderRadius: 999,
+    height: 32, paddingHorizontal: 12, borderRadius: 999,
     backgroundColor: "rgba(0,149,246,0.9)",
-    alignItems: "center",
-    justifyContent: "center",
-    marginLeft: 6,
+    alignItems: "center", justifyContent: "center", marginLeft: 6,
   },
   aiApplyButtonText: {
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "700",
+    color: "#fff", fontSize: 12, fontWeight: "700",
   },
   beautifyTabsRight: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
+    flexDirection: "row", alignItems: "center", gap: 12,
   },
   beautifyApplyText: {
-    color: "#0095F6",
-    fontSize: 13,
-    fontWeight: "700",
+    color: "#0095F6", fontSize: 13, fontWeight: "700",
+  },
+
+  // ─── NOVO: painel de ajustes avancados ───
+  adjustPanelContainer: {
+    marginBottom: 10,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    borderRadius: 16,
+    padding: 12,
+  },
+  adjustPanelHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  adjustPanelTitle: {
+    color: "#fff", fontSize: 14, fontWeight: "800",
+  },
+  adjustRow: {
+    flexDirection: "row", alignItems: "center", marginVertical: 5,
+  },
+  adjustIcon: {
+    color: "#fff", fontSize: 16, width: 26, textAlign: "center",
+  },
+  adjustLabel: {
+    color: "#fff", fontSize: 12, width: 80, fontWeight: "600",
+  },
+  adjustSliderWrap: {
+    flex: 1, marginHorizontal: 6,
+  },
+  adjustSliderTrack: {
+    height: 6, borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.20)",
+    position: "relative",
+  },
+  adjustSliderFill: {
+    position: "absolute", left: 0, top: 0, bottom: 0,
+    borderRadius: 999, backgroundColor: "#ff3366",
+  },
+  adjustValue: {
+    color: "rgba(255,255,255,0.6)", fontSize: 11, width: 40, textAlign: "right",
   },
 });
