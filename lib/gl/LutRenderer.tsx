@@ -5,23 +5,36 @@ import { ViewStyle } from "react-native";
 
 type LutSource = number | string;
 
+export type BeautifyParams = {
+  brightness?: number;
+  contrast?: number;
+  saturation?: number;
+  smoothing?: number;
+  whitenTeeth?: number;
+  baseGlow?: number;
+};
+
 export default function LutRenderer({
   sourceUri,
   lut,
   intensity = 1,
+  beautify,
   style,
   onReady,
 }: {
   sourceUri: string;
-  lut: LutSource;
+  lut: LutSource | null;
   intensity?: number;
+  beautify?: BeautifyParams;
   style?: ViewStyle;
   onReady?: () => void;
 }) {
-  const key = useMemo(
-    () => `${sourceUri}__${typeof lut === "number" ? String(lut) : lut}__${intensity}`,
-    [sourceUri, lut, intensity]
-  );
+  const key = useMemo(() => {
+    const b = beautify || {};
+    return `${sourceUri}__${typeof lut === "number" ? String(lut) : lut ?? "nolut"}__${intensity}__${JSON.stringify(b)}`;
+  }, [sourceUri, lut, intensity, beautify]);
+
+  const hasLut = lut !== null && lut !== undefined;
 
   return (
     <GLView
@@ -29,27 +42,39 @@ export default function LutRenderer({
       style={style}
       onContextCreate={async (gl: any) => {
         try {
-          const { VERT, FRAG } = await import("./shaders/lut2d");
+          const { VERT, FRAG_COMPAT } = await import("./shaders/lut2d");
 
           const compile = (type: number, src: string) => {
             const sh = gl.createShader(type);
             gl.shaderSource(sh, src);
             gl.compileShader(sh);
+            if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+              console.warn("Shader compile error:", gl.getShaderInfoLog(sh));
+            }
             return sh;
           };
 
           const vs = compile(gl.VERTEX_SHADER, VERT);
-          const fs = compile(gl.FRAGMENT_SHADER, FRAG);
+          const fs = compile(gl.FRAGMENT_SHADER, FRAG_COMPAT);
 
           const prog = gl.createProgram();
           gl.attachShader(prog, vs);
           gl.attachShader(prog, fs);
           gl.linkProgram(prog);
+
+          if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+            console.warn("Program link error:", gl.getProgramInfoLog(prog));
+          }
+
           gl.useProgram(prog);
 
           const quad = gl.createBuffer();
           gl.bindBuffer(gl.ARRAY_BUFFER, quad);
-          gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+          gl.bufferData(
+            gl.ARRAY_BUFFER,
+            new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]),
+            gl.STATIC_DRAW
+          );
 
           const aPos = gl.getAttribLocation(prog, "aPos");
           gl.enableVertexAttribArray(aPos);
@@ -58,15 +83,23 @@ export default function LutRenderer({
           const uImage = gl.getUniformLocation(prog, "uImage");
           const uLut = gl.getUniformLocation(prog, "uLut");
           const uIntensity = gl.getUniformLocation(prog, "uIntensity");
+          const uBrightness = gl.getUniformLocation(prog, "uBrightness");
+          const uContrast = gl.getUniformLocation(prog, "uContrast");
+          const uSaturation = gl.getUniformLocation(prog, "uSaturation");
+          const uSmoothing = gl.getUniformLocation(prog, "uSmoothing");
+          const uWhitenTeeth = gl.getUniformLocation(prog, "uWhitenTeeth");
+          const uBaseGlow = gl.getUniformLocation(prog, "uBaseGlow");
 
           const loadAsset = async (src: LutSource) => {
-            const a = typeof src === "number" ? Asset.fromModule(src) : Asset.fromURI(src);
-            await a.downloadAsync();
+            const a =
+              typeof src === "number"
+                ? Asset.fromModule(src)
+                : Asset.fromURI(src);
+            if (!a.downloaded) await a.downloadAsync();
             return a;
           };
 
           const srcAsset = await loadAsset(sourceUri);
-          const lutAsset = await loadAsset(lut);
 
           const makeTex = (unit: number, asset: any) => {
             const tex = gl.createTexture();
@@ -76,8 +109,6 @@ export default function LutRenderer({
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-
-            // Expo's WebGL accepts expo-asset Asset objects directly in texImage2D on native.
             gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, asset);
             return tex;
           };
@@ -85,10 +116,33 @@ export default function LutRenderer({
           makeTex(gl.TEXTURE0, srcAsset);
           gl.uniform1i(uImage, 0);
 
-          makeTex(gl.TEXTURE1, lutAsset);
-          gl.uniform1i(uLut, 1);
+          if (hasLut) {
+            const lutAsset = await loadAsset(lut!);
+            makeTex(gl.TEXTURE1, lutAsset);
+            gl.uniform1i(uLut, 1);
+            gl.uniform1f(uIntensity, intensity);
+          } else {
+            const identityTex = gl.createTexture();
+            gl.activeTexture(gl.TEXTURE1);
+            gl.bindTexture(gl.TEXTURE_2D, identityTex);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            gl.texImage2D(
+              gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0,
+              gl.RGBA, gl.UNSIGNED_BYTE,
+              new Uint8Array([255, 255, 255, 255])
+            );
+            gl.uniform1i(uLut, 1);
+            gl.uniform1f(uIntensity, 0.0);
+          }
 
-          gl.uniform1f(uIntensity, intensity);
+          const b = beautify || {};
+          gl.uniform1f(uBrightness, b.brightness ?? 0.0);
+          gl.uniform1f(uContrast, b.contrast ?? 1.0);
+          gl.uniform1f(uSaturation, b.saturation ?? 1.0);
+          gl.uniform1f(uSmoothing, b.smoothing ?? 0.0);
+          gl.uniform1f(uWhitenTeeth, b.whitenTeeth ?? 0.0);
+          gl.uniform1f(uBaseGlow, b.baseGlow ?? 0.0);
 
           gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
           gl.clearColor(0, 0, 0, 1);
@@ -98,8 +152,8 @@ export default function LutRenderer({
           gl.endFrameEXP?.();
 
           onReady?.();
-        } catch {
-          // If GL fails, we just don't crash the screen.
+        } catch (err) {
+          console.warn("LutRenderer GL error:", err);
         }
       }}
     />

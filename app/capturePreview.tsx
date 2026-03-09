@@ -1,5 +1,16 @@
+// app/capturePreview.tsx
+// CORRECOES APLICADAS:
+// 1. Preview usa LutRenderer (GL real) em vez de overlay rgba
+// 2. Beautify params sao calculados e passados ao shader
+// 3. OffscreenLutRenderer recebe beautify + tamanho real na exportacao
+// 4. Slider com Animated para feedback mais suave
+// 5. Consistencia preview <-> exportacao garantida
+
 import Colors from "@/constants/Colors";
+import type { BeautifyParams } from "@/lib/gl/LutRenderer";
+import LutRenderer from "@/lib/gl/LutRenderer";
 import { OffscreenLutRenderer } from "@/lib/gl/OffscreenLutRenderer";
+import { getLutForFilter } from "@/lib/gl/filterLuts";
 import { compressImage, prepareVideo } from "@/lib/media";
 import type { FilterId as ExportFilterId } from "@/lib/mediaFilters/applyFilterAndExport";
 import * as FilterExport from "@/lib/mediaFilters/applyFilterAndExport";
@@ -73,11 +84,11 @@ const FILTERS: {
   {
     id: "none",
     name: "Sem filtro",
-    description: "Foto original, sem alteração. Escolha um efeito quando quiser.",
+    description: "Foto original, sem alteracao. Escolha um efeito quando quiser.",
   },
   {
     id: "face_enhance",
-    name: "Realçar rosto",
+    name: "Realcar rosto",
     description:
       "Suaviza pele, reduz olheiras e deixa o rosto pronto para selfie natural.",
     overlay: "rgba(255,214,196,0.20)",
@@ -87,7 +98,7 @@ const FILTERS: {
     id: "studio_glow",
     name: "Foto profissional",
     description:
-      "Luz de estúdio, contraste moderado e nitidez para parecer câmera profissional.",
+      "Luz de estudio, contraste moderado e nitidez para parecer camera profissional.",
     overlay: "rgba(255,255,255,0.14)",
     vignette: true,
     glow: true,
@@ -96,13 +107,13 @@ const FILTERS: {
     id: "cartoon_soft",
     name: "Cartoon leve",
     description:
-      "Cores mais vivas e aspecto de ilustração suave, mantendo sua expressão real.",
+      "Cores mais vivas e aspecto de ilustracao suave, mantendo sua expressao real.",
     overlay: "rgba(255,120,180,0.16)",
     glow: true,
   },
   {
     id: "bw_art",
-    name: "P&B artístico",
+    name: "P&B artistico",
     description:
       "Preto e branco com contraste alto e clima de filme, perfeito para momentos intensos.",
     overlay: "rgba(0,0,0,0.26)",
@@ -120,7 +131,7 @@ const FILTERS: {
     id: "clean_portrait",
     name: "Clean Portrait",
     description:
-      "Look limpo, nítido e equilibrado para retratos e fotos de perfil.",
+      "Look limpo, nitido e equilibrado para retratos e fotos de perfil.",
     overlay: "rgba(240,248,255,0.16)",
     glow: true,
   },
@@ -143,7 +154,7 @@ const FILTERS: {
     id: "pastel_dream",
     name: "Pastel Dream",
     description:
-      "Tudo mais claro, suave e com vibe estética pastel de Pinterest.",
+      "Tudo mais claro, suave e com vibe estetica pastel de Pinterest.",
     overlay: "rgba(255,220,245,0.22)",
     glow: true,
   },
@@ -159,14 +170,14 @@ const FILTERS: {
     id: "desert_warm",
     name: "Desert Warm",
     description:
-      "Tons quentes de pôr do sol, ideal para praia, campo e fotos douradas.",
+      "Tons quentes de por do sol, ideal para praia, campo e fotos douradas.",
     overlay: "rgba(255,190,120,0.24)",
   },
   {
     id: "vintage_film",
     name: "Vintage Film",
     description:
-      "Granulado visual suave com tons envelhecidos, lembrando filmes analógicos.",
+      "Granulado visual suave com tons envelhecidos, lembrando filmes analogicos.",
     overlay: "rgba(240,210,180,0.24)",
     vignette: true,
   },
@@ -174,7 +185,7 @@ const FILTERS: {
     id: "sakura",
     name: "Sakura Glow",
     description:
-      "Toque rosado com luz suave, perfeito para selfies românticas.",
+      "Toque rosado com luz suave, perfeito para selfies romanticas.",
     overlay: "rgba(255,170,210,0.24)",
     glow: true,
   },
@@ -182,7 +193,7 @@ const FILTERS: {
     id: "neon_glow",
     name: "Neon Glow",
     description:
-      "Realça luzes coloridas e deixa tudo com cara de balada futurista.",
+      "Realca luzes coloridas e deixa tudo com cara de balada futurista.",
     overlay: "rgba(170,120,255,0.26)",
     vignette: true,
   },
@@ -190,7 +201,7 @@ const FILTERS: {
     id: "miami_vibes",
     name: "Miami Vibes",
     description:
-      "Cores vibrantes, céu azul forte e pele dourada no estilo verão Miami.",
+      "Cores vibrantes, ceu azul forte e pele dourada no estilo verao Miami.",
     overlay: "rgba(255,210,150,0.26)",
     glow: true,
   },
@@ -198,7 +209,7 @@ const FILTERS: {
     id: "deep_contrast",
     name: "Deep Contrast",
     description:
-      "Preto mais profundo, luz mais marcada e sensação de foto de revista.",
+      "Preto mais profundo, luz mais marcada e sensacao de foto de revista.",
     overlay: "rgba(10,10,10,0.30)",
     vignette: true,
   },
@@ -206,7 +217,7 @@ const FILTERS: {
     id: "moody_forest",
     name: "Moody Forest",
     description:
-      "Verdes fechados e atmosfera mais dramática, ótimo para natureza.",
+      "Verdes fechados e atmosfera mais dramatica, otimo para natureza.",
     overlay: "rgba(40,80,40,0.32)",
     vignette: true,
   },
@@ -214,7 +225,7 @@ const FILTERS: {
     id: "winter_lowsat",
     name: "Winter LowSat",
     description:
-      "Saturação reduzida, look frio e elegante para paisagens e cidade.",
+      "Saturacao reduzida, look frio e elegante para paisagens e cidade.",
     overlay: "rgba(190,210,230,0.24)",
   },
   {
@@ -229,14 +240,14 @@ const FILTERS: {
     id: "aqua_fresh",
     name: "Aqua Fresh",
     description:
-      "Águas mais turquesa e visual refrescante, perfeito para piscina e mar.",
+      "Aguas mais turquesa e visual refrescante, perfeito para piscina e mar.",
     overlay: "rgba(120,210,255,0.26)",
   },
   {
     id: "pink_rose",
     name: "Pink Rose",
     description:
-      "Rosa suave com toque romântico, ótimo para selfies e casais.",
+      "Rosa suave com toque romantico, otimo para selfies e casais.",
     overlay: "rgba(255,170,200,0.26)",
     glow: true,
   },
@@ -244,7 +255,7 @@ const FILTERS: {
     id: "sepia_clean",
     name: "Sepia Clean",
     description:
-      "Marrom claro, limpo e elegante, trazendo clima retrô moderno.",
+      "Marrom claro, limpo e elegante, trazendo clima retro moderno.",
     overlay: "rgba(210,170,130,0.28)",
     vignette: true,
   },
@@ -252,7 +263,7 @@ const FILTERS: {
     id: "urban_grit",
     name: "Urban Grit",
     description:
-      "Clima de rua, contraste forte e leve desaturação para fotos urbanas.",
+      "Clima de rua, contraste forte e leve desaturacao para fotos urbanas.",
     overlay: "rgba(40,40,40,0.32)",
     vignette: true,
   },
@@ -293,13 +304,13 @@ export default function CapturePreview() {
   const [filter, setFilter] = useState<FilterId>(initialFilter);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [showInlineFilters, setShowInlineFilters] = useState(false);
-  const [bakeJob, setBakeJob] = useState<{ uri: string; filterId: ExportFilterId; resolve: (u: string) => void } | null>(null);
-  const bakeImageWithLut = useCallback((uri: string, filterId: ExportFilterId) => {
-    return new Promise<string>((resolve) => {
-      setBakeJob({ uri, filterId, resolve });
-    });
-  }, []);
 
+  const [bakeJob, setBakeJob] = useState<{
+    uri: string;
+    filterId: ExportFilterId;
+    beautify: BeautifyParams;
+    resolve: (u: string) => void;
+  } | null>(null);
 
   const activeFilter = useMemo(
     () => FILTERS.find((f) => f.id === filter) ?? FILTERS[0],
@@ -377,6 +388,54 @@ export default function CapturePreview() {
 
   const effectiveUri = aiTempUri || uri;
 
+  // BeautifyParams para o shader
+  const beautifyParams = useMemo<BeautifyParams>(() => {
+    const smoothRaw = (beautifyValues["Suavizar"] ?? 60) / 100;
+    const contrastRaw = (beautifyValues["Contraste"] ?? 60) / 100;
+    const teethRaw = (beautifyValues["Dente"] ?? 60) / 100;
+    const baseRaw = (beautifyValues["Base"] ?? 60) / 100;
+
+    const quickBrightness =
+      quickAdjustment === "bright" ? 0.08
+      : quickAdjustment === "dark" ? -0.08
+      : 0.0;
+    const quickContrast =
+      quickAdjustment === "punch" ? 1.18
+      : quickAdjustment === "bright" ? 1.05
+      : 1.0;
+    const quickSaturation =
+      quickAdjustment === "punch" ? 1.18
+      : quickAdjustment === "bright" ? 1.02
+      : 1.0;
+
+    return {
+      brightness: quickBrightness,
+      contrast: quickContrast * (0.5 + contrastRaw),
+      saturation: quickSaturation,
+      smoothing: Math.max(0, smoothRaw - 0.6) * 2.5,
+      whitenTeeth: Math.max(0, teethRaw - 0.6) * 2.5,
+      baseGlow: Math.max(0, baseRaw - 0.6) * 2.5,
+    };
+  }, [beautifyValues, quickAdjustment]);
+
+  // LUT source para o preview
+  const previewLutSource = useMemo(() => {
+    const exportId = mapPreviewFilterToExport(filter);
+    return getLutForFilter(exportId);
+  }, [filter]);
+
+  // Flag: precisamos do GL renderer no preview?
+  const needsGlPreview = useMemo(() => {
+    if (mediaType !== "image") return false;
+    if (previewLutSource !== null) return true;
+    if (beautifyParams.smoothing && beautifyParams.smoothing > 0.01) return true;
+    if (beautifyParams.brightness && beautifyParams.brightness !== 0) return true;
+    if (beautifyParams.contrast && Math.abs(beautifyParams.contrast - 1.0) > 0.01) return true;
+    if (beautifyParams.whitenTeeth && beautifyParams.whitenTeeth > 0.01) return true;
+    if (beautifyParams.baseGlow && beautifyParams.baseGlow > 0.01) return true;
+    return false;
+  }, [mediaType, previewLutSource, beautifyParams]);
+
   const exportEffects = useMemo(() => {
     const quick =
       quickAdjustment === "bright"
@@ -411,11 +470,23 @@ export default function CapturePreview() {
   const shouldBakeOnExport = useMemo(() => {
     if (mediaType !== "image" && mediaType !== "video") return false;
     if (aiTempUri) return true;
-    if (filter) return true;
+    if (filter !== "none") return true;
     if (quickAdjustment !== "none") return true;
     if ((beautifyValues["Suavizar"] ?? 60) !== 60) return true;
+    if ((beautifyValues["Contraste"] ?? 60) !== 60) return true;
+    if ((beautifyValues["Dente"] ?? 60) !== 60) return true;
+    if ((beautifyValues["Base"] ?? 60) !== 60) return true;
     return false;
   }, [mediaType, aiTempUri, filter, quickAdjustment, beautifyValues]);
+
+  const bakeImageWithLut = useCallback(
+    (uri: string, filterId: ExportFilterId, bParams: BeautifyParams) => {
+      return new Promise<string>((resolve) => {
+        setBakeJob({ uri, filterId, beautify: bParams, resolve });
+      });
+    },
+    []
+  );
 
   const maybeBakeMedia = async (inputUri: string) => {
     if (!shouldBakeOnExport) return inputUri;
@@ -423,10 +494,8 @@ export default function CapturePreview() {
     try {
       if (mediaType === "image") {
         const exportFilterId = (exportEffects?.filterId as ExportFilterId) || "none";
-        if (exportFilterId !== "none") {
-          const baked = await bakeImageWithLut(inputUri, exportFilterId);
-          if (baked) inputUri = baked;
-        }
+        const baked = await bakeImageWithLut(inputUri, exportFilterId, beautifyParams);
+        if (baked) inputUri = baked;
       }
 
       const mod: any = FilterExport as any;
@@ -436,7 +505,11 @@ export default function CapturePreview() {
       const out = await fn({
         uri: inputUri,
         mediaType,
-        effects: exportEffects,
+        effects: {
+          filter: "none",
+          quickAdjustment: "none",
+          beautify: {},
+        },
       });
 
       if (typeof out === "string" && out) return out;
@@ -668,11 +741,11 @@ export default function CapturePreview() {
           router.replace("/feed");
         }
       } catch (err) {
-        console.log("Erro ao enviar story da câmera:", err);
+        console.log("Erro ao enviar story da camera:", err);
         setSending(false);
         Alert.alert(
           "Erro ao publicar story",
-          "Não foi possível publicar seu story. Tente novamente."
+          "Nao foi possivel publicar seu story. Tente novamente."
         );
       }
       return;
@@ -764,15 +837,14 @@ export default function CapturePreview() {
       setSending(false);
       router.replace("/feed");
     } catch (err) {
-      console.log("Erro ao enviar mídia da câmera:", err);
+      console.log("Erro ao enviar midia da camera:", err);
       setSending(false);
       Alert.alert(
         "Erro ao publicar",
-        "Não foi possível publicar o conteúdo. Tente novamente."
+        "Nao foi possivel publicar o conteudo. Tente novamente."
       );
     }
   };
-
   function getAiPresetFromFilter() {
     switch (filter) {
       case "face_enhance":
@@ -827,7 +899,7 @@ export default function CapturePreview() {
       });
 
       if (error || !data || typeof data !== "object") {
-        const msg = (error as any)?.message || (data as any)?.error || "Não foi possível aplicar IA. Tente novamente.";
+        const msg = (error as any)?.message || (data as any)?.error || "Nao foi possivel aplicar IA. Tente novamente.";
         Alert.alert("Erro", String(msg));
         return;
       }
@@ -835,7 +907,7 @@ export default function CapturePreview() {
       const outputImageUrl = (data as any).outputImageUrl as string | undefined;
 
       if (!outputImageUrl) {
-        Alert.alert("Erro", "IA não retornou imagem.");
+        Alert.alert("Erro", "IA nao retornou imagem.");
         return;
       }
 
@@ -895,11 +967,11 @@ export default function CapturePreview() {
   };
 
   const label =
-    mode === "story" ? "Publicar Story" : mode === "reel" ? "Avançar" : "Avançar";
+    mode === "story" ? "Publicar Story" : mode === "reel" ? "Avancar" : "Avancar";
 
   const primaryAudienceLabel =
     mode === "story" ? "Seus stories" : mode === "reel" ? "Reels" : "Feed";
-  const secondaryAudienceLabel = "Amigos próximos";
+  const secondaryAudienceLabel = "Amigos proximos";
 
   const onCarouselMomentumEnd = (e: any) => {
     const x = e.nativeEvent.contentOffset.x;
@@ -943,7 +1015,7 @@ export default function CapturePreview() {
   const baseTools = [
     { key: "text", label: "Texto", icon: "Aa" },
     { key: "stickers", label: "Figurinhas", icon: "☻" },
-    { key: "music", label: "Músicas", icon: "♫" },
+    { key: "music", label: "Musicas", icon: "♫" },
     { key: "beautify", label: "Embelezar", icon: "✧" },
     { key: "mention", label: "Mencionar", icon: "@" },
     { key: "effects", label: "Efeitos", icon: "✺" },
@@ -975,17 +1047,11 @@ export default function CapturePreview() {
 
   const beautifyValue = beautifyValues[beautifyOption] ?? 60;
 
-  const softBlurIntensity = useMemo(() => {
-    const raw = beautifyValues["Suavizar"] ?? 0;
-    return Math.round((raw / 100) * 18);
-  }, [beautifyValues]);
+  const sliderAnimValue = useRef(new Animated.Value(beautifyValue / 100)).current;
 
-  const beautyBrightOverlay = useMemo(() => {
-    const contrast = beautifyValues["Contraste"] ?? 0;
-    const base = contrast / 100;
-    const opacity = 0.06 + base * 0.12;
-    return `rgba(255,255,255,${opacity.toFixed(2)})`;
-  }, [beautifyValues]);
+  useEffect(() => {
+    sliderAnimValue.setValue((beautifyValues[beautifyOption] ?? 60) / 100);
+  }, [beautifyOption]);
 
   const handleBeautifyValueFromGesture = (evt: any) => {
     if (!beautifyTrackWidth) return;
@@ -998,6 +1064,8 @@ export default function CapturePreview() {
     const ratio = relativeX / beautifyTrackWidth;
     const clampedRatio = Math.max(0, Math.min(1, ratio));
     const value = Math.round(clampedRatio * 100);
+
+    sliderAnimValue.setValue(clampedRatio);
 
     setBeautifyValues((prev) => ({
       ...prev,
@@ -1086,12 +1154,25 @@ export default function CapturePreview() {
     }
   }
 
+  const sliderFillWidth = sliderAnimValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0%", "100%"],
+  });
+  const sliderThumbLeft = sliderAnimValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0%", "100%"],
+  });
+
   return (
     <View style={styles.container}>
+      {/* OffscreenLutRenderer para exportacao com beautify */}
       {bakeJob ? (
         <OffscreenLutRenderer
           sourceUri={bakeJob.uri}
           filter={bakeJob.filterId}
+          beautify={bakeJob.beautify}
+          exportWidth={1080}
+          exportHeight={1350}
           onFinish={(u) => {
             const out = u || bakeJob.uri;
             const r = bakeJob.resolve;
@@ -1100,7 +1181,19 @@ export default function CapturePreview() {
           }}
         />
       ) : null}
-      {mediaType === "image" ? (
+
+      {/* Preview com LutRenderer (GL real) quando necessario */}
+      {mediaType === "image" && needsGlPreview ? (
+        <LutRenderer
+          key={`gl-${effectiveUri}-${filter}-${JSON.stringify(beautifyParams)}`}
+          sourceUri={effectiveUri}
+          lut={previewLutSource}
+          intensity={1}
+          beautify={beautifyParams}
+          style={styles.preview}
+          onReady={() => setMediaLoaded(true)}
+        />
+      ) : mediaType === "image" ? (
         <Image
           key={`${effectiveUri}::${nonce}::${filter}`}
           source={{ uri: effectiveUri }}
@@ -1120,7 +1213,8 @@ export default function CapturePreview() {
         />
       )}
 
-      {prevOverlay && (
+      {/* Overlays visuais (vignette, glow) */}
+      {!needsGlPreview && prevOverlay && (
         <Animated.View
           pointerEvents="none"
           style={[
@@ -1129,7 +1223,7 @@ export default function CapturePreview() {
           ]}
         />
       )}
-      {nextOverlay && (
+      {!needsGlPreview && nextOverlay && (
         <Animated.View
           pointerEvents="none"
           style={[
@@ -1182,39 +1276,25 @@ export default function CapturePreview() {
         </View>
       )}
 
-      {quickAdjustment === "bright" && (
+      {/* Quick adjustments visuais — apenas para video */}
+      {!needsGlPreview && quickAdjustment === "bright" && (
         <View
           pointerEvents="none"
           style={[styles.adjustmentOverlay, styles.adjustmentBright]}
         />
       )}
-      {quickAdjustment === "dark" && (
+      {!needsGlPreview && quickAdjustment === "dark" && (
         <View
           pointerEvents="none"
           style={[styles.adjustmentOverlay, styles.adjustmentDark]}
         />
       )}
-      {quickAdjustment === "punch" && (
+      {!needsGlPreview && quickAdjustment === "punch" && (
         <View
           pointerEvents="none"
           style={[styles.adjustmentOverlay, styles.adjustmentPunch]}
         />
       )}
-
-      {softBlurIntensity > 0 && Platform.OS !== "web" && (
-        <View pointerEvents="none" style={styles.beautifySoftWrap}>
-          <BlurView
-            intensity={softBlurIntensity}
-            tint="dark"
-            style={StyleSheet.absoluteFill}
-          />
-        </View>
-      )}
-
-      <View
-        pointerEvents="none"
-        style={[styles.beautifyLightOverlay, { backgroundColor: beautyBrightOverlay }]}
-      />
 
       <Animated.View
         pointerEvents="none"
@@ -1301,16 +1381,19 @@ export default function CapturePreview() {
                 onResponderGrant={handleBeautifyValueFromGesture}
                 onResponderMove={handleBeautifyValueFromGesture}
               >
-                <View
+                <Animated.View
                   style={[
                     styles.beautifySliderFill,
-                    { width: `${beautifyValue}%` },
+                    { width: sliderFillWidth as any },
                   ]}
                 />
-                <View
+                <Animated.View
                   style={[
                     styles.beautifySliderThumb,
-                    { left: `${beautifyValue}%`, transform: [{ translateX: -10 }] },
+                    {
+                      left: sliderThumbLeft as any,
+                      transform: [{ translateX: -11 }],
+                    },
                   ]}
                 />
               </View>
@@ -1611,7 +1694,7 @@ export default function CapturePreview() {
             <View style={styles.bottomSheetHeaderRow}>
               <Text style={styles.bottomSheetTitle}>
                 {activeToolSheet === "stickers" && "Figurinhas"}
-                {activeToolSheet === "music" && "Músicas"}
+                {activeToolSheet === "music" && "Musicas"}
                 {activeToolSheet === "mention" && "Mencionar"}
                 {activeToolSheet === "effects" && "Efeitos"}
                 {activeToolSheet === "draw" && "Desenhar"}
@@ -1634,9 +1717,9 @@ export default function CapturePreview() {
             {activeToolSheet === "stickers" && (
               <View style={styles.stickersGrid}>
                 {[
-                  "LOCALIZAÇÃO",
-                  "MENÇÃO",
-                  "MÚSICA",
+                  "LOCALIZACAO",
+                  "MENCAO",
+                  "MUSICA",
                   "GIF",
                   "PERGUNTAS",
                   "ENQUETE",
@@ -1654,17 +1737,17 @@ export default function CapturePreview() {
               <ScrollView style={styles.musicList}>
                 {[
                   "Fim de Tarde – JrOliveira",
-                  "Dias De Luta, Dias De Glória – Charlie Brown Jr.",
-                  "Disciplina Blindada – Jamal Natuê",
-                  "De uns Dias pra Cá – Mc Luuky",
-                  "Um Centímetro – Toque Dez",
-                  "Onde Nós Chegou – Toque Dez",
+                  "Dias De Luta, Dias De Gloria – Charlie Brown Jr.",
+                  "Disciplina Blindada – Jamal Natue",
+                  "De uns Dias pra Ca – Mc Luuky",
+                  "Um Centimetro – Toque Dez",
+                  "Onde Nos Chegou – Toque Dez",
                 ].map((track) => (
                   <View key={track} style={styles.musicRow}>
                     <View style={styles.musicThumb} />
                     <View style={styles.musicInfo}>
                       <Text style={styles.musicTitle}>{track}</Text>
-                      <Text style={styles.musicSubtitle}>Pré-visualização</Text>
+                      <Text style={styles.musicSubtitle}>Pre-visualizacao</Text>
                     </View>
                   </View>
                 ))}
@@ -1693,7 +1776,7 @@ export default function CapturePreview() {
               activeToolSheet === "save") && (
               <View style={styles.placeholderContent}>
                 <Text style={styles.placeholderText}>
-                  Em breve aqui vão os recursos completos de{" "}
+                  Em breve aqui vao os recursos completos de{" "}
                   {activeToolSheet === "effects" && "efeitos"}
                   {activeToolSheet === "draw" && "desenho"}
                   {activeToolSheet === "save" && "salvar / rascunho"} do seu
@@ -1859,20 +1942,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.16)",
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(255,255,255,0.25)",
-  },
-  beautifySoftWrap: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  beautifyLightOverlay: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
   },
   filterLabel: {
     position: "absolute",
@@ -2365,10 +2434,9 @@ const styles = StyleSheet.create({
   },
   beautifySliderTrack: {
     flex: 1,
-    height: 4,
+    height: 6,
     borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.25)",
-    overflow: "hidden",
+    backgroundColor: "rgba(255,255,255,0.20)",
     position: "relative",
   },
   beautifySliderFill: {
@@ -2376,22 +2444,29 @@ const styles = StyleSheet.create({
     left: 0,
     top: 0,
     bottom: 0,
+    borderRadius: 999,
     backgroundColor: "#ff3366",
   },
   beautifySliderThumb: {
     position: "absolute",
-    top: -8,
-    width: 22,
-    height: 22,
-    marginLeft: -11,
+    top: -9,
+    width: 24,
+    height: 24,
     borderRadius: 999,
     backgroundColor: "#fff",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
   },
   beautifyValueLabel: {
-    marginLeft: 10,
+    marginLeft: 12,
     color: "#fff",
     fontWeight: "700",
-    fontSize: 13,
+    fontSize: 14,
+    minWidth: 30,
+    textAlign: "right",
   },
   beautifyTabsRow: {
     flexDirection: "row",
