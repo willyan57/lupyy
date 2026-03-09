@@ -1,34 +1,75 @@
 import { Asset } from "expo-asset";
 import { GLView, type ExpoWebGLRenderingContext } from "expo-gl";
-import { useCallback, useRef } from "react";
-import { StyleSheet, View } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Image, StyleSheet, View } from "react-native";
 
 import type { FilterId } from "@/lib/mediaFilters/applyFilterAndExport";
-import type { BeautifyParams } from "./LutRenderer";
 import { getLutForFilter } from "./filterLuts";
-import { FRAG_COMPAT as FRAG, VERT } from "./shaders/lut2d";
+import { FRAG, VERT } from "./shaders/lut2d";
+
+type ShaderAdjustments = {
+  intensity?: number;
+  brightness?: number;
+  contrast?: number;
+  saturation?: number;
+  smoothing?: number;
+  warmth?: number;
+  tintColor?: [number, number, number];
+  tintStrength?: number;
+};
 
 type OffscreenLutRendererProps = {
   sourceUri: string;
   filter: FilterId;
-  beautify?: BeautifyParams;
-  exportWidth?: number;
-  exportHeight?: number;
+  adjustments?: ShaderAdjustments;
   onFinish: (resultUri: string | null) => void;
 };
 
-export function OffscreenLutRenderer({
-  sourceUri,
-  filter,
-  beautify,
-  exportWidth,
-  exportHeight,
-  onFinish,
-}: OffscreenLutRendererProps) {
-  const finishedRef = useRef(false);
+const FALLBACK_SIZE = 1080;
 
-  const glWidth = exportWidth || 1080;
-  const glHeight = exportHeight || 1080;
+const compileShader = (gl: ExpoWebGLRenderingContext, type: number, src: string) => {
+  const shader = gl.createShader(type)!;
+  gl.shaderSource(shader, src);
+  gl.compileShader(shader);
+  return shader;
+};
+
+const loadAsset = async (input: number | string) => {
+  const asset = typeof input === "number" ? Asset.fromModule(input) : Asset.fromURI(input);
+  if (!asset.downloaded) {
+    await asset.downloadAsync();
+  }
+  return asset;
+};
+
+const makeTex = (gl: ExpoWebGLRenderingContext, unit: number, asset: Asset) => {
+  const tex = gl.createTexture();
+  gl.activeTexture(unit);
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, asset as any);
+  return tex;
+};
+
+export function OffscreenLutRenderer({ sourceUri, filter, adjustments, onFinish }: OffscreenLutRendererProps) {
+  const finishedRef = useRef(false);
+  const [size, setSize] = useState({ width: FALLBACK_SIZE, height: FALLBACK_SIZE });
+
+  useEffect(() => {
+    if (!sourceUri) return;
+    Image.getSize(
+      sourceUri,
+      (width, height) => {
+        if (width > 0 && height > 0) {
+          setSize({ width, height });
+        }
+      },
+      () => undefined
+    );
+  }, [sourceUri]);
 
   const handleFinishOnce = useCallback(
     (uri: string | null) => {
@@ -47,97 +88,45 @@ export function OffscreenLutRenderer({
       }
 
       try {
-        const vertexShader = gl.createShader(gl.VERTEX_SHADER)!;
-        gl.shaderSource(vertexShader, VERT);
-        gl.compileShader(vertexShader);
-
-        const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER)!;
-        gl.shaderSource(fragmentShader, FRAG);
-        gl.compileShader(fragmentShader);
-
+        const vertexShader = compileShader(gl, gl.VERTEX_SHADER, VERT);
+        const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, FRAG);
         const program = gl.createProgram()!;
         gl.attachShader(program, vertexShader);
         gl.attachShader(program, fragmentShader);
         gl.linkProgram(program);
         gl.useProgram(program);
 
-        const aPos = gl.getAttribLocation(program, "aPos");
         const quadBuffer = gl.createBuffer();
         gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
-        gl.bufferData(
-          gl.ARRAY_BUFFER,
-          new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]),
-          gl.STATIC_DRAW
-        );
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+
+        const aPos = gl.getAttribLocation(program, "aPos");
         gl.enableVertexAttribArray(aPos);
         gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
 
-        const uImage = gl.getUniformLocation(program, "uImage");
-        const uLut = gl.getUniformLocation(program, "uLut");
-        const uIntensity = gl.getUniformLocation(program, "uIntensity");
-        const uBrightness = gl.getUniformLocation(program, "uBrightness");
-        const uContrast = gl.getUniformLocation(program, "uContrast");
-        const uSaturation = gl.getUniformLocation(program, "uSaturation");
-        const uSmoothing = gl.getUniformLocation(program, "uSmoothing");
-        const uWhitenTeeth = gl.getUniformLocation(program, "uWhitenTeeth");
-        const uBaseGlow = gl.getUniformLocation(program, "uBaseGlow");
-
-        const loadAsset = async (input: number | string) => {
-          const asset =
-            typeof input === "number"
-              ? Asset.fromModule(input)
-              : Asset.fromURI(input);
-          if (!asset.downloaded) await asset.downloadAsync();
-          return asset;
-        };
-
         const srcAsset = await loadAsset(sourceUri);
-
-        const makeTex = (unit: number, asset: any) => {
-          const tex = gl.createTexture();
-          gl.activeTexture(unit);
-          gl.bindTexture(gl.TEXTURE_2D, tex);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-          gl.texImage2D(
-            gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, asset
-          );
-          return tex;
-        };
-
-        makeTex(gl.TEXTURE0, srcAsset);
-        gl.uniform1i(uImage, 0);
+        makeTex(gl, gl.TEXTURE0, srcAsset);
+        gl.uniform1i(gl.getUniformLocation(program, "uImage"), 0);
 
         const lutSource = getLutForFilter(filter);
         if (lutSource) {
           const lutAsset = await loadAsset(lutSource);
-          makeTex(gl.TEXTURE1, lutAsset);
-          gl.uniform1i(uLut, 1);
-          gl.uniform1f(uIntensity, 1.0);
+          makeTex(gl, gl.TEXTURE1, lutAsset);
+          gl.uniform1i(gl.getUniformLocation(program, "uLut"), 1);
+          gl.uniform1f(gl.getUniformLocation(program, "uHasLut"), 1);
         } else {
-          const identityTex = gl.createTexture();
-          gl.activeTexture(gl.TEXTURE1);
-          gl.bindTexture(gl.TEXTURE_2D, identityTex);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-          gl.texImage2D(
-            gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0,
-            gl.RGBA, gl.UNSIGNED_BYTE,
-            new Uint8Array([255, 255, 255, 255])
-          );
-          gl.uniform1i(uLut, 1);
-          gl.uniform1f(uIntensity, 0.0);
+          gl.uniform1f(gl.getUniformLocation(program, "uHasLut"), 0);
         }
 
-        const b = beautify || {};
-        gl.uniform1f(uBrightness, b.brightness ?? 0.0);
-        gl.uniform1f(uContrast, b.contrast ?? 1.0);
-        gl.uniform1f(uSaturation, b.saturation ?? 1.0);
-        gl.uniform1f(uSmoothing, b.smoothing ?? 0.0);
-        gl.uniform1f(uWhitenTeeth, b.whitenTeeth ?? 0.0);
-        gl.uniform1f(uBaseGlow, b.baseGlow ?? 0.0);
+        gl.uniform1f(gl.getUniformLocation(program, "uIntensity"), adjustments?.intensity ?? (lutSource ? 1 : 0));
+        gl.uniform1f(gl.getUniformLocation(program, "uBrightness"), adjustments?.brightness ?? 0);
+        gl.uniform1f(gl.getUniformLocation(program, "uContrast"), adjustments?.contrast ?? 1);
+        gl.uniform1f(gl.getUniformLocation(program, "uSaturation"), adjustments?.saturation ?? 1);
+        gl.uniform1f(gl.getUniformLocation(program, "uSmoothing"), adjustments?.smoothing ?? 0);
+        gl.uniform1f(gl.getUniformLocation(program, "uWarmth"), adjustments?.warmth ?? 0);
+        const tint = adjustments?.tintColor ?? [1, 1, 1];
+        gl.uniform3f(gl.getUniformLocation(program, "uTintColor"), tint[0], tint[1], tint[2]);
+        gl.uniform1f(gl.getUniformLocation(program, "uTintStrength"), adjustments?.tintStrength ?? 0);
 
         gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
         gl.clearColor(0, 0, 0, 1);
@@ -152,22 +141,19 @@ export function OffscreenLutRenderer({
           flip: true,
         } as any);
 
-        const resultUri =
-          typeof snapshot === "string" ? snapshot : (snapshot?.uri as string);
-
+        const resultUri = typeof snapshot === "string" ? snapshot : (snapshot?.uri as string | undefined);
         handleFinishOnce(resultUri || sourceUri);
-      } catch (err) {
-        console.warn("OffscreenLutRenderer error:", err);
+      } catch {
         handleFinishOnce(sourceUri);
       }
     },
-    [sourceUri, filter, beautify, handleFinishOnce]
+    [sourceUri, filter, adjustments, handleFinishOnce]
   );
 
   return (
-    <View style={styles.container} pointerEvents="none">
+    <View pointerEvents="none" style={styles.container}>
       <GLView
-        style={{ width: glWidth, height: glHeight }}
+        style={{ width: size.width, height: size.height }}
         onContextCreate={handleContextCreate}
       />
     </View>
@@ -177,8 +163,8 @@ export function OffscreenLutRenderer({
 const styles = StyleSheet.create({
   container: {
     position: "absolute",
-    left: -9999,
-    top: -9999,
-    overflow: "hidden",
+    opacity: 0,
+    left: -99999,
+    top: -99999,
   },
 });

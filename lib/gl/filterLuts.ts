@@ -1,5 +1,11 @@
+// lib/gl/filterLuts.ts
 import type { FilterId } from "@/lib/mediaFilters/applyFilterAndExport";
 
+/**
+ * Fonte de LUT:
+ * - number: require("...png") (Metro bundler)
+ * - string: URI (se você quiser carregar remoto no futuro)
+ */
 export type LutSource = number | string | null;
 
 export function getLutForFilter(filter: FilterId): LutSource {
