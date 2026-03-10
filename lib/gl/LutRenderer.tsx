@@ -1,7 +1,7 @@
 import { Asset } from "expo-asset";
 import { GLView } from "expo-gl";
 import { useMemo } from "react";
-import { ViewStyle } from "react-native";
+import { StyleProp, ViewStyle } from "react-native";
 
 type LutSource = number | string;
 
@@ -33,7 +33,7 @@ export default function LutRenderer({
   lut: LutSource | null;
   intensity?: number;
   beautify?: BeautifyParams;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
   onReady?: () => void;
 }) {
   const key = useMemo(() => {

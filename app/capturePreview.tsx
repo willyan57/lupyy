@@ -299,6 +299,28 @@ export default function CapturePreview() {
 
   const insets = useSafeAreaInsets();
 
+  const previewRotation = useMemo(() => {
+    const raw = Number(String(params.previewRotation ?? "0"));
+    if (raw === 90 || raw === -90 || raw === 180) return raw;
+    return 0;
+  }, [params.previewRotation]);
+
+  const previewMediaStyle = useMemo(() => {
+    if (!previewRotation) return styles.preview;
+    const quarterTurn = Math.abs(previewRotation) === 90;
+
+    return [
+      styles.preview,
+      {
+        width: quarterTurn ? previewHeight : width,
+        height: quarterTurn ? width : previewHeight,
+        top: quarterTurn ? (previewHeight - width) / 2 : 0,
+        left: quarterTurn ? (width - previewHeight) / 2 : 0,
+        transform: [{ rotate: `${previewRotation}deg` }],
+      },
+    ];
+  }, [previewRotation]);
+
   const initialFilter = useMemo(() => {
     const raw = String(params.filter ?? "none");
     const allowed = FILTERS.map((f) => f.id);
@@ -1288,14 +1310,14 @@ export default function CapturePreview() {
             lut={previewLutSource}
             intensity={filterIntensity}
             beautify={beautifyParams}
-            style={styles.preview}
+            style={previewMediaStyle}
             onReady={() => setMediaLoaded(true)}
           />
         ) : mediaType === "image" ? (
           <Image
             key={`${effectiveUri}::${nonce}::${filter}`}
             source={{ uri: effectiveUri }}
-            style={styles.preview}
+            style={previewMediaStyle}
             resizeMode={isWeb ? "contain" : "cover"}
             onLoadEnd={() => setMediaLoaded(true)}
           />
@@ -1303,7 +1325,7 @@ export default function CapturePreview() {
           <Video
             key={`${uri}::${nonce}`}
             source={{ uri }}
-            style={styles.preview}
+            style={previewMediaStyle}
             resizeMode={isWeb ? ResizeMode.CONTAIN : ResizeMode.COVER}
             shouldPlay
             isLooping

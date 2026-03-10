@@ -169,6 +169,25 @@ export default function CaptureScreen() {
 
   const handleClose = () => router.replace("/feed");
 
+  const getPreviewRotationFromExif = (photo: any) => {
+    const rawOrientation =
+      photo?.exif?.Orientation ??
+      photo?.exif?.orientation ??
+      photo?.exif?.TIFF?.Orientation ??
+      null;
+
+    switch (Number(rawOrientation)) {
+      case 3:
+        return "180";
+      case 6:
+        return "90";
+      case 8:
+        return "-90";
+      default:
+        return "0";
+    }
+  };
+
   const startTimerThenCapture = () => {
     if (timerSeconds === 0) { executeCapture(); return; }
     let count = timerSeconds;
@@ -201,7 +220,14 @@ export default function CaptureScreen() {
       if (photo?.uri) {
         router.push({
           pathname: "/capturePreview" as any,
-          params: { uri: photo.uri, mediaType: "image", mode, filter, nonce: String(Date.now()) },
+          params: {
+            uri: photo.uri,
+            mediaType: "image",
+            mode,
+            filter,
+            nonce: String(Date.now()),
+            previewRotation: getPreviewRotationFromExif(photo),
+          },
         });
       }
     } catch {
@@ -313,7 +339,6 @@ export default function CaptureScreen() {
 
   // Primary right tools (always visible)
   const primaryTools = [
-    { key: "flip", icon: "↺", label: "Girar", onPress: toggleFacing },
     { key: "flash", icon: flashOn ? "⚡" : "⚡︎", label: flashOn ? "On" : "Off", onPress: toggleFlash, active: flashOn },
   ];
 
@@ -722,8 +747,8 @@ const styles = StyleSheet.create({
   exposureValue: { color: "#fff", fontSize: 11, fontWeight: "700", marginTop: 2 },
 
   // ── Bottom: Story/Reel mode ──
-  bottomStory: { position: "absolute", left: 0, right: 0, bottom: 0, paddingBottom: Platform.OS === "ios" ? 34 : 16 },
-  captureRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-evenly", paddingHorizontal: 30, marginBottom: 20 },
+  bottomStory: { position: "absolute", left: 0, right: 0, bottom: 0, paddingBottom: Platform.OS === "ios" ? 42 : 28 },
+  captureRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-evenly", paddingHorizontal: 30, marginBottom: 18 },
   galleryThumb: { width: 48, height: 48, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.15)", overflow: "hidden", alignItems: "center", justifyContent: "center" },
   galleryThumbImg: { width: 48, height: 48, borderRadius: 12 },
   galleryThumbIcon: { fontSize: 22 },
@@ -736,7 +761,7 @@ const styles = StyleSheet.create({
   bottomFlipBtn: { width: 48, height: 48, borderRadius: 99, backgroundColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center" },
   bottomFlipIcon: { color: "#fff", fontSize: 22 },
 
-  modesRow: { flexDirection: "row", justifyContent: "center", gap: 6, paddingVertical: 8 },
+  modesRow: { flexDirection: "row", justifyContent: "center", gap: 6, paddingTop: 4, paddingBottom: 2 },
   modeItem: { paddingHorizontal: 14, paddingVertical: 6 },
   modeText: { color: "rgba(255,255,255,0.5)", fontSize: 13, fontWeight: "700", letterSpacing: 0.5 },
   modeTextActive: { color: "#fff" },
