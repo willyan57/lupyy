@@ -54,7 +54,7 @@ export default function CaptureScreen() {
   const [showGrid, setShowGrid] = useState(false);
   const [timerSeconds, setTimerSeconds] = useState(0);
   const [timerCountdown, setTimerCountdown] = useState<number | null>(null);
-  const [aspectRatio, setAspectRatio] = useState<AspectRatio>("4:5");
+  const [aspectRatio, setAspectRatio] = useState<AspectRatio>("9:16");
   const [showAspectMenu, setShowAspectMenu] = useState(false);
   const [exposure, setExposure] = useState(0);
   const [showExposure, setShowExposure] = useState(false);
@@ -194,7 +194,7 @@ export default function CaptureScreen() {
     try {
       setLoadingCapture(true);
       const photo: any = await Promise.race([
-        cameraRef.current.takePictureAsync({ quality: 0.92, skipProcessing: false, exif: true } as any),
+        cameraRef.current.takePictureAsync({ quality: 0.92, skipProcessing: false, exif: true, mirror: facing === 'front' } as any),
         new Promise<never>((_, rej) => setTimeout(() => rej(new Error("timeout")), 10000)),
       ]);
       setLoadingCapture(false);

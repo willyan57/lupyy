@@ -1513,7 +1513,7 @@ export default function CapturePreview() {
         </View>
       )}
 
-      <View style={styles.bottomPanel}>
+      <View style={[styles.bottomPanel, { paddingBottom: insets.bottom + 16 }]}>
         {showBeautifyPanel && (
           <View style={styles.beautifyPanel}>
             <View style={styles.beautifySliderRow}>
@@ -1706,11 +1706,20 @@ export default function CapturePreview() {
                         setAdjustValues((prev) => ({ ...prev, [item.key]: Math.round(val * 100) / 100 }));
                       }}
                     >
+                      <View style={styles.adjustSliderBg} />
                       <View
                         style={[
                           styles.adjustSliderFill,
                           {
                             width: `${((adjustValues[item.key] - item.min) / (item.max - item.min)) * 100}%` as any,
+                          },
+                        ]}
+                      />
+                      <View
+                        style={[
+                          styles.adjustSliderThumb,
+                          {
+                            left: `${((adjustValues[item.key] - item.min) / (item.max - item.min)) * 100}%` as any,
                           },
                         ]}
                       />
@@ -2213,7 +2222,7 @@ const styles = StyleSheet.create({
 
   bottomPanel: {
     position: "absolute", left: 0, right: 0, bottom: 0,
-    paddingHorizontal: 18, paddingBottom: 22,
+    paddingHorizontal: 18, paddingBottom: 0,
   },
   quickAdjustRow: {
     flexDirection: "row", alignItems: "center",
@@ -2549,13 +2558,27 @@ const styles = StyleSheet.create({
     flex: 1, marginHorizontal: 6,
   },
   adjustSliderTrack: {
-    height: 6, borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.20)",
+    height: 36, borderRadius: 999,
+    backgroundColor: "transparent",
     position: "relative",
+    justifyContent: "center",
+  },
+  adjustSliderBg: {
+    position: "absolute", left: 0, right: 0, top: 15, height: 6,
+    borderRadius: 999, backgroundColor: "rgba(255,255,255,0.20)",
   },
   adjustSliderFill: {
-    position: "absolute", left: 0, top: 0, bottom: 0,
+    position: "absolute", left: 0, top: 15, height: 6,
     borderRadius: 999, backgroundColor: "#ff3366",
+  },
+  adjustSliderThumb: {
+    position: "absolute", top: 6,
+    width: 24, height: 24, borderRadius: 999,
+    backgroundColor: "#fff",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3, shadowRadius: 4, elevation: 4,
+    transform: [{ translateX: -12 }],
   },
   adjustValue: {
     color: "rgba(255,255,255,0.6)", fontSize: 11, width: 40, textAlign: "right",

@@ -2,7 +2,8 @@ export const VERT = `precision mediump float;
 attribute vec2 aPos;
 varying vec2 vUv;
 void main() {
-  vUv = (aPos + 1.0) * 0.5;
+  vec2 uv = (aPos + 1.0) * 0.5;
+vUv = vec2(uv.x, 1.0 - uv.y);
   gl_Position = vec4(aPos, 0.0, 1.0);
 }`;
 
@@ -91,8 +92,8 @@ void main() {
     float lum = dot(color, vec3(0.299, 0.587, 0.114));
     float highlightMask = smoothstep(0.5, 1.0, lum);
     float shadowMask = 1.0 - smoothstep(0.0, 0.5, lum);
-    color += uHighlights * highlightMask * 0.15;
-    color += uShadows * shadowMask * 0.15;
+    color += uHighlights * highlightMask * 0.4;
+    color += uShadows * shadowMask * 0.4;
   }
 
   // Saturation
@@ -101,15 +102,15 @@ void main() {
 
   // Temperature (warm/cool shift)
   if (abs(uTemperature) > 0.01) {
-    color.r += uTemperature * 0.06;
-    color.b -= uTemperature * 0.06;
-    color.g += uTemperature * 0.02;
+    color.r += uTemperature * 0.18;
+    color.b -= uTemperature * 0.18;
+    color.g += uTemperature * 0.06;
   }
 
   // Fade (lift blacks)
   if (uFade > 0.01) {
-    color = mix(color, color + vec3(uFade * 0.15), 1.0 - smoothstep(0.0, 0.3, luminance));
-    color = max(color, vec3(uFade * 0.08));
+    color = mix(color, color + vec3(uFade * 0.35), 1.0 - smoothstep(0.0, 0.3, luminance));
+    color = max(color, vec3(uFade * 0.2));
   }
 
   // Whiten teeth
@@ -133,13 +134,13 @@ void main() {
     vec2 center = vUv - 0.5;
     float dist = length(center) * 1.414;
     float vig = smoothstep(0.4, 1.2, dist);
-    color *= 1.0 - vig * uVignette * 0.6;
+    color *= 1.0 - vig * uVignette * 0.85;
   }
 
   // Film grain
   if (uGrain > 0.01) {
     float noise = rand(vUv * 800.0 + fract(uGrain * 100.0)) - 0.5;
-    color += noise * uGrain * 0.12;
+    color += noise * uGrain * 0.35;
   }
 
   color = clamp(color, 0.0, 1.0);
@@ -239,8 +240,8 @@ void main() {
     float lum = dot(color, vec3(0.299, 0.587, 0.114));
     float highlightMask = smoothstep(0.5, 1.0, lum);
     float shadowMask = 1.0 - smoothstep(0.0, 0.5, lum);
-    color += uHighlights * highlightMask * 0.15;
-    color += uShadows * shadowMask * 0.15;
+    color += uHighlights * highlightMask * 0.4;
+    color += uShadows * shadowMask * 0.4;
   }
 
   // Saturation
@@ -249,15 +250,15 @@ void main() {
 
   // Temperature
   if (abs(uTemperature) > 0.01) {
-    color.r += uTemperature * 0.06;
-    color.b -= uTemperature * 0.06;
-    color.g += uTemperature * 0.02;
+    color.r += uTemperature * 0.18;
+    color.b -= uTemperature * 0.18;
+    color.g += uTemperature * 0.06;
   }
 
   // Fade
   if (uFade > 0.01) {
-    color = mix(color, color + vec3(uFade * 0.15), 1.0 - smoothstep(0.0, 0.3, luminance));
-    color = max(color, vec3(uFade * 0.08));
+    color = mix(color, color + vec3(uFade * 0.35), 1.0 - smoothstep(0.0, 0.3, luminance));
+    color = max(color, vec3(uFade * 0.2));
   }
 
   // Whiten teeth
@@ -281,13 +282,13 @@ void main() {
     vec2 center = vUv - 0.5;
     float dist = length(center) * 1.414;
     float vig = smoothstep(0.4, 1.2, dist);
-    color *= 1.0 - vig * uVignette * 0.6;
+    color *= 1.0 - vig * uVignette * 0.85;
   }
 
   // Film grain
   if (uGrain > 0.01) {
     float noise = rand(vUv * 800.0 + fract(uGrain * 100.0)) - 0.5;
-    color += noise * uGrain * 0.12;
+    color += noise * uGrain * 0.35;
   }
 
   color = clamp(color, 0.0, 1.0);
