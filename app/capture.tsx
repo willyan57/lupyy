@@ -65,9 +65,6 @@ export default function CaptureScreen() {
   // Right tools expand/collapse
   const [toolsExpanded, setToolsExpanded] = useState(false);
 
-  // Left side tools (Instagram-style: Criar, Boomerang, Layout)
-  const [showLeftTools, setShowLeftTools] = useState(false);
-
   // Gallery state (Post mode bottom gallery)
   const [galleryAssets, setGalleryAssets] = useState<MediaLibrary.Asset[]>([]);
   const [galleryAlbums, setGalleryAlbums] = useState<MediaLibrary.Album[]>([]);
@@ -328,13 +325,6 @@ export default function CaptureScreen() {
     { key: "exposure", icon: "☀", label: "Exposição", onPress: () => setShowExposure((p) => !p) },
   ];
 
-  // ── Left tools (Instagram story-style) ──
-  const leftTools = [
-    { key: "criar", icon: "Aa", label: "Criar" },
-    { key: "boomerang", icon: "∞", label: "Boomerang" },
-    { key: "layout", icon: "⊞", label: "Layout" },
-  ];
-
   // ── Render ──
   return (
     <View style={styles.container}>
@@ -422,31 +412,6 @@ export default function CaptureScreen() {
           </TouchableOpacity>
         )}
       </View>
-
-      {/* ── Left side tools (story/reel modes) ── */}
-      {!isPostMode && (
-        <View style={styles.leftTools}>
-          {showLeftTools && leftTools.map((t) => (
-            <TouchableOpacity key={t.key} activeOpacity={0.7} style={styles.leftToolItem}>
-              <View style={styles.leftToolCircle}>
-                <Text style={styles.leftToolIcon}>{t.icon}</Text>
-              </View>
-              <Text style={styles.leftToolLabel}>{t.label}</Text>
-            </TouchableOpacity>
-          ))}
-          <TouchableOpacity
-            activeOpacity={0.7}
-            onPress={() => setShowLeftTools((p) => !p)}
-            style={styles.leftToolItem}
-          >
-            <View style={styles.leftToolCircle}>
-              <Text style={[styles.leftToolIcon, { fontSize: 22 }]}>
-                {showLeftTools ? "ˇ" : "⋯"}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        </View>
-      )}
       {/* ── Right side tools ── */}
       {!isPostMode && (
         <View style={styles.rightTools}>
@@ -724,13 +689,6 @@ const styles = StyleSheet.create({
   recBadge: { flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, backgroundColor: "rgba(255,30,50,0.85)" },
   recDot: { width: 8, height: 8, borderRadius: 99, backgroundColor: "#fff", marginRight: 5 },
   recText: { color: "#fff", fontSize: 12, fontWeight: "700" },
-
-  // Left tools
-  leftTools: { position: "absolute", left: 14, top: H * 0.28, gap: 18, zIndex: 5 },
-  leftToolItem: { alignItems: "center" },
-  leftToolCircle: { width: 40, height: 40, borderRadius: 99, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center" },
-  leftToolIcon: { color: "#fff", fontSize: 16, fontWeight: "800" },
-  leftToolLabel: { color: "rgba(255,255,255,0.85)", fontSize: 10, fontWeight: "600", marginTop: 3 },
 
   // Right tools
   rightTools: { position: "absolute", right: 14, top: Platform.OS === "ios" ? 110 : 90, alignItems: "center", gap: 14, zIndex: 5 },
