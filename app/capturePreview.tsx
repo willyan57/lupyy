@@ -32,7 +32,6 @@ import {
   FlatList,
   Image,
   Modal,
-  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -40,7 +39,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -299,28 +298,6 @@ export default function CapturePreview() {
 
   const insets = useSafeAreaInsets();
 
-  const previewRotation = useMemo(() => {
-    const raw = Number(String(params.previewRotation ?? "0"));
-    if (raw === 90 || raw === -90 || raw === 180) return raw;
-    return 0;
-  }, [params.previewRotation]);
-
-  const previewMediaStyle = useMemo(() => {
-    if (!previewRotation) return styles.preview;
-    const quarterTurn = Math.abs(previewRotation) === 90;
-
-    return [
-      styles.preview,
-      {
-        width: quarterTurn ? previewHeight : width,
-        height: quarterTurn ? width : previewHeight,
-        top: quarterTurn ? (previewHeight - width) / 2 : 0,
-        left: quarterTurn ? (width - previewHeight) / 2 : 0,
-        transform: [{ rotate: `${previewRotation}deg` }],
-      },
-    ];
-  }, [previewRotation]);
-
   const initialFilter = useMemo(() => {
     const raw = String(params.filter ?? "none");
     const allowed = FILTERS.map((f) => f.id);
@@ -422,37 +399,6 @@ export default function CapturePreview() {
   const [aiTempUri, setAiTempUri] = useState<string | null>(null);
 
   const effectiveUri = aiTempUri || uri;
-
-  // ─── NOVO: swipe gesture para trocar filtro ───
-  const swipeAnim = useRef(new Animated.Value(0)).current;
-  const panResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => false,
-        onMoveShouldSetPanResponder: (_, gs) =>
-          Math.abs(gs.dx) > 15 && Math.abs(gs.dx) > Math.abs(gs.dy * 1.5),
-        onPanResponderMove: (_, gs) => {
-          swipeAnim.setValue(gs.dx);
-        },
-        onPanResponderRelease: (_, gs) => {
-          const threshold = width * 0.18;
-          if (gs.dx < -threshold) {
-            const newIdx = Math.min(filterIndex + 1, FILTERS.length - 1);
-            setFilter(FILTERS[newIdx].id);
-            setFilterIntensity(1.0);
-          } else if (gs.dx > threshold) {
-            const newIdx = Math.max(filterIndex - 1, 0);
-            setFilter(FILTERS[newIdx].id);
-            setFilterIntensity(1.0);
-          }
-          Animated.spring(swipeAnim, {
-            toValue: 0,
-            useNativeDriver: true,
-          }).start();
-        },
-      }),
-    [filterIndex]
-  );
 
   // BeautifyParams para o shader — ATUALIZADO com campos avancados
   const beautifyParams = useMemo<BeautifyParams>(() => {
@@ -1298,11 +1244,8 @@ export default function CapturePreview() {
         />
       ) : null}
 
-      {/* ─── ATUALIZADO: Preview com swipe gesture ─── */}
-      <Animated.View
-        style={{ flex: 1, transform: [{ translateX: swipeAnim }] }}
-        {...panResponder.panHandlers}
-      >
+      {/* Preview da mídia */}
+      <View style={{ flex: 1 }}>
         {mediaType === "image" && needsGlPreview ? (
           <LutRenderer
             key={`gl-${effectiveUri}-${filter}-${filterIntensity}-${JSON.stringify(beautifyParams)}`}
@@ -1310,14 +1253,14 @@ export default function CapturePreview() {
             lut={previewLutSource}
             intensity={filterIntensity}
             beautify={beautifyParams}
-            style={previewMediaStyle}
+            style={styles.preview}
             onReady={() => setMediaLoaded(true)}
           />
         ) : mediaType === "image" ? (
           <Image
             key={`${effectiveUri}::${nonce}::${filter}`}
             source={{ uri: effectiveUri }}
-            style={previewMediaStyle}
+            style={styles.preview}
             resizeMode={isWeb ? "contain" : "cover"}
             onLoadEnd={() => setMediaLoaded(true)}
           />
@@ -1325,14 +1268,14 @@ export default function CapturePreview() {
           <Video
             key={`${uri}::${nonce}`}
             source={{ uri }}
-            style={previewMediaStyle}
+            style={styles.preview}
             resizeMode={isWeb ? ResizeMode.CONTAIN : ResizeMode.COVER}
             shouldPlay
             isLooping
             onLoad={() => setMediaLoaded(true)}
           />
         )}
-      </Animated.View>
+      </View>
 
       {/* Overlays visuais (vignette, glow) */}
       {!needsGlPreview && prevOverlay && (
@@ -1466,9 +1409,6 @@ export default function CapturePreview() {
       </View>
 
       {/* ─── Swipe hint ─── */}
-      <View pointerEvents="none" style={styles.swipeHint}>
-        <Text style={styles.swipeHintText}>◀ Deslize para trocar filtro ▶</Text>
-      </View>
 
       <View style={styles.rightTools}>
         {tools.map((tool) => (
@@ -2091,7 +2031,7 @@ export default function CapturePreview() {
 }
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  preview: { ...StyleSheet.absoluteFillObject, width: "100%", height: previewHeight },
+  preview: { width, height: previewHeight, position: "absolute", top: 0, left: 0 },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
@@ -2177,14 +2117,6 @@ const styles = StyleSheet.create({
   },
   topRight: { width: 40, alignItems: "flex-end" },
   topRightIcon: { color: "#fff", fontSize: 22 },
-
-  // ─── NOVO: swipe hint ───
-  swipeHint: {
-    position: "absolute", top: height * 0.24, alignSelf: "center",
-  },
-  swipeHintText: {
-    color: "rgba(255,255,255,0.35)", fontSize: 11, fontWeight: "500",
-  },
 
   rightTools: {
     position: "absolute", right: 12, top: height * 0.16,
