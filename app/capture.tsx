@@ -18,6 +18,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const { width: W, height: H } = Dimensions.get("window");
 const isWeb = Platform.OS === "web";
@@ -38,6 +39,7 @@ const GALLERY_THUMB = (W - 4) / 4; // 4 columns, 1px gap
 // ──────────────────────────────────────────────
 export default function CaptureScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
 
   // Camera state
@@ -515,7 +517,7 @@ export default function CaptureScreen() {
       {/* ── Bottom section ── */}
       {!isPostMode ? (
         /* Story/Reel bottom */
-        <View style={styles.bottomStory}>
+        <View style={[styles.bottomStory, { paddingBottom: (Platform.OS === "android" ? Math.max(insets.bottom, 18) + 20 : insets.bottom + 10) }]}>
           <LinearGradient colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.8)"]} style={styles.bottomGradientInner} />
 
           {/* Shot button + gallery + flip */}
@@ -667,7 +669,7 @@ export default function CaptureScreen() {
           />
 
           {/* Bottom mode tabs (Post mode) */}
-          <View style={styles.postModesRow}>
+          <View style={[styles.postModesRow, { paddingBottom: (Platform.OS === "android" ? Math.max(insets.bottom, 18) + 12 : insets.bottom + 8) }]}>
             <TouchableOpacity onPress={handleOpenGallery} activeOpacity={0.7} style={styles.postGalleryBtn}>
               <Text style={styles.postGalleryIcon}>🖼</Text>
             </TouchableOpacity>
@@ -747,7 +749,7 @@ const styles = StyleSheet.create({
   exposureValue: { color: "#fff", fontSize: 11, fontWeight: "700", marginTop: 2 },
 
   // ── Bottom: Story/Reel mode ──
-  bottomStory: { position: "absolute", left: 0, right: 0, bottom: 0, paddingBottom: Platform.OS === "ios" ? 42 : 28 },
+  bottomStory: { position: "absolute", left: 0, right: 0, bottom: 0, paddingBottom: 24 },
   captureRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-evenly", paddingHorizontal: 30, marginBottom: 18 },
   galleryThumb: { width: 48, height: 48, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.15)", overflow: "hidden", alignItems: "center", justifyContent: "center" },
   galleryThumbImg: { width: 48, height: 48, borderRadius: 12 },
@@ -796,7 +798,7 @@ const styles = StyleSheet.create({
   galleryCheck: { width: 22, height: 22, borderRadius: 99, backgroundColor: "#3897f0", alignItems: "center", justifyContent: "center", borderWidth: 1.5, borderColor: "#fff" },
   galleryCheckText: { color: "#fff", fontSize: 12, fontWeight: "800" },
 
-  postModesRow: { flexDirection: "row", justifyContent: "center", alignItems: "center", paddingVertical: 10, paddingHorizontal: 12, gap: 4, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "rgba(255,255,255,0.1)" },
+  postModesRow: { flexDirection: "row", justifyContent: "center", alignItems: "center", paddingTop: 10, paddingBottom: 12, paddingHorizontal: 12, gap: 4, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "rgba(255,255,255,0.1)" },
   postGalleryBtn: { padding: 8 },
   postGalleryIcon: { fontSize: 20 },
   modeTextPost: { color: "rgba(255,255,255,0.4)", fontSize: 13, fontWeight: "700", letterSpacing: 0.5, paddingHorizontal: 10, paddingVertical: 6 },

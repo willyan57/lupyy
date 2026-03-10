@@ -2091,7 +2091,7 @@ export default function CapturePreview() {
 }
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  preview: { width, height: previewHeight, position: "absolute", top: 0, left: 0 },
+  preview: { ...StyleSheet.absoluteFillObject, width: "100%", height: previewHeight },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
