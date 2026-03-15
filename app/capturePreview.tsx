@@ -297,10 +297,6 @@ export default function CapturePreview() {
   const nonce = useMemo(() => String(params.nonce ?? ""), [params.nonce]);
   const facing = useMemo(() => String(params.facing ?? "back"), [params.facing]);
   const isFrontCamera = facing === "front";
-  const cameFromCamera = facing === "front" || facing === "back";
-  const shouldNormalizeAndroidCameraImage =
-    Platform.OS === "android" && mediaType === "image" && cameFromCamera;
-  const shouldFlipYInGl = mediaType === "image";
 
   const insets = useSafeAreaInsets();
 
@@ -507,7 +503,6 @@ export default function CapturePreview() {
 
   const shouldBakeOnExport = useMemo(() => {
     if (mediaType !== "image" && mediaType !== "video") return false;
-    if (shouldNormalizeAndroidCameraImage) return true;
     if (aiTempUri) return true;
     if (filter !== "none") return true;
     if (quickAdjustment !== "none") return true;
@@ -519,7 +514,7 @@ export default function CapturePreview() {
     if (adjustValues.vignette !== 0 || adjustValues.grain !== 0) return true;
     if (adjustValues.fade !== 0 || adjustValues.highlights !== 0 || adjustValues.shadows !== 0) return true;
     return false;
-  }, [mediaType, aiTempUri, filter, quickAdjustment, beautifyValues, adjustValues, shouldNormalizeAndroidCameraImage]);
+  }, [mediaType, aiTempUri, filter, quickAdjustment, beautifyValues, adjustValues]);
 
   const bakeImageWithLut = useCallback(
     (uri: string, filterId: ExportFilterId, bParams: BeautifyParams) => {
@@ -1269,7 +1264,6 @@ export default function CapturePreview() {
           beautify={bakeJob.beautify}
           exportWidth={1080}
           exportHeight={1350}
-          flipY={shouldFlipYInGl}
           onFinish={(u) => {
             const out = u || bakeJob.uri;
             const r = bakeJob.resolve;
@@ -1288,7 +1282,6 @@ export default function CapturePreview() {
             lut={previewLutSource}
             intensity={filterIntensity}
             beautify={beautifyParams}
-            flipY={shouldFlipYInGl}
             style={[styles.preview, isFrontCamera && { transform: [{ scaleX: -1 }] }]}
             onReady={() => setMediaLoaded(true)}
           />

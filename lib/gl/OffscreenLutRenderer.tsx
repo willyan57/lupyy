@@ -1,5 +1,5 @@
 // lib/gl/OffscreenLutRenderer.tsx
-// Corrigido: tamanho real da imagem + parâmetros de beautify
+// CORRIGIDO: todos os uniforms do shader (incluindo sharpness, temperature, etc.)
 
 import { Asset } from "expo-asset";
 import { GLView, type ExpoWebGLRenderingContext } from "expo-gl";
@@ -11,26 +11,26 @@ import type { BeautifyParams } from "./LutRenderer";
 import { getLutForFilter } from "./filterLuts";
 import { FRAG_COMPAT as FRAG, VERT } from "./shaders/lut2d";
 
+type ExtendedBeautifyParams = BeautifyParams & {
+  sharpness?: number;
+  temperature?: number;
+  vignette?: number;
+  grain?: number;
+  fade?: number;
+  highlights?: number;
+  shadows?: number;
+};
+
 type OffscreenLutRendererProps = {
   sourceUri: string;
   filter: FilterId;
-  beautify?: BeautifyParams;
-  /** Tamanho do GL canvas para exportação. Se não informado, tenta detectar da imagem. */
+  beautify?: ExtendedBeautifyParams;
   exportWidth?: number;
   exportHeight?: number;
   flipY?: boolean;
   onFinish: (resultUri: string | null) => void;
 };
 
-/**
- * Renderiza imagem + LUT + beautify em um GLView offscreen (invisível)
- * e tira snapshot do framebuffer, devolvendo a URI do arquivo gerado.
- *
- * CORREÇÕES:
- * - GLView agora usa tamanho real da imagem (não 1x1)
- * - Parâmetros de beautify são passados como uniforms
- * - Fallback seguro se tamanho não estiver disponível
- */
 export function OffscreenLutRenderer({
   sourceUri,
   filter,
@@ -42,7 +42,6 @@ export function OffscreenLutRenderer({
 }: OffscreenLutRendererProps) {
   const finishedRef = useRef(false);
 
-  // Tamanho padrão razoável para exportação
   const glWidth = exportWidth || 1080;
   const glHeight = exportHeight || 1080;
 
@@ -67,15 +66,24 @@ export function OffscreenLutRenderer({
         const vertexShader = gl.createShader(gl.VERTEX_SHADER)!;
         gl.shaderSource(vertexShader, VERT);
         gl.compileShader(vertexShader);
+        if (!gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS)) {
+          console.warn("VS compile error:", gl.getShaderInfoLog(vertexShader));
+        }
 
         const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER)!;
         gl.shaderSource(fragmentShader, FRAG);
         gl.compileShader(fragmentShader);
+        if (!gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS)) {
+          console.warn("FS compile error:", gl.getShaderInfoLog(fragmentShader));
+        }
 
         const program = gl.createProgram()!;
         gl.attachShader(program, vertexShader);
         gl.attachShader(program, fragmentShader);
         gl.linkProgram(program);
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+          console.warn("Program link error:", gl.getProgramInfoLog(program));
+        }
         gl.useProgram(program);
 
         // Quad
@@ -90,7 +98,7 @@ export function OffscreenLutRenderer({
         gl.enableVertexAttribArray(aPos);
         gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
 
-        // Uniforms
+        // TODOS os uniforms — incluindo os novos
         const uImage = gl.getUniformLocation(program, "uImage");
         const uLut = gl.getUniformLocation(program, "uLut");
         const uIntensity = gl.getUniformLocation(program, "uIntensity");
@@ -100,6 +108,13 @@ export function OffscreenLutRenderer({
         const uSmoothing = gl.getUniformLocation(program, "uSmoothing");
         const uWhitenTeeth = gl.getUniformLocation(program, "uWhitenTeeth");
         const uBaseGlow = gl.getUniformLocation(program, "uBaseGlow");
+        const uSharpness = gl.getUniformLocation(program, "uSharpness");
+        const uTemperature = gl.getUniformLocation(program, "uTemperature");
+        const uVignette = gl.getUniformLocation(program, "uVignette");
+        const uGrain = gl.getUniformLocation(program, "uGrain");
+        const uFade = gl.getUniformLocation(program, "uFade");
+        const uHighlights = gl.getUniformLocation(program, "uHighlights");
+        const uShadows = gl.getUniformLocation(program, "uShadows");
         const uFlipY = gl.getUniformLocation(program, "uFlipY");
 
         // Load assets
@@ -140,7 +155,6 @@ export function OffscreenLutRenderer({
           gl.uniform1i(uLut, 1);
           gl.uniform1f(uIntensity, 1.0);
         } else {
-          // Textura identidade 1x1
           const identityTex = gl.createTexture();
           gl.activeTexture(gl.TEXTURE1);
           gl.bindTexture(gl.TEXTURE_2D, identityTex);
@@ -155,14 +169,21 @@ export function OffscreenLutRenderer({
           gl.uniform1f(uIntensity, 0.0);
         }
 
-        // Beautify uniforms
-        const b = beautify || {};
+        // TODOS os beautify uniforms — CORRIGIDO: agora inclui sharpness, temperature, etc.
+        const b: ExtendedBeautifyParams = beautify || {};
         gl.uniform1f(uBrightness, b.brightness ?? 0.0);
         gl.uniform1f(uContrast, b.contrast ?? 1.0);
         gl.uniform1f(uSaturation, b.saturation ?? 1.0);
         gl.uniform1f(uSmoothing, b.smoothing ?? 0.0);
         gl.uniform1f(uWhitenTeeth, b.whitenTeeth ?? 0.0);
         gl.uniform1f(uBaseGlow, b.baseGlow ?? 0.0);
+        gl.uniform1f(uSharpness, b.sharpness ?? 0.0);
+        gl.uniform1f(uTemperature, b.temperature ?? 0.0);
+        gl.uniform1f(uVignette, b.vignette ?? 0.0);
+        gl.uniform1f(uGrain, b.grain ?? 0.0);
+        gl.uniform1f(uFade, b.fade ?? 0.0);
+        gl.uniform1f(uHighlights, b.highlights ?? 0.0);
+        gl.uniform1f(uShadows, b.shadows ?? 0.0);
         if (uFlipY) gl.uniform1f(uFlipY, flipY ? 1.0 : 0.0);
 
         // Draw
@@ -173,9 +194,9 @@ export function OffscreenLutRenderer({
         gl.flush();
 
         // Aguardar o frame ser renderizado completamente
-        await new Promise((r) => setTimeout(r, 100));
+        await new Promise((r) => setTimeout(r, 150));
 
-        // Snapshot ANTES de endFrameEXP (que limpa o framebuffer)
+        // Snapshot ANTES de endFrameEXP
         let resultUri: string | null = null;
         try {
           const snapshot = await GLView.takeSnapshotAsync(gl, {
@@ -188,10 +209,9 @@ export function OffscreenLutRenderer({
             typeof snapshot === "string" ? snapshot : (snapshot?.uri as string);
         } catch (snapErr) {
           console.warn("Snapshot falhou, tentando novamente:", snapErr);
-          // Retry: redesenhar e tentar novamente
           gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
           gl.flush();
-          await new Promise((r) => setTimeout(r, 200));
+          await new Promise((r) => setTimeout(r, 250));
           try {
             const snapshot2 = await GLView.takeSnapshotAsync(gl, {
               format: "jpeg",
@@ -201,7 +221,7 @@ export function OffscreenLutRenderer({
             resultUri =
               typeof snapshot2 === "string" ? snapshot2 : (snapshot2?.uri as string);
           } catch {
-            console.warn("Snapshot retry também falhou");
+            console.warn("Snapshot retry tambem falhou");
           }
         }
 
@@ -229,7 +249,6 @@ export function OffscreenLutRenderer({
 const styles = StyleSheet.create({
   container: {
     position: "absolute",
-    // Fora da tela, mas com tamanho real para gerar snapshot de qualidade
     left: -9999,
     top: -9999,
     overflow: "hidden",

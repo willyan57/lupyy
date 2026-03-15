@@ -21,6 +21,16 @@ export type BeautifyParams = {
   shadows?: number;
 };
 
+type ExtendedBeautifyParams = BeautifyParams & {
+  sharpness?: number;
+  temperature?: number;
+  vignette?: number;
+  grain?: number;
+  fade?: number;
+  highlights?: number;
+  shadows?: number;
+};
+
 export default function LutRenderer({
   sourceUri,
   lut,
@@ -33,14 +43,14 @@ export default function LutRenderer({
   sourceUri: string;
   lut: LutSource | null;
   intensity?: number;
-  beautify?: BeautifyParams;
+  beautify?: ExtendedBeautifyParams;
   style?: StyleProp<ViewStyle>;
   onReady?: () => void;
   flipY?: boolean;
 }) {
   const key = useMemo(() => {
     const b = beautify || {};
-    return `${sourceUri}__${typeof lut === "number" ? String(lut) : lut ?? "nolut"}__${intensity}__${JSON.stringify(b)}`;
+    return `${sourceUri}__${typeof lut === "number" ? String(lut) : lut ?? "nolut"}__${intensity}__${JSON.stringify(b)}__${flipY}`;
   }, [sourceUri, lut, intensity, beautify, flipY]);
 
   const hasLut = lut !== null && lut !== undefined;
@@ -153,7 +163,7 @@ export default function LutRenderer({
             gl.uniform1f(uIntensity, 0.0);
           }
 
-          const b = beautify || {};
+          const b: ExtendedBeautifyParams = beautify || {};
           gl.uniform1f(uBrightness, b.brightness ?? 0.0);
           gl.uniform1f(uContrast, b.contrast ?? 1.0);
           gl.uniform1f(uSaturation, b.saturation ?? 1.0);
