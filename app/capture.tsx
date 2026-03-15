@@ -215,7 +215,7 @@ export default function CaptureScreen() {
     try {
       setLoadingCapture(true);
       const photo: any = await Promise.race([
-        cameraRef.current.takePictureAsync({ quality: 0.92, skipProcessing: false, exif: true, mirror: facing === 'front' } as any),
+        cameraRef.current.takePictureAsync({ quality: 0.92, skipProcessing: true, exif: false } as any),
         new Promise<never>((_, rej) => setTimeout(() => rej(new Error("timeout")), 10000)),
       ]);
       setLoadingCapture(false);
@@ -227,8 +227,9 @@ export default function CaptureScreen() {
             mediaType: "image",
             mode,
             filter,
+            facing,
+            aspectRatio,
             nonce: String(Date.now()),
-            previewRotation: getPreviewRotationFromExif(photo),
           },
         });
       }
@@ -333,9 +334,13 @@ export default function CaptureScreen() {
   const isPostMode = mode === "post";
   const isVideoMode = mode === "reel" || (mode === "story" && recording);
   const showGallery = isPostMode && galleryPermission && !isWeb;
+
+  // Aspect ratio applied to camera view
+  const selectedAR = ASPECT_RATIOS.find((ar) => ar.key === aspectRatio) ?? ASPECT_RATIOS[2]; // default 9:16
   const cameraHeight = showGallery
     ? (galleryExpanded ? H * 0.35 : H * 0.55)
-    : H;
+    : Math.min(H, W / selectedAR.ratio);
+  const cameraWidth = showGallery ? W : Math.min(W, cameraHeight * selectedAR.ratio);
 
   const flipRotation = flipAnim.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "90deg"] });
 
@@ -360,8 +365,9 @@ export default function CaptureScreen() {
         style={[
           styles.cameraWrap,
           {
-            width: W,
+            width: cameraWidth,
             height: cameraHeight,
+            alignSelf: "center",
             transform: [{ rotateY: flipRotation }],
           },
         ]}

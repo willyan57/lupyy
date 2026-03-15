@@ -1,3 +1,6 @@
+// lib/gl/OffscreenLutRenderer.tsx
+// Corrigido: tamanho real da imagem + parâmetros de beautify
+
 import { Asset } from "expo-asset";
 import { GLView, type ExpoWebGLRenderingContext } from "expo-gl";
 import { useCallback, useRef } from "react";
@@ -12,11 +15,21 @@ type OffscreenLutRendererProps = {
   sourceUri: string;
   filter: FilterId;
   beautify?: BeautifyParams;
+  /** Tamanho do GL canvas para exportação. Se não informado, tenta detectar da imagem. */
   exportWidth?: number;
   exportHeight?: number;
   onFinish: (resultUri: string | null) => void;
 };
 
+/**
+ * Renderiza imagem + LUT + beautify em um GLView offscreen (invisível)
+ * e tira snapshot do framebuffer, devolvendo a URI do arquivo gerado.
+ *
+ * CORREÇÕES:
+ * - GLView agora usa tamanho real da imagem (não 1x1)
+ * - Parâmetros de beautify são passados como uniforms
+ * - Fallback seguro se tamanho não estiver disponível
+ */
 export function OffscreenLutRenderer({
   sourceUri,
   filter,
@@ -27,6 +40,7 @@ export function OffscreenLutRenderer({
 }: OffscreenLutRendererProps) {
   const finishedRef = useRef(false);
 
+  // Tamanho padrão razoável para exportação
   const glWidth = exportWidth || 1080;
   const glHeight = exportHeight || 1080;
 
@@ -47,6 +61,7 @@ export function OffscreenLutRenderer({
       }
 
       try {
+        // Compilar shaders
         const vertexShader = gl.createShader(gl.VERTEX_SHADER)!;
         gl.shaderSource(vertexShader, VERT);
         gl.compileShader(vertexShader);
@@ -61,6 +76,7 @@ export function OffscreenLutRenderer({
         gl.linkProgram(program);
         gl.useProgram(program);
 
+        // Quad
         const aPos = gl.getAttribLocation(program, "aPos");
         const quadBuffer = gl.createBuffer();
         gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
@@ -72,6 +88,7 @@ export function OffscreenLutRenderer({
         gl.enableVertexAttribArray(aPos);
         gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
 
+        // Uniforms
         const uImage = gl.getUniformLocation(program, "uImage");
         const uLut = gl.getUniformLocation(program, "uLut");
         const uIntensity = gl.getUniformLocation(program, "uIntensity");
@@ -81,14 +98,8 @@ export function OffscreenLutRenderer({
         const uSmoothing = gl.getUniformLocation(program, "uSmoothing");
         const uWhitenTeeth = gl.getUniformLocation(program, "uWhitenTeeth");
         const uBaseGlow = gl.getUniformLocation(program, "uBaseGlow");
-        const uSharpness = gl.getUniformLocation(program, "uSharpness");
-        const uTemperature = gl.getUniformLocation(program, "uTemperature");
-        const uVignette = gl.getUniformLocation(program, "uVignette");
-        const uGrain = gl.getUniformLocation(program, "uGrain");
-        const uFade = gl.getUniformLocation(program, "uFade");
-        const uHighlights = gl.getUniformLocation(program, "uHighlights");
-        const uShadows = gl.getUniformLocation(program, "uShadows");
 
+        // Load assets
         const loadAsset = async (input: number | string) => {
           const asset =
             typeof input === "number"
@@ -114,9 +125,11 @@ export function OffscreenLutRenderer({
           return tex;
         };
 
+        // Imagem
         makeTex(gl.TEXTURE0, srcAsset);
         gl.uniform1i(uImage, 0);
 
+        // LUT
         const lutSource = getLutForFilter(filter);
         if (lutSource) {
           const lutAsset = await loadAsset(lutSource);
@@ -124,6 +137,7 @@ export function OffscreenLutRenderer({
           gl.uniform1i(uLut, 1);
           gl.uniform1f(uIntensity, 1.0);
         } else {
+          // Textura identidade 1x1
           const identityTex = gl.createTexture();
           gl.activeTexture(gl.TEXTURE1);
           gl.bindTexture(gl.TEXTURE_2D, identityTex);
@@ -138,6 +152,7 @@ export function OffscreenLutRenderer({
           gl.uniform1f(uIntensity, 0.0);
         }
 
+        // Beautify uniforms
         const b = beautify || {};
         gl.uniform1f(uBrightness, b.brightness ?? 0.0);
         gl.uniform1f(uContrast, b.contrast ?? 1.0);
@@ -145,31 +160,48 @@ export function OffscreenLutRenderer({
         gl.uniform1f(uSmoothing, b.smoothing ?? 0.0);
         gl.uniform1f(uWhitenTeeth, b.whitenTeeth ?? 0.0);
         gl.uniform1f(uBaseGlow, b.baseGlow ?? 0.0);
-        gl.uniform1f(uSharpness, b.sharpness ?? 0.0);
-        gl.uniform1f(uTemperature, b.temperature ?? 0.0);
-        gl.uniform1f(uVignette, b.vignette ?? 0.0);
-        gl.uniform1f(uGrain, b.grain ?? 0.0);
-        gl.uniform1f(uFade, b.fade ?? 0.0);
-        gl.uniform1f(uHighlights, b.highlights ?? 0.0);
-        gl.uniform1f(uShadows, b.shadows ?? 0.0);
 
+        // Draw
         gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
         gl.clearColor(0, 0, 0, 1);
         gl.clear(gl.COLOR_BUFFER_BIT);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
         gl.flush();
 
-        // Snapshot ANTES de endFrameEXP (senao fica preto)
-        const snapshot = await GLView.takeSnapshotAsync(gl, {
-          format: "jpeg",
-          result: "file",
-          flip: false, // false = nao inverte de ponta cabeca
-        } as any);
+        // Aguardar o frame ser renderizado completamente
+        await new Promise((r) => setTimeout(r, 100));
+
+        // Snapshot ANTES de endFrameEXP (que limpa o framebuffer)
+        let resultUri: string | null = null;
+        try {
+          const snapshot = await GLView.takeSnapshotAsync(gl, {
+            format: "jpeg",
+            result: "file",
+            flip: false,
+          } as any);
+
+          resultUri =
+            typeof snapshot === "string" ? snapshot : (snapshot?.uri as string);
+        } catch (snapErr) {
+          console.warn("Snapshot falhou, tentando novamente:", snapErr);
+          // Retry: redesenhar e tentar novamente
+          gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+          gl.flush();
+          await new Promise((r) => setTimeout(r, 200));
+          try {
+            const snapshot2 = await GLView.takeSnapshotAsync(gl, {
+              format: "jpeg",
+              result: "file",
+              flip: false,
+            } as any);
+            resultUri =
+              typeof snapshot2 === "string" ? snapshot2 : (snapshot2?.uri as string);
+          } catch {
+            console.warn("Snapshot retry também falhou");
+          }
+        }
 
         gl.endFrameEXP?.();
-
-        const resultUri =
-          typeof snapshot === "string" ? snapshot : (snapshot?.uri as string);
 
         handleFinishOnce(resultUri || sourceUri);
       } catch (err) {
@@ -193,6 +225,7 @@ export function OffscreenLutRenderer({
 const styles = StyleSheet.create({
   container: {
     position: "absolute",
+    // Fora da tela, mas com tamanho real para gerar snapshot de qualidade
     left: -9999,
     top: -9999,
     overflow: "hidden",

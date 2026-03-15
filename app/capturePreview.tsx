@@ -295,6 +295,8 @@ export default function CapturePreview() {
     [params.mode]
   );
   const nonce = useMemo(() => String(params.nonce ?? ""), [params.nonce]);
+  const facing = useMemo(() => String(params.facing ?? "back"), [params.facing]);
+  const isFrontCamera = facing === "front";
 
   const insets = useSafeAreaInsets();
 
@@ -517,7 +519,22 @@ export default function CapturePreview() {
   const bakeImageWithLut = useCallback(
     (uri: string, filterId: ExportFilterId, bParams: BeautifyParams) => {
       return new Promise<string>((resolve) => {
-        setBakeJob({ uri, filterId, beautify: bParams, resolve });
+        // Timeout de segurança: se o GL não responder em 8s, retorna a URI original
+        const timeout = setTimeout(() => {
+          console.log("bakeImageWithLut timeout — retornando URI original");
+          setBakeJob(null);
+          resolve(uri);
+        }, 8000);
+
+        setBakeJob({
+          uri,
+          filterId,
+          beautify: bParams,
+          resolve: (result: string) => {
+            clearTimeout(timeout);
+            resolve(result);
+          },
+        });
       });
     },
     []
@@ -530,7 +547,19 @@ export default function CapturePreview() {
       if (mediaType === "image") {
         const exportFilterId = (exportEffects?.filterId as ExportFilterId) || "none";
         const baked = await bakeImageWithLut(inputUri, exportFilterId, beautifyParams);
-        if (baked) inputUri = baked;
+        if (baked && baked !== inputUri) {
+          // Verificar se o arquivo existe antes de usar
+          try {
+            const info = await FileSystem.getInfoAsync(baked);
+            if (info.exists && (info as any).size > 0) {
+              inputUri = baked;
+            } else {
+              console.log("Baked file vazio ou inexistente, usando original");
+            }
+          } catch {
+            console.log("Erro ao verificar arquivo baked, usando original");
+          }
+        }
       }
 
       const mod: any = FilterExport as any;
@@ -1253,15 +1282,15 @@ export default function CapturePreview() {
             lut={previewLutSource}
             intensity={filterIntensity}
             beautify={beautifyParams}
-            style={styles.preview}
+            style={[styles.preview, isFrontCamera && { transform: [{ scaleX: -1 }] }]}
             onReady={() => setMediaLoaded(true)}
           />
         ) : mediaType === "image" ? (
           <Image
             key={`${effectiveUri}::${nonce}::${filter}`}
             source={{ uri: effectiveUri }}
-            style={styles.preview}
-            resizeMode={isWeb ? "contain" : "cover"}
+            style={[styles.preview, isFrontCamera && { transform: [{ scaleX: -1 }] }]}
+            resizeMode="contain"
             onLoadEnd={() => setMediaLoaded(true)}
           />
         ) : (
@@ -2031,9 +2060,9 @@ export default function CapturePreview() {
 }
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  preview: { width, height: previewHeight, position: "absolute", top: 0, left: 0 },
+  preview: { width, height: previewHeight, position: "absolute", top: 0, left: 0, resizeMode: "contain" as any },
   loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill as any,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(0,0,0,0.55)",
