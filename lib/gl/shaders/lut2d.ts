@@ -1,9 +1,11 @@
 export const VERT = `precision mediump float;
 attribute vec2 aPos;
 varying vec2 vUv;
+uniform float uFlipY;
 void main() {
   vec2 uv = (aPos + 1.0) * 0.5;
-vUv = vec2(uv.x, 1.0 - uv.y);
+  float fy = clamp(uFlipY, 0.0, 1.0);
+  vUv = vec2(uv.x, mix(uv.y, 1.0 - uv.y, fy));
   gl_Position = vec4(aPos, 0.0, 1.0);
 }`;
 
