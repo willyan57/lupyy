@@ -43,6 +43,10 @@ export default function ConversationsScreen() {
 
   const [search, setSearch] = useState("");
 
+  // ── Relationship status lock ──
+  const [myRelationshipStatus, setMyRelationshipStatus] = useState<string | null>(null);
+  const isCrushLocked = myRelationshipStatus === "committed" || myRelationshipStatus === "dating" || myRelationshipStatus === "married";
+
   // ── Animated badge scale ──
   const badgeScale = useRef(new Animated.Value(1)).current;
 
@@ -112,6 +116,16 @@ export default function ConversationsScreen() {
       const { data, error } = await supabase.auth.getUser();
       if (error || !data.user) return;
       setCurrentUserId(data.user.id);
+
+      // Fetch relationship status
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("relationship_status")
+        .eq("id", data.user.id)
+        .maybeSingle();
+      if (profile?.relationship_status) {
+        setMyRelationshipStatus(profile.relationship_status);
+      }
     };
     loadUser();
   }, []);
@@ -412,20 +426,25 @@ export default function ConversationsScreen() {
           style={[
             styles.tabButton,
             activeTab === "crush" && styles.tabButtonActive,
+            isCrushLocked && styles.tabButtonLocked,
           ]}
-          onPress={() => setActiveTab("crush")}
-          activeOpacity={0.8}
+          onPress={() => {
+            if (isCrushLocked) return;
+            setActiveTab("crush");
+          }}
+          activeOpacity={isCrushLocked ? 1 : 0.8}
         >
           <View style={styles.tabLabelWrapper}>
             <Text
               style={[
                 styles.tabText,
                 activeTab === "crush" && styles.tabTextActive,
+                isCrushLocked && { color: "#555" },
               ]}
             >
-              Crushes 💘
+              {isCrushLocked ? "Crushes 🔒" : "Crushes 💘"}
             </Text>
-            {crushUnreadTotal > 0 && (
+            {!isCrushLocked && crushUnreadTotal > 0 && (
               <Animated.View
                 style={[
                   styles.tabBadge,
@@ -453,7 +472,18 @@ export default function ConversationsScreen() {
         />
       </View>
 
-      {loading ? (
+      {/* ── Crush locked overlay ── */}
+      {activeTab === "crush" && isCrushLocked ? (
+        <View style={styles.emptyArea}>
+          <Text style={{ fontSize: 56, marginBottom: 16 }}>🔒</Text>
+          <Text style={[styles.emptyText, { fontSize: 17 }]}>
+            Crushes bloqueados
+          </Text>
+          <Text style={[styles.emptySubtext, { marginTop: 8, maxWidth: 280, textAlign: "center" }]}>
+            Enquanto seu status for comprometido, as conversas de crush ficam ocultas. Mude para Solteiro para desbloquear.
+          </Text>
+        </View>
+      ) : loading ? (
         <View style={styles.loadingArea}>
           <ActivityIndicator color="#888" />
         </View>
@@ -511,6 +541,10 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
     elevation: 4,
+  },
+  tabButtonLocked: {
+    opacity: 0.45,
+    borderColor: "#2a2a3a",
   },
   tabLabelWrapper: {
     flexDirection: "row",

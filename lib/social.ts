@@ -18,6 +18,8 @@ export type FollowState = {
 export type FollowUpdateResult = {
   interestType: InterestType;
   crush: boolean;
+  /** True if a mutual silent crush was just discovered (match!) */
+  isNewMatch?: boolean;
 };
 
 export async function fetchSocialStats(userId: string): Promise<SocialStats | null> {
@@ -73,6 +75,25 @@ export async function getFollowState(
   };
 }
 
+/**
+ * Check if a user's relationship status blocks crush actions.
+ */
+function isCommitted(status?: string | null): boolean {
+  return status === "committed" || status === "dating" || status === "married";
+}
+
+/**
+ * Fetch a user's relationship status from profiles table.
+ */
+async function fetchRelationshipStatus(userId: string): Promise<string | null> {
+  const { data } = await supabase
+    .from("profiles")
+    .select("relationship_status")
+    .eq("id", userId)
+    .maybeSingle();
+  return data?.relationship_status ?? null;
+}
+
 export async function setFollowInterestType(
   followerId: string,
   followingId: string,
@@ -80,6 +101,21 @@ export async function setFollowInterestType(
 ): Promise<FollowUpdateResult> {
   if (!followerId || !followingId || followerId === followingId) {
     return { interestType, crush: false };
+  }
+
+  // ── Server-side crush validation ──
+  if (interestType === "crush" || interestType === "silent_crush") {
+    const [myStatus, targetStatus] = await Promise.all([
+      fetchRelationshipStatus(followerId),
+      fetchRelationshipStatus(followingId),
+    ]);
+
+    if (isCommitted(myStatus)) {
+      throw new Error("CRUSH_BLOCKED_SELF_COMMITTED");
+    }
+    if (isCommitted(targetStatus)) {
+      throw new Error("CRUSH_BLOCKED_TARGET_COMMITTED");
+    }
   }
 
   const { data, error } = await supabase
@@ -100,6 +136,7 @@ export async function setFollowInterestType(
   }
 
   let crush = false;
+  let isNewMatch = false;
 
   if (interestType === "crush" || interestType === "silent_crush") {
     const { data: reciprocal, error: reciprocalErr } = await supabase
@@ -112,6 +149,8 @@ export async function setFollowInterestType(
 
     if (!reciprocalErr && reciprocal) {
       crush = true;
+      // It's a new match if this is the action that created the mutual link
+      isNewMatch = true;
     }
   }
 
@@ -120,6 +159,7 @@ export async function setFollowInterestType(
   return {
     interestType: row.interest_type,
     crush,
+    isNewMatch,
   };
 }
 

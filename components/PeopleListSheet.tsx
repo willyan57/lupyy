@@ -21,6 +21,8 @@ type PeopleListSheetProps = {
   isOwnProfile: boolean;
   onClose: () => void;
   onOpenProfile: (userId: string) => void;
+  /** Pass the logged-in user's relationship status to block crush lists */
+  myRelationshipStatus?: string | null;
 };
 
 type PersonRow = {
@@ -66,9 +68,20 @@ function getEmptyText(mode: Mode, isOwnProfile: boolean) {
   return "";
 }
 
+function isCommitted(status?: string | null) {
+  return status === "committed" || status === "dating" || status === "married";
+}
+
 export default function PeopleListSheet(props: PeopleListSheetProps) {
-  const { visible, mode, profileId, isOwnProfile, onClose, onOpenProfile } =
-    props;
+  const {
+    visible,
+    mode,
+    profileId,
+    isOwnProfile,
+    onClose,
+    onOpenProfile,
+    myRelationshipStatus,
+  } = props;
 
   const [data, setData] = useState<PersonRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -79,11 +92,14 @@ export default function PeopleListSheet(props: PeopleListSheetProps) {
     [mode, isOwnProfile]
   );
 
+  // Block crush/interested list when committed
+  const isCrushBlocked = mode === "interested" && isCommitted(myRelationshipStatus);
+
   useEffect(() => {
     let isCancelled = false;
 
     async function load() {
-      if (!visible || !profileId) {
+      if (!visible || !profileId || isCrushBlocked) {
         setData([]);
         setError(null);
         return;
@@ -101,35 +117,19 @@ export default function PeopleListSheet(props: PeopleListSheetProps) {
         viewName = "view_crush_detailed";
       }
 
-      const { data, error } = await supabase
-  .from(viewName)
-  .select("*")
-  .eq("profile_id", profileId)
-  .order("created_at", { ascending: false });
+      const { data: rows, error: fetchError } = await supabase
+        .from(viewName)
+        .select("*")
+        .eq("profile_id", profileId)
+        .order("created_at", { ascending: false });
 
-if (isCancelled) {
-  return;
-}
+      if (isCancelled) return;
 
-if (error) {
-  setError(error.message);
-  setData([]);
-} else {
-  const rows = (data ?? []) as PersonRow[];
-  setData(rows);
-}
-
-setLoading(false);
-
-      if (isCancelled) {
-        return;
-      }
-
-      if (error) {
-        setError(error.message);
+      if (fetchError) {
+        setError(fetchError.message);
         setData([]);
       } else {
-        setData(data ?? []);
+        setData((rows ?? []) as PersonRow[]);
       }
 
       setLoading(false);
@@ -140,7 +140,7 @@ setLoading(false);
     return () => {
       isCancelled = true;
     };
-  }, [visible, mode, profileId]);
+  }, [visible, mode, profileId, isCrushBlocked]);
 
   function renderItem({ item }: { item: PersonRow }) {
     const displayName =
@@ -194,7 +194,7 @@ setLoading(false);
     );
   }
 
-  const showEmptyState = !loading && !error && data.length === 0;
+  const showEmptyState = !loading && !error && data.length === 0 && !isCrushBlocked;
 
   return (
     <Modal visible={visible} animationType="fade" transparent>
@@ -204,36 +204,49 @@ setLoading(false);
           <View style={styles.handle} />
           <Text style={styles.title}>{title}</Text>
 
-          {loading && (
-            <View style={styles.center}>
-              <ActivityIndicator />
-            </View>
-          )}
-
-          {error && !loading && (
-            <View style={styles.center}>
-              <Text style={styles.errorText}>
-                Não foi possível carregar a lista.
+          {/* ── Crush blocked overlay ── */}
+          {isCrushBlocked ? (
+            <View style={styles.blockedContainer}>
+              <Text style={{ fontSize: 48, marginBottom: 12 }}>🔒</Text>
+              <Text style={styles.blockedTitle}>Lista bloqueada</Text>
+              <Text style={styles.blockedSubtext}>
+                Enquanto seu status for comprometido, a lista de interessados fica oculta. Mude para Solteiro para desbloquear.
               </Text>
             </View>
-          )}
+          ) : (
+            <>
+              {loading && (
+                <View style={styles.center}>
+                  <ActivityIndicator />
+                </View>
+              )}
 
-          {showEmptyState && (
-            <View style={styles.center}>
-              <Text style={styles.emptyText}>
-                {getEmptyText(mode, isOwnProfile)}
-              </Text>
-            </View>
-          )}
+              {error && !loading && (
+                <View style={styles.center}>
+                  <Text style={styles.errorText}>
+                    Não foi possível carregar a lista.
+                  </Text>
+                </View>
+              )}
 
-          {!loading && !error && data.length > 0 && (
-            <FlatList
-              data={data}
-              keyExtractor={(item) => item.follow_id}
-              renderItem={renderItem}
-              contentContainerStyle={styles.listContent}
-              keyboardShouldPersistTaps="handled"
-            />
+              {showEmptyState && (
+                <View style={styles.center}>
+                  <Text style={styles.emptyText}>
+                    {getEmptyText(mode, isOwnProfile)}
+                  </Text>
+                </View>
+              )}
+
+              {!loading && !error && data.length > 0 && (
+                <FlatList
+                  data={data}
+                  keyExtractor={(item) => item.follow_id}
+                  renderItem={renderItem}
+                  contentContainerStyle={styles.listContent}
+                  keyboardShouldPersistTaps="handled"
+                />
+              )}
+            </>
           )}
 
           <TouchableOpacity style={styles.closeButton} onPress={onClose}>
@@ -295,6 +308,25 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: "center",
     paddingHorizontal: 16,
+  },
+  blockedContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 28,
+    paddingHorizontal: 20,
+  },
+  blockedTitle: {
+    color: "rgba(255,255,255,0.85)",
+    fontSize: 17,
+    fontWeight: "700",
+    marginBottom: 8,
+  },
+  blockedSubtext: {
+    color: "rgba(255,255,255,0.5)",
+    fontSize: 13,
+    textAlign: "center",
+    lineHeight: 19,
+    maxWidth: 280,
   },
   listContent: {
     paddingVertical: 4,

@@ -76,6 +76,11 @@ export default function ConversationScreen() {
   const [sending, setSending] = useState(false);
   const [uploadingMedia, setUploadingMedia] = useState(false);
 
+  // ── Crush lock state ──
+  const [myRelationshipStatus, setMyRelationshipStatus] = useState<string | null>(null);
+  const isCrushLocked = (conversationType === "crush") &&
+    (myRelationshipStatus === "committed" || myRelationshipStatus === "dating" || myRelationshipStatus === "married");
+
   const [selectedMessage, setSelectedMessage] = useState<DbMessage | null>(null);
   const [showMessageMenu, setShowMessageMenu] = useState(false);
   const [replyingTo, setReplyingTo] = useState<DbMessage | null>(null);
@@ -283,6 +288,16 @@ export default function ConversationScreen() {
 
         const uid = auth.user.id;
         setAuthUserId(uid);
+
+        // Fetch my relationship status for crush lock
+        const { data: myProfile } = await supabase
+          .from("profiles")
+          .select("relationship_status")
+          .eq("id", uid)
+          .maybeSingle();
+        if (myProfile?.relationship_status) {
+          setMyRelationshipStatus(myProfile.relationship_status);
+        }
 
         const { data: conv, error: convErr } = await supabase
           .from("conversations")
@@ -854,6 +869,22 @@ export default function ConversationScreen() {
           <View style={styles.loadingContainer}>
             <ActivityIndicator color="#888" />
           </View>
+        ) : isCrushLocked ? (
+          /* ── Crush locked overlay ── */
+          <View style={styles.crushLockedOverlay}>
+            <Text style={{ fontSize: 56, marginBottom: 16 }}>🔒</Text>
+            <Text style={styles.crushLockedTitle}>Conversa bloqueada</Text>
+            <Text style={styles.crushLockedSubtext}>
+              Enquanto seu status for comprometido, conversas de crush ficam ocultas. Suas mensagens não foram apagadas — mude para Solteiro para desbloquear.
+            </Text>
+            <TouchableOpacity
+              style={styles.crushLockedBackBtn}
+              onPress={() => router.back()}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.crushLockedBackText}>← Voltar</Text>
+            </TouchableOpacity>
+          </View>
         ) : (
           <View style={styles.flex1}>
             <FlatList
@@ -1058,6 +1089,38 @@ export default function ConversationScreen() {
 const styles = StyleSheet.create({
   flex1: {
     flex: 1,
+  },
+  crushLockedOverlay: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 32,
+  },
+  crushLockedTitle: {
+    color: "#ccc",
+    fontSize: 18,
+    fontWeight: "700",
+    marginBottom: 8,
+  },
+  crushLockedSubtext: {
+    color: "#777",
+    fontSize: 13,
+    textAlign: "center",
+    maxWidth: 300,
+    lineHeight: 19,
+  },
+  crushLockedBackBtn: {
+    marginTop: 24,
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
+  },
+  crushLockedBackText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "600",
   },
   safe: {
     flex: 1,

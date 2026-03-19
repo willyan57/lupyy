@@ -34,6 +34,7 @@ import {
 import CommentsSheet from "@/components/CommentsSheet";
 import FollowModal from "@/components/FollowModal";
 import FullscreenViewer, { ViewerItem } from "@/components/FullscreenViewer";
+import MatchCelebration from "@/components/MatchCelebration";
 import PeopleListSheet from "@/components/PeopleListSheet";
 import ThemeSelector from "@/components/ThemeSelector";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -41,6 +42,7 @@ import {
   ConversationType,
   getOrCreateConversation,
 } from "@/lib/conversations";
+import { setFollowInterestType } from "@/lib/social";
 import { useIsMobileWeb } from "@/lib/useIsMobileWeb";
 
 type DbPost = {
@@ -71,6 +73,7 @@ type ProfileRow = {
   avatar_url: string | null;
   bio: string | null;
   relationship_status?: RelationshipStatus | null;
+  relationship_status_changed_at?: string | null;
 };
 
 type StoryRow = {
@@ -211,8 +214,11 @@ const router = useRouter();
   const [draftUsername, setDraftUsername] = useState<string>("");
   const [draftFullName, setDraftFullName] = useState<string>("");
   const [draftBio, setDraftBio] = useState<string>("");
+  const [draftRelationshipStatus, setDraftRelationshipStatus] = useState<RelationshipStatus | null>(null);
+  const [draftGender, setDraftGender] = useState<string>("");
 
   const [editing, setEditing] = useState(false);
+  const [settingsVisible, setSettingsVisible] = useState(false);
 
   const [posts, setPosts] = useState<UiPost[]>([]);
   const [hasMore, setHasMore] = useState(true);
@@ -256,6 +262,12 @@ const router = useRouter();
 
   const [relationshipStatus, setRelationshipStatus] =
     useState<RelationshipStatus | null>(null);
+  const [myRelationshipStatus, setMyRelationshipStatus] =
+    useState<RelationshipStatus | null>(null);
+  const [relationshipStatusChangedAt, setRelationshipStatusChangedAt] =
+    useState<string | null>(null);
+  const [gender, setGender] = useState<string>("");
+  const [settingsSubScreen, setSettingsSubScreen] = useState<string | null>(null);
 
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
@@ -272,6 +284,9 @@ const router = useRouter();
   const [silentModalVisible, setSilentModalVisible] = useState(false);
   const [silentModalTitle, setSilentModalTitle] = useState("");
   const [silentModalMessage, setSilentModalMessage] = useState("");
+
+  const [matchCelebrationVisible, setMatchCelebrationVisible] = useState(false);
+  const [matchedUserName, setMatchedUserName] = useState("");
 
   const [logoutSheetVisible, setLogoutSheetVisible] = useState(false);
 
@@ -392,6 +407,12 @@ const router = useRouter();
           setDraftFullName(fName);
           setDraftBio(bioText);
           relStatus = r.relationship_status ?? null;
+          const changedAt = (r as any).relationship_status_changed_at || null;
+          setRelationshipStatusChangedAt(changedAt);
+          const g = (r as any).gender || "";
+          setGender(g);
+          setDraftGender(g);
+          setDraftRelationshipStatus(relStatus);
         } else {
           setProfileRow(null);
           setUsername(fallbackUsername);
@@ -401,6 +422,8 @@ const router = useRouter();
           setDraftUsername(fallbackUsername);
           setDraftFullName("");
           setDraftBio("");
+          setDraftRelationshipStatus(null);
+          setDraftGender("");
           relStatus = null;
         }
       } catch {
@@ -440,6 +463,20 @@ const router = useRouter();
       }
 
       if (u.id && targetUserId !== u.id) {
+        // Load MY OWN relationship status for crush blocking
+        try {
+          const { data: myProfile } = await supabase
+            .from("profiles")
+            .select("relationship_status")
+            .eq("id", u.id)
+            .maybeSingle();
+          if (myProfile) {
+            setMyRelationshipStatus(
+              (myProfile as any).relationship_status ?? null
+            );
+          }
+        } catch {}
+
         try {
           const { data: followRow, error: followErr } = await supabase
             .from("follows")
@@ -472,6 +509,8 @@ const router = useRouter();
           setTheirInterestType(null);
         }
       } else {
+        // Own profile — my status IS the loaded status
+        setMyRelationshipStatus(relStatus);
         setCurrentInterestType(null);
         setTheirInterestType(null);
       }
@@ -701,24 +740,53 @@ const handleChangeAvatar = useCallback(async () => {
       return;
     }
 
+    // ── 24h ANTI-ABUSE DELAY ──
+    const wasCommitted = relationshipStatus === "committed" || relationshipStatus === "other";
+    const willBeCommitted = draftRelationshipStatus === "committed" || draftRelationshipStatus === "other";
+    const willBeSingle = draftRelationshipStatus === "single" || !draftRelationshipStatus;
+
+    // If going from single → committed, check 24h cooldown
+    if (!wasCommitted && willBeCommitted && relationshipStatusChangedAt) {
+      const changedDate = new Date(relationshipStatusChangedAt).getTime();
+      const now = Date.now();
+      const hoursSince = (now - changedDate) / (1000 * 60 * 60);
+      if (hoursSince < 24) {
+        const hoursLeft = Math.ceil(24 - hoursSince);
+        Alert.alert(
+          "Aguarde um pouco ⏳",
+          `Você mudou seu status recentemente. Aguarde mais ${hoursLeft}h para alterar novamente.`
+        );
+        return;
+      }
+    }
+
+    // Track if relationship status actually changed
+    const statusChanged = draftRelationshipStatus !== relationshipStatus;
+
     try {
       setSavingProfile(true);
       const usernameClean = draftUsername.trim();
       const fullNameClean = draftFullName.trim();
       const bioClean = draftBio.trim();
 
+      const updatePayload: any = {
+        id: userId,
+        username: usernameClean,
+        full_name: fullNameClean || null,
+        bio: bioClean || null,
+        avatar_url: avatarUrl,
+        relationship_status: draftRelationshipStatus || null,
+        gender: draftGender.trim() || null,
+      };
+
+      // If status changed, persist the timestamp
+      if (statusChanged) {
+        updatePayload.relationship_status_changed_at = new Date().toISOString();
+      }
+
       const { data, error } = await supabase
         .from("profiles")
-        .upsert(
-          {
-            id: userId,
-            username: usernameClean,
-            full_name: fullNameClean || null,
-            bio: bioClean || null,
-            avatar_url: avatarUrl,
-          },
-          { onConflict: "id" }
-        )
+        .upsert(updatePayload, { onConflict: "id" })
         .select("*")
         .single();
 
@@ -729,6 +797,11 @@ const handleChangeAvatar = useCallback(async () => {
       setUsername(usernameClean);
       setFullName(fullNameClean);
       setBio(bioClean);
+      setRelationshipStatus(draftRelationshipStatus);
+      if (statusChanged) {
+        setRelationshipStatusChangedAt(new Date().toISOString());
+      }
+      setGender(draftGender.trim());
       setEditing(false);
       Alert.alert("Perfil atualizado", "Seu perfil foi salvo com sucesso.");
     } catch (e: any) {
@@ -1039,25 +1112,12 @@ const handleChangeAvatar = useCallback(async () => {
       try {
         setLoadingFollow(true);
 
-        const { data, error } = await supabase
-          .from("follows")
-          .upsert(
-            {
-              follower_id: authUserId,
-              following_id: userId,
-              interest_type: interestType,
-            },
-            { onConflict: "follower_id,following_id" }
-          )
-          .select("interest_type")
-          .single();
+        const result = await setFollowInterestType(authUserId, userId, interestType);
 
-        if (error) throw error;
-
-        const fr = data as { interest_type: InterestType };
-        setCurrentInterestType(fr.interest_type);
+        setCurrentInterestType(result.interestType);
         setFollowModalVisible(false);
 
+        // Refresh social stats
         try {
           const { data: stats, error: statsError } = await supabase
             .from("profile_social_stats")
@@ -1073,41 +1133,44 @@ const handleChangeAvatar = useCallback(async () => {
           }
         } catch {}
 
+        // 🎉 Match detected — show premium celebration for ANY mutual crush
+        if (result.isNewMatch) {
+          setMatchedUserName(fullName || username || "");
+          setMatchCelebrationVisible(true);
+          return; // skip the simple modal
+        }
+
+        // Non-match silent crush — show subtle confirmation
         if (interestType === "silent_crush") {
           setSilentModalTitle("Shhh…");
           setSilentModalMessage(
             "Crush silencioso enviado. Se for recíproco, a faísca aparece 😉"
           );
           setSilentModalVisible(true);
+        }
 
-          try {
-            const { data: reciprocal, error: reciprocalErr } = await supabase
-              .from("follows")
-              .select("id")
-              .eq("follower_id", userId)
-              .eq("following_id", authUserId)
-              .eq("interest_type", "silent_crush")
-              .maybeSingle();
-
-            if (!reciprocalErr && reciprocal) {
-              setSilentModalTitle("✨ CRUSH!");
-              setSilentModalMessage(
-                "A faísca bateu — vocês se escolheram no silencioso. Que comecem os papos."
-              );
-              setSilentModalVisible(true);
-            }
-          } catch {}
+        // Non-match crush — show confirmation
+        if (interestType === "crush") {
+          setSilentModalTitle("💘 Crush enviado!");
+          setSilentModalMessage(
+            "Agora é esperar… Se a pessoa curtir de volta, vocês vão se conectar!"
+          );
+          setSilentModalVisible(true);
         }
       } catch (e: any) {
-        Alert.alert(
-          "Erro ao seguir",
-          e?.message ?? "Não foi possível salvar sua escolha."
-        );
+        const msg = e?.message ?? "";
+        if (msg === "CRUSH_BLOCKED_SELF_COMMITTED") {
+          Alert.alert("Coração ocupado 💍", "Você está em um relacionamento. Mude seu status para usar crushes.");
+        } else if (msg === "CRUSH_BLOCKED_TARGET_COMMITTED") {
+          Alert.alert("Essa pessoa está comprometida 💔", "Não é possível enviar crush para alguém em um relacionamento.");
+        } else {
+          Alert.alert("Erro ao seguir", msg || "Não foi possível salvar sua escolha.");
+        }
       } finally {
         setLoadingFollow(false);
       }
     },
-    [authUserId, userId]
+    [authUserId, userId, fullName, username]
   );
 
   const openPeopleSheet = useCallback(
@@ -1271,305 +1334,342 @@ const handleChangeAvatar = useCallback(async () => {
     duration: undefined,
   }));
 
+  // ── RELATIONSHIP STATUS OPTIONS ──
+  const relationshipOptions: { value: RelationshipStatus; label: string; icon: string }[] = [
+    { value: "single", label: "Solteiro(a)", icon: "💚" },
+    { value: "committed", label: "Namorando", icon: "💜" },
+    { value: "other", label: "Casado(a)", icon: "💍" },
+  ];
+
+  const committedJokes = [
+    "Essa pessoa já está enforcada 😅",
+    "Tente novamente amanhã 😂",
+    "Coração indisponível no momento 💍",
+    "Esse crush tá com dono(a) 🔒",
+    "Tá reservado(a)! Volta depois 😜",
+  ];
+
+  const isCommitted = relationshipStatus === "committed" || relationshipStatus === "other";
+
+  // ── GENDER OPTIONS ──
+  const genderOptions = ["Masculino", "Feminino", "Não-binário", "Prefiro não dizer"];
+
+  // ── SETTINGS SCREEN ──
+  if (settingsVisible) {
+  // ── SETTINGS SUB-SCREEN (dedicated fullscreen) ──
+    if (settingsSubScreen) {
+      const subScreenInfo: Record<string, { emoji: string; title: string; desc: string }> = {
+        privacy: { emoji: "🔒", title: "Privacidade da conta", desc: "Controle quem pode ver seu perfil, posts e stories. Configure a visibilidade da sua conta e gerencie permissões de acesso." },
+        notifications: { emoji: "🔔", title: "Notificações", desc: "Gerencie suas preferências de notificações. Escolha quais alertas receber sobre curtidas, comentários, seguidores e mensagens." },
+        security: { emoji: "🛡️", title: "Segurança", desc: "Proteja sua conta com verificação em duas etapas, gerencie dispositivos conectados e revise atividades recentes." },
+        messages_settings: { emoji: "💬", title: "Mensagens e respostas", desc: "Configure quem pode enviar mensagens e respostas a stories. Gerencie filtros de mensagens e solicitações." },
+        tags: { emoji: "🏷️", title: "Marcações e menções", desc: "Controle quem pode marcar ou mencionar você em posts, stories e comentários." },
+        comments: { emoji: "💭", title: "Comentários", desc: "Gerencie quem pode comentar nos seus posts. Configure filtros de palavras e moderação automática." },
+        blocked: { emoji: "🚫", title: "Bloqueados", desc: "Veja e gerencie a lista de contas que você bloqueou. Contas bloqueadas não podem interagir com você." },
+        restricted: { emoji: "⚠️", title: "Contas restritas", desc: "Contas restritas podem ver seus posts, mas não interagem diretamente. Útil para limitar contato sem bloquear." },
+        close_friends: { emoji: "⭐", title: "Amigos próximos", desc: "Crie sua lista de amigos próximos para compartilhar stories e conteúdos exclusivos com quem mais importa." },
+        tribes: { emoji: "👥", title: "Tribos", desc: "Crie ou participe de tribos — grupos de interesse que conectam pessoas com afinidades em comum." },
+        discovery: { emoji: "🎯", title: "Preferências de descoberta", desc: "Configure como o Lupyy sugere perfis para você. Ajuste seus interesses e preferências de descoberta." },
+        saved: { emoji: "🔖", title: "Itens salvos", desc: "Acesse todos os posts, vídeos e conteúdos que você salvou para ver depois." },
+        archived: { emoji: "📦", title: "Itens arquivados", desc: "Posts e stories que você arquivou ficam aqui. Você pode restaurá-los a qualquer momento." },
+        activity: { emoji: "📊", title: "Sua atividade", desc: "Veja o resumo da sua atividade no Lupyy: tempo de uso, interações, curtidas e muito mais." },
+        appearance: { emoji: "🎨", title: "Aparência / tema", desc: "Personalize a aparência do Lupyy. Escolha entre temas escuros, coloridos e personalizados." },
+        time_mgmt: { emoji: "⏱️", title: "Gerenciamento de tempo", desc: "Configure lembretes de tempo de uso e pausas para manter um uso saudável do app." },
+        help: { emoji: "❓", title: "Ajuda / suporte", desc: "Precisa de ajuda? Acesse perguntas frequentes, entre em contato com o suporte ou reporte problemas." },
+        privacy_policy: { emoji: "📋", title: "Política de privacidade", desc: "Leia nossa política de privacidade para entender como protegemos seus dados e informações pessoais." },
+        terms: { emoji: "📜", title: "Termos de uso", desc: "Conheça os termos e condições de uso do Lupyy. Saiba seus direitos e responsabilidades na plataforma." },
+      };
+
+      const info = subScreenInfo[settingsSubScreen] || { emoji: "⚙️", title: "Em breve", desc: "Esta funcionalidade estará disponível em breve." };
+
+      return (
+        <SafeAreaView style={[styles.screen, { backgroundColor: theme.colors.background }]}>
+          <View style={styles.settingsHeader}>
+            <TouchableOpacity onPress={() => setSettingsSubScreen(null)} activeOpacity={0.7} style={styles.settingsBackBtn}>
+              <Text style={[styles.settingsBackIcon, { color: theme.colors.text }]}>←</Text>
+            </TouchableOpacity>
+            <Text style={[styles.settingsTitle, { color: theme.colors.text }]}>{info.title}</Text>
+            <View style={{ width: 40 }} />
+          </View>
+          <View style={styles.subScreenContent}>
+            <Text style={styles.subScreenEmoji}>{info.emoji}</Text>
+            <Text style={[styles.subScreenTitle, { color: theme.colors.text }]}>{info.title}</Text>
+            <Text style={[styles.subScreenDesc, { color: theme.colors.textMuted }]}>{info.desc}</Text>
+          </View>
+        </SafeAreaView>
+      );
+    }
+
+    const settingsSections = [
+      {
+        title: "Sua conta",
+        items: [
+          { icon: "👤", label: "Editar perfil", onPress: () => { setSettingsVisible(false); setEditing(true); } },
+          { icon: "🔒", label: "Privacidade da conta", onPress: () => setSettingsSubScreen("privacy") },
+          { icon: "🔔", label: "Notificações", onPress: () => setSettingsSubScreen("notifications") },
+          { icon: "🛡️", label: "Segurança", onPress: () => setSettingsSubScreen("security") },
+        ],
+      },
+      {
+        title: "Como as pessoas interagem com você",
+        items: [
+          { icon: "💬", label: "Mensagens e respostas", onPress: () => setSettingsSubScreen("messages_settings") },
+          { icon: "🏷️", label: "Marcações e menções", onPress: () => setSettingsSubScreen("tags") },
+          { icon: "💭", label: "Comentários", onPress: () => setSettingsSubScreen("comments") },
+          { icon: "🚫", label: "Bloqueados", onPress: () => setSettingsSubScreen("blocked") },
+          { icon: "⚠️", label: "Restritas", onPress: () => setSettingsSubScreen("restricted") },
+        ],
+      },
+      {
+        title: "Social / Lupyy",
+        items: [
+          { icon: "💘", label: "Crushes", onPress: () => {
+            if (isCommitted && isOwnProfile) {
+              Alert.alert("🔒 Crushes bloqueados", "Seu status de relacionamento bloqueia o acesso aos crushes.");
+              return;
+            }
+            openPeopleSheet("interested");
+          } },
+          { icon: "⭐", label: "Amigos próximos", onPress: () => setSettingsSubScreen("close_friends") },
+          { icon: "👥", label: "Tribos", onPress: () => setSettingsSubScreen("tribes") },
+          { icon: "🎯", label: "Preferências de descoberta", onPress: () => setSettingsSubScreen("discovery") },
+        ],
+      },
+      {
+        title: "Conteúdo",
+        items: [
+          { icon: "🔖", label: "Itens salvos", onPress: () => setSettingsSubScreen("saved") },
+          { icon: "📦", label: "Itens arquivados", onPress: () => setSettingsSubScreen("archived") },
+          { icon: "📊", label: "Sua atividade", onPress: () => setSettingsSubScreen("activity") },
+        ],
+      },
+      {
+        title: "App",
+        items: [
+          { icon: "🎨", label: "Aparência / tema", onPress: () => setSettingsSubScreen("appearance") },
+          { icon: "⏱️", label: "Gerenciamento de tempo", onPress: () => setSettingsSubScreen("time_mgmt") },
+          { icon: "❓", label: "Ajuda / suporte", onPress: () => setSettingsSubScreen("help") },
+          { icon: "📋", label: "Política de privacidade", onPress: () => setSettingsSubScreen("privacy_policy") },
+          { icon: "📜", label: "Termos de uso", onPress: () => setSettingsSubScreen("terms") },
+        ],
+      },
+    ];
+
+    return (
+      <SafeAreaView style={[styles.screen, { backgroundColor: theme.colors.background }]}>
+        {/* Header */}
+        <View style={styles.settingsHeader}>
+          <TouchableOpacity onPress={() => setSettingsVisible(false)} activeOpacity={0.7} style={styles.settingsBackBtn}>
+            <Text style={[styles.settingsBackIcon, { color: theme.colors.text }]}>←</Text>
+          </TouchableOpacity>
+          <Text style={[styles.settingsTitle, { color: theme.colors.text }]}>Configurações e atividade</Text>
+          <View style={{ width: 40 }} />
+        </View>
+
+        {/* Search */}
+        <View style={styles.settingsSearchWrap}>
+          <View style={[styles.settingsSearchBox, { backgroundColor: theme.colors.surface }]}>
+            <Text style={[styles.settingsSearchIcon, { color: theme.colors.textMuted }]}>🔍</Text>
+            <Text style={[styles.settingsSearchPlaceholder, { color: theme.colors.textMuted }]}>Pesquisar</Text>
+          </View>
+        </View>
+
+        <ScrollView contentContainerStyle={styles.settingsScroll} showsVerticalScrollIndicator={false}>
+          {settingsSections.map((section, sIdx) => (
+            <View key={sIdx} style={styles.settingsSection}>
+              <Text style={[styles.settingsSectionTitle, { color: theme.colors.primary || "#a855f7" }]}>{section.title}</Text>
+              {section.items.map((item, iIdx) => (
+                <TouchableOpacity
+                  key={iIdx}
+                  style={[styles.settingsRow, { borderBottomColor: "rgba(255,255,255,0.06)" }]}
+                  activeOpacity={0.6}
+                  onPress={item.onPress}
+                >
+                  <Text style={styles.settingsRowIcon}>{item.icon}</Text>
+                  <Text style={[styles.settingsRowLabel, { color: theme.colors.text }]}>{item.label}</Text>
+                  <Text style={[styles.settingsRowChevron, { color: theme.colors.textMuted }]}>›</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          ))}
+
+          {/* Sair */}
+          <View style={styles.settingsSection}>
+            <TouchableOpacity
+              style={[styles.settingsRow, { borderBottomColor: "transparent" }]}
+              activeOpacity={0.6}
+              onPress={() => {
+                setSettingsVisible(false);
+                signOut();
+              }}
+            >
+              <Text style={styles.settingsRowIcon}>🚪</Text>
+              <Text style={[styles.settingsRowLabel, { color: "#ff6b6b" }]}>Sair da conta</Text>
+              <Text style={[styles.settingsRowChevron, { color: "#ff6b6b" }]}>›</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={{ height: 80 }} />
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  // ── EDIT PROFILE FULLSCREEN ──
   if (editing) {
     return (
-      <SafeAreaView
-        {...(!isDesktopWeb ? (panResponder as any).panHandlers : {})}
-        style={[styles.screen, { backgroundColor: theme.colors.background }]}
-      >
-        <ScrollView contentContainerStyle={styles.editScrollContent}>
-          <View style={styles.mainColumn}>
-            <View style={styles.topBar}>
-              <TouchableOpacity
-                onPress={() => {
-                  setDraftUsername(username);
-                  setDraftFullName(fullName);
-                  setDraftBio(bio);
-                  setEditing(false);
-                }}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.topIcon, { color: theme.colors.text }]}>
-                  ←
-                </Text>
-              </TouchableOpacity>
-              <View style={styles.topCenter}>
-                <Text
-                  style={[styles.topUsername, { color: theme.colors.text }]}
-                  numberOfLines={1}
-                >
-                  Ajustar vibe
-                </Text>
-              </View>
-              <View style={styles.topActions}>
-                {isOwnProfile && (
-                  <TouchableOpacity
-                    onPress={() => setLogoutSheetVisible(true)}
-                    activeOpacity={0.8}
-                    style={styles.logoutButton}
-                  >
-                    <Text
-                      style={[
-                        styles.logoutIcon,
-                        { color: theme.colors.text },
-                      ]}
-                    >
-                      ⎋
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            </View>
+      <SafeAreaView style={[styles.screen, { backgroundColor: theme.colors.background }]}>
+        {/* Header */}
+        <View style={styles.settingsHeader}>
+          <TouchableOpacity
+            onPress={() => {
+              setDraftUsername(username);
+              setDraftFullName(fullName);
+              setDraftBio(bio);
+              setDraftRelationshipStatus(relationshipStatus);
+              setDraftGender(gender);
+              setEditing(false);
+            }}
+            activeOpacity={0.7}
+            style={styles.settingsBackBtn}
+          >
+            <Text style={[styles.settingsBackIcon, { color: theme.colors.text }]}>←</Text>
+          </TouchableOpacity>
+          <Text style={[styles.settingsTitle, { color: theme.colors.text }]}>Editar perfil</Text>
+          <TouchableOpacity
+            onPress={handleSaveProfile}
+            disabled={savingProfile}
+            activeOpacity={0.7}
+            style={styles.editSaveHeaderBtn}
+          >
+            {savingProfile ? (
+              <ActivityIndicator size="small" color={theme.colors.primary || "#a855f7"} />
+            ) : (
+              <Text style={[styles.editSaveHeaderText, { color: theme.colors.primary || "#a855f7" }]}>Salvar</Text>
+            )}
+          </TouchableOpacity>
+        </View>
 
-            <View style={styles.header}>
-  <TouchableOpacity
-    style={styles.avatarWrapper}
-    onPress={() => {
-      const hasStories = stories.length > 0;
-      if (hasStories) {
-        openStory(0);
-      } else if (isOwnProfile) {
-        handleChangeAvatar();
-      }
-    }}
-    onLongPress={isOwnProfile ? handleChangeAvatar : undefined}
-    activeOpacity={0.8}
-  >
-    {avatarUrl ? (
-      <ExpoImage
-        source={{ uri: avatarUrl }}
-        style={styles.avatar}
-        contentFit="cover"
-        cachePolicy="disk"
-      />
-    ) : (
-      <LinearGradient
-        colors={[Colors.brandStart, Colors.brandEnd]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.avatar}
-      >
-        <Text style={styles.avatarInitials}>
-          {username?.[0]?.toUpperCase() || "L"}
-        </Text>
-      </LinearGradient>
-    )}
-  </TouchableOpacity>
+        <ScrollView contentContainerStyle={styles.editPremiumScroll} showsVerticalScrollIndicator={false}>
+          {/* Avatar Section */}
+          <View style={styles.editAvatarSection}>
+            <TouchableOpacity onPress={handleChangeAvatar} activeOpacity={0.8} style={styles.editAvatarBtn}>
+              {avatarUrl ? (
+                <ExpoImage source={{ uri: avatarUrl }} style={styles.editAvatarImg} contentFit="cover" cachePolicy="disk" />
+              ) : (
+                <LinearGradient colors={[Colors.brandStart, Colors.brandEnd]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.editAvatarImg}>
+                  <Text style={styles.avatarInitials}>{username?.[0]?.toUpperCase() || "L"}</Text>
+                </LinearGradient>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={handleChangeAvatar} activeOpacity={0.7}>
+              <Text style={[styles.editAvatarLabel, { color: theme.colors.primary || "#a855f7" }]}>Editar foto ou avatar</Text>
+            </TouchableOpacity>
+          </View>
 
-              <View style={[styles.statsRow, isMobileLayout && styles.statsRowMobile]}>
-                <View style={styles.statItem}>
-                  <Text
-                    style={[styles.statNumber, { color: theme.colors.text }]}
-                  >
-                    {postsCount}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.statLabel,
-                      { color: theme.colors.textMuted },
-                    ]}
-                  >
-                    Posts
-                  </Text>
-                </View>
-                <View style={styles.statItem}>
-                  <Text
-                    style={[styles.statNumber, { color: theme.colors.text }]}
-                  >
-                    {followersCount}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.statLabel,
-                      { color: theme.colors.textMuted },
-                    ]}
-                  >
-                    Seguidores
-                  </Text>
-                </View>
-                <View style={styles.statItem}>
-                  <Text
-                    style={[styles.statNumber, { color: theme.colors.text }]}
-                  >
-                    {followingCount}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.statLabel,
-                      { color: theme.colors.textMuted },
-                    ]}
-                  >
-                    Seguindo
-                  </Text>
-                </View>
-                <View style={styles.statItem}>
-                  <Text
-                    style={[styles.statNumber, { color: theme.colors.text }]}
-                  >
-                    {interestedCount}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.statLabel,
-                      { color: theme.colors.textMuted },
-                    ]}
-                  >
-                    Crush
-                  </Text>
-                </View>
-              </View>
-            </View>
-
-            <View style={styles.bioSection}>
-              {fullName ? (
-                <Text style={[styles.fullName, { color: theme.colors.text }, isMobileLayout && { textAlign: "center" }]}>
-                  {fullName}
-                </Text>
-              ) : null}
-              {bio ? (
-                <Text style={[styles.bioText, { color: theme.colors.text }, isMobileLayout && { textAlign: "center" }]}>
-                  {bio}
-                </Text>
-              ) : authEmail && isOwnProfile ? (
-                <Text
-                  style={[
-                    styles.bioPlaceholder,
-                    { color: theme.colors.textMuted },
-                    Platform.OS !== "web" && { textAlign: "center" },
-                  ]}
-                >
-                  {authEmail}
-                </Text>
-              ) : null}
-            </View>
-
-            <View
-              style={[
-                styles.editCard,
-                { marginTop: 12, backgroundColor: theme.colors.surface },
-              ]}
-            >
-              <Text style={[styles.editTitle, { color: theme.colors.text }]}>
-                Ajustar vibe
-              </Text>
-
-              <Text
-                style={[styles.editLabel, { color: theme.colors.textMuted }]}
-              >
-                Username
-              </Text>
-              <TextInput
-                value={draftUsername}
-                onChangeText={setDraftUsername}
-                placeholder="username"
-                placeholderTextColor={Colors.textMuted}
-                autoCapitalize="none"
-                style={[
-                  styles.editInput,
-                  {
-                    color: theme.colors.text,
-                    backgroundColor: theme.colors.background,
-                    borderColor: theme.colors.border,
-                  },
-                ]}
-              />
-
-              <Text
-                style={[styles.editLabel, { color: theme.colors.textMuted }]}
-              >
-                Nome
-              </Text>
+          {/* Fields */}
+          <View style={styles.editFieldsWrap}>
+            {/* Nome */}
+            <View style={[styles.editFieldBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+              <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>Nome</Text>
               <TextInput
                 value={draftFullName}
                 onChangeText={setDraftFullName}
                 placeholder="Seu nome"
-                placeholderTextColor={Colors.textMuted}
-                style={[
-                  styles.editInput,
-                  {
-                    color: theme.colors.text,
-                    backgroundColor: theme.colors.background,
-                    borderColor: theme.colors.border,
-                  },
-                ]}
+                placeholderTextColor={theme.colors.textMuted}
+                style={[styles.editFieldInput, { color: theme.colors.text }]}
               />
+            </View>
 
-              <Text
-                style={[styles.editLabel, { color: theme.colors.textMuted }]}
-              >
-                Bio
-              </Text>
+            {/* Username */}
+            <View style={[styles.editFieldBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+              <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>Nome de usuário</Text>
+              <TextInput
+                value={draftUsername}
+                onChangeText={setDraftUsername}
+                placeholder="username"
+                placeholderTextColor={theme.colors.textMuted}
+                autoCapitalize="none"
+                style={[styles.editFieldInput, { color: theme.colors.text }]}
+              />
+            </View>
+
+            {/* Bio */}
+            <View style={[styles.editFieldBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, minHeight: 100 }]}>
+              <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>Bio</Text>
               <TextInput
                 value={draftBio}
                 onChangeText={setDraftBio}
                 placeholder="Fale um pouco sobre você"
-                placeholderTextColor={Colors.textMuted}
+                placeholderTextColor={theme.colors.textMuted}
                 multiline
-                style={[
-                  styles.editInput,
-                  styles.editInputMultiline,
-                  {
-                    color: theme.colors.text,
-                    backgroundColor: theme.colors.background,
-                    borderColor: theme.colors.border,
-                  },
-                ]}
+                style={[styles.editFieldInput, { color: theme.colors.text, minHeight: 60, textAlignVertical: "top" }]}
               />
+            </View>
 
+            {/* Gênero */}
+            <View style={[styles.editFieldBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+              <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>Gênero</Text>
+              <View style={styles.editGenderRow}>
+                {genderOptions.map((g) => (
+                  <TouchableOpacity
+                    key={g}
+                    onPress={() => setDraftGender(g)}
+                    activeOpacity={0.7}
+                    style={[
+                      styles.editGenderPill,
+                      {
+                        borderColor: draftGender === g ? (theme.colors.primary || "#a855f7") : theme.colors.border,
+                        backgroundColor: draftGender === g ? "rgba(168,85,247,0.15)" : "transparent",
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.editGenderText, { color: draftGender === g ? (theme.colors.primary || "#a855f7") : theme.colors.text }]}>{g}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
 
-              <Text
-                style={[styles.editLabel, { color: theme.colors.textMuted }]}
-              >
-                Estilo visual
-              </Text>
+            {/* Status de relacionamento */}
+            <View style={[styles.editFieldBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+              <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>Status de relacionamento</Text>
+              <View style={styles.editGenderRow}>
+                {relationshipOptions.map((opt) => (
+                  <TouchableOpacity
+                    key={opt.value}
+                    onPress={() => setDraftRelationshipStatus(opt.value)}
+                    activeOpacity={0.7}
+                    style={[
+                      styles.editGenderPill,
+                      {
+                        borderColor: draftRelationshipStatus === opt.value ? (theme.colors.primary || "#a855f7") : theme.colors.border,
+                        backgroundColor: draftRelationshipStatus === opt.value ? "rgba(168,85,247,0.15)" : "transparent",
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.editGenderText, { color: draftRelationshipStatus === opt.value ? (theme.colors.primary || "#a855f7") : theme.colors.text }]}>
+                      {opt.icon} {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              {(draftRelationshipStatus === "committed" || draftRelationshipStatus === "other") && (
+                <Text style={[styles.editFieldHint, { color: theme.colors.textMuted }]}>
+                  🔒 Crushes e mensagens de crush serão bloqueados enquanto esse status estiver ativo.
+                </Text>
+              )}
+            </View>
+
+            {/* Estilo visual */}
+            <View style={[styles.editFieldBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+              <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>Estilo visual</Text>
               <View style={styles.editThemeBox}>
                 <ThemeSelector />
               </View>
-
-
-              <View style={styles.editButtonsRow}>
-                <TouchableOpacity
-                  style={[
-                    styles.editButton,
-                    styles.editCancelButton,
-                    {
-                      borderColor: theme.colors.border,
-                      backgroundColor: theme.colors.background,
-                    },
-                  ]}
-                  onPress={() => {
-                    setDraftUsername(username);
-                    setDraftFullName(fullName);
-                    setDraftBio(bio);
-                    setEditing(false);
-                  }}
-                  activeOpacity={0.8}
-                >
-                  <Text
-                    style={[
-                      styles.editCancelText,
-                      { color: theme.colors.text },
-                    ]}
-                  >
-                    Cancelar
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.editButton, styles.editSaveButton]}
-                  onPress={handleSaveProfile}
-                  disabled={savingProfile}
-                  activeOpacity={0.8}
-                >
-                  {savingProfile ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <Text style={styles.editSaveText}>Salvar</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
             </View>
           </View>
+
+          <View style={{ height: 80 }} />
         </ScrollView>
       </SafeAreaView>
     );
@@ -1636,7 +1736,7 @@ const handleChangeAvatar = useCallback(async () => {
             </Text>
             {isOwnProfile && (
               <TouchableOpacity
-                onPress={() => setLogoutSheetVisible(true)}
+                onPress={() => setSettingsVisible(true)}
                 activeOpacity={0.8}
                 style={[
                   styles.logoutButton,
@@ -1805,10 +1905,16 @@ const handleChangeAvatar = useCallback(async () => {
             <TouchableOpacity
               style={styles.statItem}
               activeOpacity={0.8}
-              onPress={() => openPeopleSheet("interested")}
+              onPress={() => {
+                if (isCommitted && isOwnProfile) {
+                  Alert.alert("🔒 Crushes bloqueados", "Seu status de relacionamento bloqueia o acesso aos crushes. Mude para Solteiro(a) para desbloquear.");
+                  return;
+                }
+                openPeopleSheet("interested");
+              }}
             >
               <Text style={[styles.statNumber, { color: theme.colors.text }]}>
-                {interestedCount}
+                {isCommitted && isOwnProfile ? "🔒" : interestedCount}
               </Text>
               <Text
                 style={[styles.statLabel, { color: theme.colors.textMuted }]}
@@ -1818,6 +1924,17 @@ const handleChangeAvatar = useCallback(async () => {
             </TouchableOpacity>
           </View>
         </View>
+
+        {/* ── COMMITTED BADGE ── */}
+        {isCommitted && (
+          <View style={[styles.committedBadgeRow]}>
+            <View style={[styles.committedBadge, { backgroundColor: "rgba(168,85,247,0.12)", borderColor: "rgba(168,85,247,0.3)" }]}>
+              <Text style={styles.committedBadgeText}>
+                {relationshipStatus === "other" ? "💍 Casado(a)" : "💜 Comprometido(a)"}
+              </Text>
+            </View>
+          </View>
+        )}
 
         <View style={[styles.bioSection, isMobileLayout && styles.bioSectionMobile]}>
           {fullName ? (
@@ -2297,73 +2414,14 @@ const handleChangeAvatar = useCallback(async () => {
             </Pressable>
           </Modal>
 
-          <Modal
-            transparent
-            visible={logoutSheetVisible}
-            animationType="fade"
-            onRequestClose={() => setLogoutSheetVisible(false)}
-          >
-            <Pressable
-              style={styles.modalOverlay}
-              onPress={() => setLogoutSheetVisible(false)}
-            >
-              <Pressable style={styles.actionSheetCard} onPress={() => {}}>
-                <Text style={styles.modalTitle}>Conta</Text>
-
-                <TouchableOpacity
-                  activeOpacity={0.85}
-                  onPress={() => {
-                    setLogoutSheetVisible(false);
-                    Alert.alert("Em breve", "Configurações estarão disponíveis.");
-                  }}
-                  style={[styles.sheetAction, { borderColor: theme.colors.border }]}
-                >
-                  <Text style={styles.sheetActionText}>Configurações</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  activeOpacity={0.85}
-                  onPress={() => {
-                    setLogoutSheetVisible(false);
-                    Alert.alert("Em breve", "Troca de conta estará disponível.");
-                  }}
-                  style={[styles.sheetAction, { borderColor: theme.colors.border }]}
-                >
-                  <Text style={styles.sheetActionText}>Trocar conta</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  activeOpacity={0.85}
-                  onPress={() => {
-                    setLogoutSheetVisible(false);
-                    signOut();
-                  }}
-                  style={[
-                    styles.sheetAction,
-                    { borderColor: theme.colors.border },
-                  ]}
-                >
-                  <Text style={[styles.sheetActionText, { color: "#ff6b6b" }]}>
-                    Sair
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  activeOpacity={0.85}
-                  onPress={() => setLogoutSheetVisible(false)}
-                  style={[styles.sheetCancel, { borderColor: theme.colors.border }]}
-                >
-                  <Text style={styles.sheetCancelText}>Cancelar</Text>
-                </TouchableOpacity>
-              </Pressable>
-            </Pressable>
-          </Modal>
+          {/* Logout modal removed — settings screen handles this now */}
 
           <FollowModal
             visible={isFollowModalVisible}
             onClose={() => setFollowModalVisible(false)}
             onSelect={handleSelectInterest}
-            relationshipStatus={relationshipStatus || "single"}
+            myRelationshipStatus={myRelationshipStatus || "single"}
+            targetRelationshipStatus={relationshipStatus || "single"}
             existingInterestType={currentInterestType}
             loading={loadingFollow}
           />
@@ -2373,10 +2431,21 @@ const handleChangeAvatar = useCallback(async () => {
             mode={peopleSheetMode}
             profileId={userId ?? ""}
             isOwnProfile={isOwnProfile}
+            myRelationshipStatus={myRelationshipStatus}
             onClose={() => setPeopleSheetVisible(false)}
             onOpenProfile={(targetId) => {
               setPeopleSheetVisible(false);
               handlePressUser(targetId);
+            }}
+          />
+
+          <MatchCelebration
+            visible={matchCelebrationVisible}
+            matchedUserName={matchedUserName}
+            onClose={() => setMatchCelebrationVisible(false)}
+            onSendMessage={() => {
+              setMatchCelebrationVisible(false);
+              openConversation("crush");
             }}
           />
         </>
@@ -3043,5 +3112,207 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "900",
     fontSize: 14,
+  },
+
+  // ── SETTINGS STYLES ──
+  settingsHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 12,
+  },
+  settingsBackBtn: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  settingsBackIcon: {
+    fontSize: 24,
+    fontWeight: "700",
+  },
+  settingsTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    flex: 1,
+    textAlign: "center",
+  },
+  settingsSearchWrap: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  settingsSearchBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  settingsSearchIcon: {
+    fontSize: 14,
+  },
+  settingsSearchPlaceholder: {
+    fontSize: 15,
+    fontWeight: "500",
+  },
+  settingsScroll: {
+    paddingBottom: 40,
+  },
+  settingsSection: {
+    marginTop: 8,
+    paddingHorizontal: 16,
+  },
+  settingsSectionTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    marginBottom: 4,
+    marginTop: 16,
+    letterSpacing: 0.3,
+  },
+  settingsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    borderBottomWidth: 0.5,
+    gap: 14,
+  },
+  settingsRowIcon: {
+    fontSize: 20,
+    width: 28,
+    textAlign: "center",
+  },
+  settingsRowLabel: {
+    fontSize: 15,
+    fontWeight: "500",
+    flex: 1,
+  },
+  settingsRowChevron: {
+    fontSize: 22,
+    fontWeight: "300",
+  },
+
+  // ── EDIT PROFILE PREMIUM STYLES ──
+  editSaveHeaderBtn: {
+    width: 60,
+    alignItems: "flex-end",
+    justifyContent: "center",
+  },
+  editSaveHeaderText: {
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  editPremiumScroll: {
+    paddingBottom: 40,
+  },
+  editAvatarSection: {
+    alignItems: "center",
+    paddingVertical: 20,
+    gap: 10,
+  },
+  editAvatarBtn: {
+    width: 96,
+    height: 96,
+    borderRadius: 999,
+    overflow: "hidden",
+  },
+  editAvatarImg: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  editAvatarLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  editFieldsWrap: {
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  editFieldBox: {
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  editFieldLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    marginBottom: 4,
+    letterSpacing: 0.2,
+  },
+  editFieldInput: {
+    fontSize: 15,
+    fontWeight: "500",
+    padding: 0,
+    margin: 0,
+  },
+  editFieldHint: {
+    fontSize: 12,
+    fontWeight: "500",
+    marginTop: 8,
+    lineHeight: 16,
+  },
+  editGenderRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 6,
+  },
+  editGenderPill: {
+    borderRadius: 20,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  editGenderText: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  // ── COMMITTED BADGE ──
+  committedBadgeRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 4,
+  },
+  committedBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  committedBadgeText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#c084fc",
+  },
+  // ── SETTINGS SUB-SCREEN ──
+  subScreenContent: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+  },
+  subScreenEmoji: {
+    fontSize: 48,
+    marginBottom: 16,
+  },
+  subScreenTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    marginBottom: 8,
+  },
+  subScreenDesc: {
+    fontSize: 14,
+    fontWeight: "500",
+    textAlign: "center",
+    lineHeight: 20,
   },
 });

@@ -1,14 +1,14 @@
 // components/FollowModal.tsx
 import { LinearGradient } from "expo-linear-gradient";
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import {
-    ActivityIndicator,
-    Modal,
-    Pressable,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 
 type InterestType = "friend" | "crush" | "silent_crush";
@@ -18,24 +18,64 @@ type Props = {
   visible: boolean;
   onClose: () => void;
   onSelect: (interestType: InterestType) => void;
+  /** The logged-in user's own relationship status */
+  myRelationshipStatus?: RelationshipStatus | null;
+  /** The target profile's relationship status */
+  targetRelationshipStatus?: RelationshipStatus | null;
+  /** @deprecated use myRelationshipStatus instead */
   relationshipStatus?: RelationshipStatus | null;
   existingInterestType?: InterestType | null;
   loading?: boolean;
 };
 
+const JOKES_SELF_COMMITTED = [
+  "Você já tem dono(a)! 💍",
+  "Coração ocupado, lembra? 😏",
+  "Seu crush é quem tá do seu lado 💜",
+  "Compromisso ativo — nada de crush! 🔒",
+  "Foco no relacionamento! 😘",
+];
+
+const JOKES_TARGET_COMMITTED = [
+  "Essa pessoa já está enforcada 😅",
+  "Coração indisponível no momento 💍",
+  "Tente novamente amanhã 😂",
+  "Esse coração já tem dono(a) 🔒",
+  "Território ocupado — passe adiante 🚫",
+  "Amor em manutenção… tente outro 😜",
+];
+
+function pickRandom(arr: string[]) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
 function FollowModalComponent({
   visible,
   onClose,
   onSelect,
+  myRelationshipStatus,
+  targetRelationshipStatus,
   relationshipStatus,
   existingInterestType,
   loading,
 }: Props) {
-  const isCrushBlocked = relationshipStatus === "committed";
+  // Backwards compat: if new props not provided, fall back to old prop
+  const myStatus = myRelationshipStatus ?? relationshipStatus ?? "single";
+  const targetStatus = targetRelationshipStatus ?? "single";
+
+  const iAmCommitted = myStatus === "committed";
+  const targetIsCommitted = targetStatus === "committed";
+  const isCrushBlocked = iAmCommitted || targetIsCommitted;
+
+  const blockedMessage = useMemo(() => {
+    if (!isCrushBlocked) return "";
+    if (iAmCommitted) return pickRandom(JOKES_SELF_COMMITTED);
+    return pickRandom(JOKES_TARGET_COMMITTED);
+  }, [isCrushBlocked, iAmCommitted, visible]); // re-pick on each open
 
   const handleSelect = (value: InterestType) => {
     if (loading) return;
-    if (value === "crush" && isCrushBlocked) return;
+    if ((value === "crush" || value === "silent_crush") && isCrushBlocked) return;
     onSelect(value);
   };
 
@@ -62,6 +102,7 @@ function FollowModalComponent({
             </Text>
 
             <View style={styles.optionsWrapper}>
+              {/* ── Friend (always available) ── */}
               <TouchableOpacity
                 style={[
                   styles.option,
@@ -87,6 +128,7 @@ function FollowModalComponent({
                 )}
               </TouchableOpacity>
 
+              {/* ── Crush (blocked if committed) ── */}
               <TouchableOpacity
                 style={[
                   styles.option,
@@ -97,7 +139,9 @@ function FollowModalComponent({
                 onPress={() => handleSelect("crush")}
               >
                 <View style={styles.optionLeft}>
-                  <Text style={styles.emoji}>❤️</Text>
+                  <Text style={styles.emoji}>
+                    {isCrushBlocked ? "🔒" : "❤️"}
+                  </Text>
                   <View>
                     <Text
                       style={[
@@ -113,12 +157,12 @@ function FollowModalComponent({
                         isCrushBlocked && styles.optionDescriptionMuted,
                       ]}
                     >
-                      Mostra que você está interessado romanticamente.
+                      {isCrushBlocked
+                        ? "Indisponível para perfis comprometidos"
+                        : "Mostra que você está interessado romanticamente."}
                     </Text>
                     {isCrushBlocked && (
-                      <Text style={styles.blockedText}>
-                        Esse coração já tem dono 😅
-                      </Text>
+                      <Text style={styles.blockedText}>{blockedMessage}</Text>
                     )}
                   </View>
                 </View>
@@ -129,26 +173,45 @@ function FollowModalComponent({
                 )}
               </TouchableOpacity>
 
+              {/* ── Silent Crush (also blocked if committed) ── */}
               <TouchableOpacity
                 style={[
                   styles.option,
-                  existingInterestType === "silent_crush" &&
-                    styles.optionActive,
-                  loading && styles.optionDisabled,
+                  existingInterestType === "silent_crush" && styles.optionActive,
+                  (isCrushBlocked || loading) && styles.optionDisabled,
                 ]}
-                activeOpacity={0.8}
+                activeOpacity={isCrushBlocked ? 1 : 0.8}
                 onPress={() => handleSelect("silent_crush")}
               >
                 <View style={styles.optionLeft}>
-                  <Text style={styles.emoji}>🤐</Text>
+                  <Text style={styles.emoji}>
+                    {isCrushBlocked ? "🔒" : "🤐"}
+                  </Text>
                   <View>
-                    <Text style={styles.optionLabel}>Crush silencioso</Text>
-                    <Text style={styles.optionDescription}>
-                      Só você vê. Se o interesse for mútuo, a gente avisa.
+                    <Text
+                      style={[
+                        styles.optionLabel,
+                        isCrushBlocked && styles.optionLabelMuted,
+                      ]}
+                    >
+                      Crush silencioso
                     </Text>
+                    <Text
+                      style={[
+                        styles.optionDescription,
+                        isCrushBlocked && styles.optionDescriptionMuted,
+                      ]}
+                    >
+                      {isCrushBlocked
+                        ? "Bloqueado enquanto comprometido"
+                        : "Só você vê. Se o interesse for mútuo, a gente avisa."}
+                    </Text>
+                    {isCrushBlocked && (
+                      <Text style={styles.blockedText}>{blockedMessage}</Text>
+                    )}
                   </View>
                 </View>
-                {existingInterestType === "silent_crush" && (
+                {existingInterestType === "silent_crush" && !isCrushBlocked && (
                   <View style={styles.badge}>
                     <Text style={styles.badgeText}>Atual</Text>
                   </View>
@@ -233,7 +296,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255, 255, 255, 0.06)",
   },
   optionDisabled: {
-    opacity: 0.6,
+    opacity: 0.5,
   },
   optionLeft: {
     flexDirection: "row",
@@ -266,6 +329,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: "#FFD6E0",
     marginTop: 4,
+    fontStyle: "italic",
   },
   badge: {
     paddingHorizontal: 10,
