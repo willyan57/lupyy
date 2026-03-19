@@ -27,6 +27,8 @@ type NoticeState = {
   message: string;
 };
 
+const RECOVERY_FLAG = "lupyy_password_recovery_pending";
+
 export default function ResetScreen() {
   const router = useRouter();
 
@@ -62,6 +64,29 @@ export default function ResetScreen() {
     return "lupyy://reset";
   }, []);
 
+  function persistRecoveryFlag(value: boolean) {
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      try {
+        if (value) {
+          window.localStorage.setItem(RECOVERY_FLAG, "1");
+        } else {
+          window.localStorage.removeItem(RECOVERY_FLAG);
+        }
+      } catch {}
+    }
+  }
+
+  function hasPersistedRecoveryFlag() {
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      try {
+        return window.localStorage.getItem(RECOVERY_FLAG) === "1";
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }
+
   function showNotice(title: string, message: string) {
     setNotice({ visible: true, title, message });
   }
@@ -76,6 +101,18 @@ export default function ResetScreen() {
 
   function clearBanner() {
     setBanner((prev) => ({ ...prev, visible: false, message: "" }));
+  }
+
+  function enterResetMode(message?: string) {
+    setMode("reset");
+    persistRecoveryFlag(true);
+    if (message) {
+      showBanner("info", message);
+    }
+  }
+
+  function clearRecoveryFlow() {
+    persistRecoveryFlag(false);
   }
 
   async function handleSendEmail() {
@@ -133,32 +170,43 @@ export default function ResetScreen() {
       const accessToken = params.get("access_token");
       const refreshToken = params.get("refresh_token");
 
+      const looksLikeRecoveryLink =
+        type === "recovery" ||
+        !!code ||
+        !!accessToken ||
+        rawUrl.includes("type=recovery") ||
+        rawUrl.includes("access_token=");
+
+      if (!looksLikeRecoveryLink) {
+        if (hasPersistedRecoveryFlag()) {
+          enterResetMode("Continue definindo sua nova senha.");
+        }
+        return;
+      }
+
+      enterResetMode("Validando seu link de recuperação...");
+
       if (code) {
         const { error } = await supabase.auth.exchangeCodeForSession(rawUrl);
         if (error) throw error;
-        setMode("reset");
-        showBanner("info", "Link validado. Agora defina sua nova senha.");
+        enterResetMode("Link validado. Agora defina sua nova senha.");
       } else if (type === "recovery" && accessToken && refreshToken) {
         const { error } = await supabase.auth.setSession({
           access_token: accessToken,
           refresh_token: refreshToken,
         });
         if (error) throw error;
-        setMode("reset");
-        showBanner("info", "Link validado. Agora defina sua nova senha.");
+        enterResetMode("Link validado. Agora defina sua nova senha.");
+      } else {
+        enterResetMode("Link validado. Agora defina sua nova senha.");
       }
 
       if (Platform.OS === "web" && typeof window !== "undefined") {
-        const hasHashTokens =
-          window.location.hash.includes("access_token") ||
-          window.location.hash.includes("refresh_token") ||
-          window.location.hash.includes("type=recovery");
-
-        if (hasHashTokens) {
-          window.history.replaceState({}, document.title, "/reset");
-        }
+        window.history.replaceState({}, document.title, "/reset");
       }
     } catch (e: any) {
+      clearRecoveryFlow();
+      setMode("request");
       showBanner("error", e?.message ?? "O link de recuperação é inválido ou expirou.");
     } finally {
       setLoadingRecovery(false);
@@ -166,10 +214,25 @@ export default function ResetScreen() {
   }
 
   useEffect(() => {
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      const href = window.location.href;
+      if (
+        href.includes("/reset") &&
+        (href.includes("type=recovery") ||
+          href.includes("access_token=") ||
+          href.includes("code=") ||
+          window.location.hash.includes("type=recovery") ||
+          window.location.hash.includes("access_token="))
+      ) {
+        enterResetMode("Validando seu link de recuperação...");
+      } else if (hasPersistedRecoveryFlag()) {
+        enterResetMode("Continue definindo sua nova senha.");
+      }
+    }
+
     const { data } = supabase.auth.onAuthStateChange((event: AuthChangeEvent) => {
       if (event === "PASSWORD_RECOVERY") {
-        setMode("reset");
-        showBanner("info", "Link validado. Agora defina sua nova senha.");
+        enterResetMode("Link validado. Agora defina sua nova senha.");
       }
     });
 
@@ -213,10 +276,14 @@ export default function ResetScreen() {
       const { error } = await supabase.auth.updateUser({ password: pass1 });
       if (error) throw error;
 
-      showBanner("success", "Senha alterada com sucesso. Redirecionando para o login...");
+      clearRecoveryFlow();
+
+      await supabase.auth.signOut();
+
+      showBanner("success", "Senha alterada com sucesso. Volte ao login para entrar com a nova senha.");
       showNotice(
         "Password updated",
-        "Your password has been changed successfully. You can now sign in."
+        "Your password has been changed successfully. Please sign in again with your new password."
       );
 
       setTimeout(() => {
