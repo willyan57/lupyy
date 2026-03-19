@@ -37,7 +37,7 @@ export function OffscreenLutRenderer({
   beautify,
   exportWidth,
   exportHeight,
-  flipY = true,
+  flipY = false,
   onFinish,
 }: OffscreenLutRendererProps) {
   const finishedRef = useRef(false);
