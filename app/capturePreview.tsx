@@ -377,6 +377,14 @@ export default function CapturePreview() {
     sharpness: 0, temperature: 0, vignette: 0,
     grain: 0, fade: 0, highlights: 0, shadows: 0,
   });
+  const [selectedAdjust, setSelectedAdjust] = useState<keyof typeof adjustValues>("sharpness");
+
+  // ─── Press-to-compare: segurar para ver original ───
+  const [isComparing, setIsComparing] = useState(false);
+
+  // ─── Debounce para GL renderer (evitar flicker) ───
+  const [debouncedBeautifyParams, setDebouncedBeautifyParams] = useState<ExtendedBeautifyParams | null>(null);
+  const debounceTimerRef = useRef<any>(null);
 
   const [bakeJob, setBakeJob] = useState<{
     uri: string;
@@ -545,6 +553,19 @@ export default function CapturePreview() {
       shadows: adjustValues.shadows + (fp.shadows ?? 0),
     };
   }, [beautifyValues, quickAdjustment, filter, adjustValues, activeFilter]);
+
+  // Debounce beautifyParams para evitar flicker no GL
+  useEffect(() => {
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    debounceTimerRef.current = setTimeout(() => {
+      setDebouncedBeautifyParams(beautifyParams);
+    }, 60);
+    return () => {
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    };
+  }, [beautifyParams]);
+
+  const glBeautifyParams = debouncedBeautifyParams ?? beautifyParams;
 
   // LUT source para o preview
   const previewLutSource = useMemo(() => {
@@ -1375,15 +1396,22 @@ export default function CapturePreview() {
         />
       ) : null}
 
-      {/* Preview da mídia */}
-      <View style={styles.previewStage}>
-        {isPreparingImage ? null : mediaType === "image" && needsGlPreview ? (
+      {/* Preview da mídia — com press-to-compare */}
+      <Pressable
+        style={styles.previewStage}
+        onPressIn={() => {
+          if (needsGlPreview || filter !== "none" || quickAdjustment !== "none") {
+            setIsComparing(true);
+          }
+        }}
+        onPressOut={() => setIsComparing(false)}
+      >
+        {isPreparingImage ? null : mediaType === "image" && needsGlPreview && !isComparing ? (
           <LutRenderer
-            key={`gl-${effectiveUri}-${filter}-${filterIntensity}-${JSON.stringify(beautifyParams)}`}
             sourceUri={effectiveUri}
             lut={previewLutSource}
             intensity={filterIntensity}
-            beautify={beautifyParams}
+            beautify={glBeautifyParams}
             style={
               (isFrontCamera
                 ? [styles.preview, previewMediaStyle, { transform: [{ scaleX: -1 }] }]
@@ -1393,7 +1421,7 @@ export default function CapturePreview() {
           />
         ) : mediaType === "image" ? (
           <Image
-            key={`${effectiveUri}::${nonce}::${filter}`}
+            key={`${effectiveUri}::${nonce}::${isComparing ? "orig" : filter}`}
             source={{ uri: effectiveUri }}
             style={
               (isFrontCamera
@@ -1414,7 +1442,14 @@ export default function CapturePreview() {
             onLoad={() => setMediaLoaded(true)}
           />
         )}
-      </View>
+
+        {/* Compare label */}
+        {isComparing && (
+          <View style={styles.comparingLabel}>
+            <Text style={styles.comparingLabelText}>Original</Text>
+          </View>
+        )}
+      </Pressable>
 
       {/* Overlays visuais (vignette, glow) */}
       {!needsGlPreview && prevOverlay && (
@@ -1708,16 +1743,6 @@ export default function CapturePreview() {
                 >
                   <Text style={styles.beautifyResetText}>Redefinir</Text>
                 </TouchableOpacity>
-
-                <TouchableOpacity
-                  activeOpacity={0.9}
-                  onPress={handleApplyBeautifyAi}
-                  disabled={aiProcessing || mediaType !== "image"}
-                >
-                  <Text style={styles.beautifyApplyText}>
-                    {aiProcessing ? "IA..." : "Aplicar IA"}
-                  </Text>
-                </TouchableOpacity>
               </View>
             </View>
 
@@ -1768,11 +1793,58 @@ export default function CapturePreview() {
           </View>
         )}
 
-        {/* ─── NOVO: Painel de ajustes avancados ─── */}
+        {/* ─── Painel de ajustes (redesenhado como beautify) ─── */}
         {showAdjustPanel && (
-          <View style={styles.adjustPanelContainer}>
-            <View style={styles.adjustPanelHeader}>
-              <Text style={styles.adjustPanelTitle}>Ajustes Avancados</Text>
+          <View style={styles.beautifyPanel}>
+            <View style={styles.beautifySliderRow}>
+              <View
+                style={styles.beautifySliderTrack}
+                onStartShouldSetResponder={() => true}
+                onMoveShouldSetResponder={() => true}
+                onResponderGrant={(e) => {
+                  const item = adjustItems.find((i) => i.key === selectedAdjust)!;
+                  const px = e.nativeEvent.locationX;
+                  const trackW = width - 18 * 2 - 60;
+                  const ratio = Math.max(0, Math.min(1, px / trackW));
+                  const val = item.min + ratio * (item.max - item.min);
+                  setAdjustValues((prev) => ({ ...prev, [selectedAdjust]: Math.round(val * 100) / 100 }));
+                }}
+                onResponderMove={(e) => {
+                  const item = adjustItems.find((i) => i.key === selectedAdjust)!;
+                  const px = e.nativeEvent.locationX;
+                  const trackW = width - 18 * 2 - 60;
+                  const ratio = Math.max(0, Math.min(1, px / trackW));
+                  const val = item.min + ratio * (item.max - item.min);
+                  setAdjustValues((prev) => ({ ...prev, [selectedAdjust]: Math.round(val * 100) / 100 }));
+                }}
+              >
+                {(() => {
+                  const item = adjustItems.find((i) => i.key === selectedAdjust)!;
+                  const pct = ((adjustValues[selectedAdjust] - item.min) / (item.max - item.min)) * 100;
+                  return (
+                    <>
+                      <Animated.View
+                        style={[styles.beautifySliderFill, { width: `${pct}%` as any }]}
+                      />
+                      <Animated.View
+                        style={[
+                          styles.beautifySliderThumb,
+                          { left: `${pct}%` as any, transform: [{ translateX: -11 }] },
+                        ]}
+                      />
+                    </>
+                  );
+                })()}
+              </View>
+              <Text style={styles.beautifyValueLabel}>
+                {adjustValues[selectedAdjust].toFixed(2)}
+              </Text>
+            </View>
+
+            <View style={styles.beautifyTabsRow}>
+              <Text style={[styles.beautifyTabText, { fontWeight: "800", color: "#fff" }]}>
+                {adjustItems.find((i) => i.key === selectedAdjust)?.label}
+              </Text>
               <TouchableOpacity
                 onPress={() => setAdjustValues({
                   sharpness: 0, temperature: 0, vignette: 0,
@@ -1782,55 +1854,47 @@ export default function CapturePreview() {
                 <Text style={styles.beautifyResetText}>Redefinir</Text>
               </TouchableOpacity>
             </View>
-            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: height * 0.3 }}>
-              {adjustItems.map((item) => (
-                <View key={item.key} style={styles.adjustRow}>
-                  <Text style={styles.adjustIcon}>{item.icon}</Text>
-                  <Text style={styles.adjustLabel}>{item.label}</Text>
-                  <View style={styles.adjustSliderWrap}>
+
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.beautifyOptionsRow}
+            >
+              {adjustItems.map((item) => {
+                const active = selectedAdjust === item.key;
+                return (
+                  <TouchableOpacity
+                    key={item.key}
+                    activeOpacity={0.9}
+                    onPress={() => setSelectedAdjust(item.key)}
+                    style={styles.beautifyOptionItem}
+                  >
                     <View
-                      style={styles.adjustSliderTrack}
-                      onStartShouldSetResponder={() => true}
-                      onMoveShouldSetResponder={() => true}
-                      onResponderGrant={(e) => {
-                        const px = e.nativeEvent.locationX;
-                        const trackW = width - 180;
-                        const ratio = Math.max(0, Math.min(1, px / trackW));
-                        const val = item.min + ratio * (item.max - item.min);
-                        setAdjustValues((prev) => ({ ...prev, [item.key]: Math.round(val * 100) / 100 }));
-                      }}
-                      onResponderMove={(e) => {
-                        const px = e.nativeEvent.locationX;
-                        const trackW = width - 180;
-                        const ratio = Math.max(0, Math.min(1, px / trackW));
-                        const val = item.min + ratio * (item.max - item.min);
-                        setAdjustValues((prev) => ({ ...prev, [item.key]: Math.round(val * 100) / 100 }));
-                      }}
+                      style={[
+                        styles.beautifyOptionCircle,
+                        active && styles.beautifyOptionCircleActive,
+                      ]}
                     >
-                      <View style={styles.adjustSliderBg} />
-                      <View
+                      <Text
                         style={[
-                          styles.adjustSliderFill,
-                          {
-                            width: `${((adjustValues[item.key] - item.min) / (item.max - item.min)) * 100}%` as any,
-                          },
+                          styles.beautifyOptionIcon,
+                          active && styles.beautifyOptionIconActive,
                         ]}
-                      />
-                      <View
-                        style={[
-                          styles.adjustSliderThumb,
-                          {
-                            left: `${((adjustValues[item.key] - item.min) / (item.max - item.min)) * 100}%` as any,
-                          },
-                        ]}
-                      />
+                      >
+                        {item.icon}
+                      </Text>
                     </View>
-                  </View>
-                  <Text style={styles.adjustValue}>
-                    {adjustValues[item.key].toFixed(2)}
-                  </Text>
-                </View>
-              ))}
+                    <Text
+                      style={[
+                        styles.beautifyOptionLabel,
+                        active && styles.beautifyOptionLabelActive,
+                      ]}
+                    >
+                      {item.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </ScrollView>
           </View>
         )}
@@ -2175,6 +2239,21 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "flex-start",
     overflow: "hidden",
+  },
+  comparingLabel: {
+    position: "absolute",
+    top: "50%" as any,
+    alignSelf: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: "rgba(0,0,0,0.6)",
+  },
+  comparingLabelText: {
+    color: "#fff",
+    fontWeight: "900",
+    fontSize: 14,
+    letterSpacing: 0.5,
   },
   preview: {
     width: width,
