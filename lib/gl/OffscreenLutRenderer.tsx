@@ -96,6 +96,9 @@ export function OffscreenLutRenderer({
         gl.enableVertexAttribArray(aPos);
         gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
 
+        const uSrcAspect = gl.getUniformLocation(program, "uSrcAspect");
+        const uDstAspect = gl.getUniformLocation(program, "uDstAspect");
+
         // TODOS os uniforms — incluindo os novos
         const uImage = gl.getUniformLocation(program, "uImage");
         const uLut = gl.getUniformLocation(program, "uLut");
@@ -140,9 +143,12 @@ export function OffscreenLutRenderer({
           return tex;
         };
 
-        // Imagem
         makeTex(gl.TEXTURE0, srcAsset);
         gl.uniform1i(uImage, 0);
+
+        // For export: no cover crop needed, use 1:1 aspect mapping
+        gl.uniform1f(uSrcAspect, 1.0);
+        gl.uniform1f(uDstAspect, 1.0);
 
         // LUT
         const lutSource = getLutForFilter(filter);

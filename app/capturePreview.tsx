@@ -539,7 +539,7 @@ export default function CapturePreview() {
 
     return {
       brightness: quickBrightness + (fp.brightness ?? 0),
-      contrast: quickContrast * (0.5 + contrastRaw) * (fp.contrast ?? 1),
+      contrast: quickContrast * (0.4 + contrastRaw) * (fp.contrast ?? 1),
       saturation: quickSaturation * (fp.saturation ?? 1),
       smoothing: Math.max(0, smoothRaw - 0.6) * 2.5 + (fp.smoothing ?? 0),
       whitenTeeth: Math.max(0, teethRaw - 0.6) * 2.5,
@@ -1406,6 +1406,7 @@ export default function CapturePreview() {
         }}
         onPressOut={() => setIsComparing(false)}
       >
+        <View style={styles.previewAbsolute}>
         {isPreparingImage ? null : mediaType === "image" && needsGlPreview && !isComparing ? (
           <LutRenderer
             sourceUri={effectiveUri}
@@ -1442,6 +1443,7 @@ export default function CapturePreview() {
             onLoad={() => setMediaLoaded(true)}
           />
         )}
+        </View>
 
         {/* Compare label */}
         {isComparing && (
@@ -2236,9 +2238,14 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   previewStage: {
     flex: 1,
-    alignItems: "center",
-    justifyContent: "flex-start",
     overflow: "hidden",
+  },
+  previewAbsolute: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    width: width,
+    height: previewHeight,
   },
   comparingLabel: {
     position: "absolute",

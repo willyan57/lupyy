@@ -1,8 +1,20 @@
 export const VERT = `precision mediump float;
 attribute vec2 aPos;
 varying vec2 vUv;
+uniform float uSrcAspect;
+uniform float uDstAspect;
 void main() {
   vec2 uv = (aPos + 1.0) * 0.5;
+  // Cover-style UV: crop excess dimension to preserve aspect ratio
+  if (uSrcAspect > 0.0 && uDstAspect > 0.0) {
+    if (uSrcAspect > uDstAspect) {
+      float s = uDstAspect / uSrcAspect;
+      uv.x = uv.x * s + 0.5 * (1.0 - s);
+    } else {
+      float s = uSrcAspect / uDstAspect;
+      uv.y = uv.y * s + 0.5 * (1.0 - s);
+    }
+  }
   vUv = vec2(uv.x, 1.0 - uv.y);
   gl_Position = vec4(aPos, 0.0, 1.0);
 }`;

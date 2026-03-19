@@ -97,6 +97,9 @@ export default function LutRenderer({
           gl.enableVertexAttribArray(aPos);
           gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
 
+          const uSrcAspect = gl.getUniformLocation(prog, "uSrcAspect");
+          const uDstAspect = gl.getUniformLocation(prog, "uDstAspect");
+
           const uImage = gl.getUniformLocation(prog, "uImage");
           const uLut = gl.getUniformLocation(prog, "uLut");
           const uIntensity = gl.getUniformLocation(prog, "uIntensity");
@@ -139,6 +142,14 @@ export default function LutRenderer({
 
           makeTex(gl.TEXTURE0, srcAsset);
           gl.uniform1i(uImage, 0);
+
+          // Set aspect ratios for cover UV adjustment
+          const srcW = srcAsset.width || 1;
+          const srcH = srcAsset.height || 1;
+          const dstW = gl.drawingBufferWidth || 1;
+          const dstH = gl.drawingBufferHeight || 1;
+          gl.uniform1f(uSrcAspect, srcW / srcH);
+          gl.uniform1f(uDstAspect, dstW / dstH);
 
           if (hasLut) {
             const lutAsset = await loadAsset(lut!);
