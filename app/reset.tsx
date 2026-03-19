@@ -119,6 +119,23 @@ export default function ResetScreen() {
 
   function clearRecoveryFlow() {
     persistRecoveryFlag(false);
+    setMode("request");
+    setPass1("");
+    setPass2("");
+  }
+
+  /**
+   * Validates that a real recovery session exists in Supabase.
+   * Returns true only if there's an active session.
+   * This prevents relying solely on localStorage flags.
+   */
+  async function hasValidRecoverySession(): Promise<boolean> {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      return !!session;
+    } catch {
+      return false;
+    }
   }
 
   function cleanResetUrl() {
@@ -209,9 +226,9 @@ export default function ResetScreen() {
         rawUrl.includes("access_token=");
 
       if (!looksLikeRecoveryLink) {
-        if (hasPersistedRecoveryFlag()) {
-          enterResetMode("Continue definindo sua nova senha.");
-        }
+        // DO NOT fall back to localStorage flag here.
+        // If the URL has no recovery params, this function should do nothing.
+        // The useEffect will handle persisted flag validation with session check.
         return;
       }
 
@@ -252,25 +269,56 @@ export default function ResetScreen() {
   }
 
   useEffect(() => {
-    if (Platform.OS === "web" && typeof window !== "undefined") {
-      const href = window.location.href;
-      if (
-        href.includes("/reset") &&
-        (href.includes("type=recovery") ||
-          href.includes("access_token=") ||
-          href.includes("code=") ||
-          window.location.hash.includes("type=recovery") ||
-          window.location.hash.includes("access_token="))
-      ) {
-        enterResetMode("Validando seu link de recuperação...");
-      } else if (hasPersistedRecoveryFlag()) {
-        enterResetMode("Continue definindo sua nova senha.");
+    let cancelled = false;
+
+    async function initRecoveryCheck() {
+      if (Platform.OS === "web" && typeof window !== "undefined") {
+        const href = window.location.href;
+        const hasRecoveryParams =
+          href.includes("/reset") &&
+          (href.includes("type=recovery") ||
+            href.includes("access_token=") ||
+            href.includes("code=") ||
+            window.location.hash.includes("type=recovery") ||
+            window.location.hash.includes("access_token="));
+
+        if (hasRecoveryParams) {
+          // URL has recovery params — process them
+          enterResetMode("Validando seu link de recuperação...");
+        } else if (hasPersistedRecoveryFlag()) {
+          // Flag exists but NO recovery params in URL.
+          // Must validate that a real session exists before entering reset mode.
+          const hasSession = await hasValidRecoverySession();
+          if (cancelled) return;
+
+          if (hasSession) {
+            enterResetMode("Continue definindo sua nova senha.");
+          } else {
+            // No valid session — flag is stale. Clean up.
+            returnToRequestMode();
+            clearRecoveryFlow();
+          }
+        }
       }
     }
 
-    const { data } = supabase.auth.onAuthStateChange((event: AuthChangeEvent) => {
+    initRecoveryCheck();
+
+    const { data } = supabase.auth.onAuthStateChange((event: AuthChangeEvent, session: any) => {
+      if (cancelled) return;
+
       if (event === "PASSWORD_RECOVERY") {
         enterResetMode("Link validado. Agora defina sua nova senha.");
+      }
+
+      // If user signs out (manually or after password change), clear recovery state
+      if (event === "SIGNED_OUT") {
+        clearRecoveryFlow();
+      }
+
+      // If user signs in normally (not recovery), clear recovery flags
+      if (event === "SIGNED_IN" && mode !== "reset") {
+        clearRecoveryFlow();
       }
     });
 
@@ -287,6 +335,7 @@ export default function ResetScreen() {
     }
 
     return () => {
+      cancelled = true;
       data.subscription.unsubscribe();
       sub.remove();
     };

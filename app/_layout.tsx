@@ -9,6 +9,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Platform, StatusBar, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
+const RECOVERY_FLAG = "lupyy_password_recovery_pending";
+
 export default function RootLayout() {
   const router = useRouter();
   const pathname = usePathname();
@@ -18,8 +20,9 @@ export default function RootLayout() {
     return ["/", "/login", "/signup", "/reset", "/terms", "/privacy"];
   }, []);
 
+  // ✅ CORREÇÃO: /reset REMOVIDO desta lista para não redirecionar para feed durante recovery
   const redirectToFeedRoutes = useMemo(() => {
-    return ["/", "/login", "/signup", "/reset"];
+    return ["/", "/login", "/signup"];
   }, []);
 
   const isPublicRoute = useMemo(() => {
@@ -31,6 +34,31 @@ export default function RootLayout() {
   }, [redirectToFeedRoutes, pathname]);
 
   const isMobileWeb = useIsMobileWeb(900);
+
+  /**
+   * Checks if the current context is a password recovery flow.
+   * Uses both URL params and the persisted flag as signals,
+   * but the flag alone is NOT enough — the auth guard uses this
+   * only to SKIP redirect, not to grant access.
+   */
+  function isRecoveryContext(): boolean {
+    // If we're on /reset, never redirect to feed
+    if (pathname === "/reset") return true;
+
+    // Check URL for recovery params (web only)
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      const href = window.location.href;
+      if (
+        href.includes("type=recovery") ||
+        href.includes("access_token=") ||
+        href.includes("code=")
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  }
 
   useEffect(() => {
     let mounted = true;
@@ -47,9 +75,18 @@ export default function RootLayout() {
       if (!mounted) return;
 
       if (!session) {
+        // No session: clear any stale recovery flag
+        if (Platform.OS === "web" && typeof window !== "undefined") {
+          try { window.localStorage.removeItem(RECOVERY_FLAG); } catch {}
+        }
         if (!isPublicRoute) navigateIfNeeded("/");
       } else {
-        if (isRedirectToFeedRoute) navigateIfNeeded("/(tabs)/feed");
+        // ✅ CORREÇÃO: Se estiver em contexto de recovery, NÃO redirecionar para feed
+        if (isRecoveryContext()) {
+          // Sessão existe mas é recovery — manter em /reset
+        } else if (isRedirectToFeedRoute) {
+          navigateIfNeeded("/(tabs)/feed");
+        }
       }
 
       setReady(true);
@@ -63,9 +100,23 @@ export default function RootLayout() {
       (_event: AuthChangeEvent, session: Session | null) => {
         if (!mounted) return;
 
+        // ✅ CORREÇÃO: PASSWORD_RECOVERY event = não redirecionar, deixar reset.tsx cuidar
+        if (_event === "PASSWORD_RECOVERY") {
+          return;
+        }
+
+        // ✅ CORREÇÃO: Se estiver em /reset com recovery ativo, não redirecionar
+        if (isRecoveryContext()) {
+          return;
+        }
+
         if (session) {
           if (isRedirectToFeedRoute) navigateIfNeeded("/(tabs)/feed");
         } else {
+          // Usuário deslogou — limpar flag de recovery
+          if (Platform.OS === "web" && typeof window !== "undefined") {
+            try { window.localStorage.removeItem(RECOVERY_FLAG); } catch {}
+          }
           if (!isPublicRoute) navigateIfNeeded("/");
         }
       }
