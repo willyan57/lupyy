@@ -79,7 +79,7 @@ export default function ConversationScreen() {
   // ── Crush lock state ──
   const [myRelationshipStatus, setMyRelationshipStatus] = useState<string | null>(null);
   const isCrushLocked = (conversationType === "crush") &&
-    (myRelationshipStatus === "committed" || myRelationshipStatus === "dating" || myRelationshipStatus === "married");
+    (myRelationshipStatus === "committed" || myRelationshipStatus === "other");
 
   const [selectedMessage, setSelectedMessage] = useState<DbMessage | null>(null);
   const [showMessageMenu, setShowMessageMenu] = useState(false);

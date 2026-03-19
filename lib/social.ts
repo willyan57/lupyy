@@ -79,7 +79,7 @@ export async function getFollowState(
  * Check if a user's relationship status blocks crush actions.
  */
 function isCommitted(status?: string | null): boolean {
-  return status === "committed" || status === "dating" || status === "married";
+  return status === "committed" || status === "other";
 }
 
 /**

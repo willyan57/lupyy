@@ -45,7 +45,7 @@ export default function ConversationsScreen() {
 
   // ── Relationship status lock ──
   const [myRelationshipStatus, setMyRelationshipStatus] = useState<string | null>(null);
-  const isCrushLocked = myRelationshipStatus === "committed" || myRelationshipStatus === "dating" || myRelationshipStatus === "married";
+  const isCrushLocked = myRelationshipStatus === "committed" || myRelationshipStatus === "other";
 
   // ── Animated badge scale ──
   const badgeScale = useRef(new Animated.Value(1)).current;

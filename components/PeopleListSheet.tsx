@@ -69,7 +69,7 @@ function getEmptyText(mode: Mode, isOwnProfile: boolean) {
 }
 
 function isCommitted(status?: string | null) {
-  return status === "committed" || status === "dating" || status === "married";
+  return status === "committed" || status === "other";
 }
 
 export default function PeopleListSheet(props: PeopleListSheetProps) {

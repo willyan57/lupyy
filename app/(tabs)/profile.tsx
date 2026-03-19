@@ -74,6 +74,7 @@ type ProfileRow = {
   bio: string | null;
   relationship_status?: RelationshipStatus | null;
   relationship_status_changed_at?: string | null;
+  gender?: string | null;
 };
 
 type StoryRow = {
@@ -407,9 +408,9 @@ const router = useRouter();
           setDraftFullName(fName);
           setDraftBio(bioText);
           relStatus = r.relationship_status ?? null;
-          const changedAt = (r as any).relationship_status_changed_at || null;
+          const changedAt = r.relationship_status_changed_at || null;
           setRelationshipStatusChangedAt(changedAt);
-          const g = (r as any).gender || "";
+          const g = r.gender || "";
           setGender(g);
           setDraftGender(g);
           setDraftRelationshipStatus(relStatus);
@@ -1731,9 +1732,6 @@ const handleChangeAvatar = useCallback(async () => {
             </Text>
           </View>
           <View style={styles.topActions}>
-            <Text style={[styles.topIcon, { color: theme.colors.text }]}>
-              ◎
-            </Text>
             {isOwnProfile && (
               <TouchableOpacity
                 onPress={() => setSettingsVisible(true)}
@@ -2483,8 +2481,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 4,
+    paddingTop: 14,
+    paddingBottom: 6,
     justifyContent: "space-between",
   },
   topCenter: {
