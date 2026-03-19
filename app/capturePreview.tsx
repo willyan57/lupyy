@@ -352,6 +352,7 @@ export default function CapturePreview() {
   const [userId, setUserId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [mediaLoaded, setMediaLoaded] = useState(false);
+  const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
 
   const [toolsCollapsed, setToolsCollapsed] = useState(true);
   const [caption, setCaption] = useState("");
@@ -588,6 +589,31 @@ export default function CapturePreview() {
   useEffect(() => {
     setMediaLoaded(false);
   }, [uri, nonce, mediaType]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (mediaType !== "image" || !effectiveUri) {
+      setImageSize(null);
+      return;
+    }
+
+    Image.getSize(
+      effectiveUri,
+      (width, height) => {
+        if (!cancelled && width > 0 && height > 0) {
+          setImageSize({ width, height });
+        }
+      },
+      () => {
+        if (!cancelled) setImageSize(null);
+      }
+    );
+
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveUri, mediaType]);
 
   useEffect(() => {
     const next = activeFilter.overlay ?? null;
@@ -1026,6 +1052,22 @@ export default function CapturePreview() {
     void performSendWithUri(effectiveUri);
   };
 
+  const glFlipY = Platform.OS === "web";
+
+  const exportSize = useMemo(() => {
+    if (!imageSize?.width || !imageSize?.height) {
+      return { width: 1080, height: 1350 };
+    }
+
+    const maxDim = 2048;
+    const ratio = Math.min(maxDim / imageSize.width, maxDim / imageSize.height, 1);
+
+    return {
+      width: Math.max(1, Math.round(imageSize.width * ratio)),
+      height: Math.max(1, Math.round(imageSize.height * ratio)),
+    };
+  }, [imageSize]);
+
   const label =
     mode === "story" ? "Publicar Story" : mode === "reel" ? "Avancar" : "Avancar";
 
@@ -1262,8 +1304,9 @@ export default function CapturePreview() {
           sourceUri={bakeJob.uri}
           filter={bakeJob.filterId}
           beautify={bakeJob.beautify}
-          exportWidth={1080}
-          exportHeight={1350}
+          exportWidth={exportSize.width}
+          exportHeight={exportSize.height}
+          flipY={glFlipY}
           onFinish={(u) => {
             const out = u || bakeJob.uri;
             const r = bakeJob.resolve;
@@ -1282,6 +1325,7 @@ export default function CapturePreview() {
             lut={previewLutSource}
             intensity={filterIntensity}
             beautify={beautifyParams}
+            flipY={glFlipY}
             style={[styles.preview, isFrontCamera && { transform: [{ scaleX: -1 }] }]}
             onReady={() => setMediaLoaded(true)}
           />

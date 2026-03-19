@@ -38,7 +38,7 @@ export default function LutRenderer({
   beautify,
   style,
   onReady,
-  flipY = true,
+  flipY = false,
 }: {
   sourceUri: string;
   lut: LutSource | null;
@@ -136,7 +136,14 @@ export default function LutRenderer({
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, asset);
+            gl.texImage2D(
+              gl.TEXTURE_2D,
+              0,
+              gl.RGBA,
+              gl.RGBA,
+              gl.UNSIGNED_BYTE,
+              asset
+            );
             return tex;
           };
 
@@ -154,9 +161,17 @@ export default function LutRenderer({
             gl.bindTexture(gl.TEXTURE_2D, identityTex);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
             gl.texImage2D(
-              gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0,
-              gl.RGBA, gl.UNSIGNED_BYTE,
+              gl.TEXTURE_2D,
+              0,
+              gl.RGBA,
+              1,
+              1,
+              0,
+              gl.RGBA,
+              gl.UNSIGNED_BYTE,
               new Uint8Array([255, 255, 255, 255])
             );
             gl.uniform1i(uLut, 1);
@@ -177,7 +192,10 @@ export default function LutRenderer({
           gl.uniform1f(uFade, b.fade ?? 0.0);
           gl.uniform1f(uHighlights, b.highlights ?? 0.0);
           gl.uniform1f(uShadows, b.shadows ?? 0.0);
-          if (uFlipY) gl.uniform1f(uFlipY, flipY ? 1.0 : 0.0);
+
+          if (uFlipY) {
+            gl.uniform1f(uFlipY, flipY ? 1.0 : 0.0);
+          }
 
           gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
           gl.clearColor(0, 0, 0, 1);
