@@ -27,7 +27,6 @@ type OffscreenLutRendererProps = {
   beautify?: ExtendedBeautifyParams;
   exportWidth?: number;
   exportHeight?: number;
-  flipY?: boolean;
   onFinish: (resultUri: string | null) => void;
 };
 
@@ -37,7 +36,6 @@ export function OffscreenLutRenderer({
   beautify,
   exportWidth,
   exportHeight,
-  flipY = false,
   onFinish,
 }: OffscreenLutRendererProps) {
   const finishedRef = useRef(false);
@@ -115,7 +113,6 @@ export function OffscreenLutRenderer({
         const uFade = gl.getUniformLocation(program, "uFade");
         const uHighlights = gl.getUniformLocation(program, "uHighlights");
         const uShadows = gl.getUniformLocation(program, "uShadows");
-        const uFlipY = gl.getUniformLocation(program, "uFlipY");
 
         // Load assets
         const loadAsset = async (input: number | string) => {
@@ -184,7 +181,6 @@ export function OffscreenLutRenderer({
         gl.uniform1f(uFade, b.fade ?? 0.0);
         gl.uniform1f(uHighlights, b.highlights ?? 0.0);
         gl.uniform1f(uShadows, b.shadows ?? 0.0);
-        if (uFlipY) gl.uniform1f(uFlipY, flipY ? 1.0 : 0.0);
 
         // Draw
         gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
@@ -233,7 +229,7 @@ export function OffscreenLutRenderer({
         handleFinishOnce(sourceUri);
       }
     },
-    [sourceUri, filter, beautify, flipY, handleFinishOnce]
+    [sourceUri, filter, beautify, handleFinishOnce]
   );
 
   return (

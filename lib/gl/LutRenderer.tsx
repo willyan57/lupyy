@@ -38,7 +38,6 @@ export default function LutRenderer({
   beautify,
   style,
   onReady,
-  flipY = false,
 }: {
   sourceUri: string;
   lut: LutSource | null;
@@ -46,12 +45,11 @@ export default function LutRenderer({
   beautify?: ExtendedBeautifyParams;
   style?: StyleProp<ViewStyle>;
   onReady?: () => void;
-  flipY?: boolean;
 }) {
   const key = useMemo(() => {
     const b = beautify || {};
-    return `${sourceUri}__${typeof lut === "number" ? String(lut) : lut ?? "nolut"}__${intensity}__${JSON.stringify(b)}__${flipY}`;
-  }, [sourceUri, lut, intensity, beautify, flipY]);
+    return `${sourceUri}__${typeof lut === "number" ? String(lut) : lut ?? "nolut"}__${intensity}__${JSON.stringify(b)}`;
+  }, [sourceUri, lut, intensity, beautify]);
 
   const hasLut = lut !== null && lut !== undefined;
 
@@ -115,7 +113,6 @@ export default function LutRenderer({
           const uFade = gl.getUniformLocation(prog, "uFade");
           const uHighlights = gl.getUniformLocation(prog, "uHighlights");
           const uShadows = gl.getUniformLocation(prog, "uShadows");
-          const uFlipY = gl.getUniformLocation(prog, "uFlipY");
 
           const loadAsset = async (src: LutSource) => {
             const a =
@@ -177,7 +174,6 @@ export default function LutRenderer({
           gl.uniform1f(uFade, b.fade ?? 0.0);
           gl.uniform1f(uHighlights, b.highlights ?? 0.0);
           gl.uniform1f(uShadows, b.shadows ?? 0.0);
-          if (uFlipY) gl.uniform1f(uFlipY, flipY ? 1.0 : 0.0);
 
           gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
           gl.clearColor(0, 0, 0, 1);
