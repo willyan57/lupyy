@@ -106,13 +106,25 @@ export default function ResetScreen() {
   function enterResetMode(message?: string) {
     setMode("reset");
     persistRecoveryFlag(true);
-    if (message) {
-      showBanner("info", message);
-    }
+    if (message) showBanner("info", message);
+  }
+
+  function returnToRequestMode(message?: string) {
+    setMode("request");
+    persistRecoveryFlag(false);
+    setPass1("");
+    setPass2("");
+    if (message) showBanner("error", message);
   }
 
   function clearRecoveryFlow() {
     persistRecoveryFlag(false);
+  }
+
+  function cleanResetUrl() {
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      window.history.replaceState({}, document.title, "/reset");
+    }
   }
 
   async function handleSendEmail() {
@@ -139,11 +151,11 @@ export default function ResetScreen() {
       setEmail(normalizedEmail);
       showBanner(
         "success",
-        `Enviamos um link de recuperação para ${normalizedEmail}. Verifique sua caixa de entrada e também o spam.`
+        `Enviamos um link de recuperação para ${normalizedEmail}. Use somente o e-mail mais recente.`
       );
       showNotice(
         "Recovery email sent",
-        `We sent a password recovery link to ${normalizedEmail}. Open your inbox and tap the link to continue.`
+        `We sent a password recovery link to ${normalizedEmail}. Open the newest email and tap the link to continue.`
       );
     } catch (e: any) {
       setEmailError(true);
@@ -170,6 +182,25 @@ export default function ResetScreen() {
       const accessToken = params.get("access_token");
       const refreshToken = params.get("refresh_token");
 
+      const error = params.get("error");
+      const errorCode = params.get("error_code");
+      const errorDescription = params.get("error_description");
+
+      if (error || errorCode) {
+        const decodedMessage = decodeURIComponent(
+          (errorDescription || "Este link de recuperação é inválido ou expirou.")
+            .replace(/\+/g, " ")
+        );
+
+        returnToRequestMode(
+          errorCode === "otp_expired"
+            ? "Este link expirou ou já foi usado. Solicite um novo e-mail de recuperação."
+            : decodedMessage
+        );
+        cleanResetUrl();
+        return;
+      }
+
       const looksLikeRecoveryLink =
         type === "recovery" ||
         !!code ||
@@ -187,27 +218,34 @@ export default function ResetScreen() {
       enterResetMode("Validando seu link de recuperação...");
 
       if (code) {
-        const { error } = await supabase.auth.exchangeCodeForSession(rawUrl);
-        if (error) throw error;
+        const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(rawUrl);
+        if (exchangeError) throw exchangeError;
         enterResetMode("Link validado. Agora defina sua nova senha.");
       } else if (type === "recovery" && accessToken && refreshToken) {
-        const { error } = await supabase.auth.setSession({
+        const { error: sessionError } = await supabase.auth.setSession({
           access_token: accessToken,
           refresh_token: refreshToken,
         });
-        if (error) throw error;
+        if (sessionError) throw sessionError;
         enterResetMode("Link validado. Agora defina sua nova senha.");
       } else {
         enterResetMode("Link validado. Agora defina sua nova senha.");
       }
 
-      if (Platform.OS === "web" && typeof window !== "undefined") {
-        window.history.replaceState({}, document.title, "/reset");
-      }
+      cleanResetUrl();
     } catch (e: any) {
-      clearRecoveryFlow();
-      setMode("request");
-      showBanner("error", e?.message ?? "O link de recuperação é inválido ou expirou.");
+      const msg = String(e?.message ?? "");
+      const expired =
+        msg.toLowerCase().includes("expired") ||
+        msg.toLowerCase().includes("otp") ||
+        msg.toLowerCase().includes("invalid");
+
+      returnToRequestMode(
+        expired
+          ? "Este link expirou ou já foi usado. Solicite um novo e-mail de recuperação."
+          : "Não foi possível validar o link de recuperação."
+      );
+      cleanResetUrl();
     } finally {
       setLoadingRecovery(false);
     }
@@ -271,16 +309,25 @@ export default function ResetScreen() {
         return;
       }
 
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        setPasswordError(true);
+        returnToRequestMode("Sessão de recuperação não encontrada. Solicite um novo e-mail.");
+        return;
+      }
+
       setChanging(true);
 
       const { error } = await supabase.auth.updateUser({ password: pass1 });
       if (error) throw error;
 
       clearRecoveryFlow();
-
       await supabase.auth.signOut();
 
-      showBanner("success", "Senha alterada com sucesso. Volte ao login para entrar com a nova senha.");
+      showBanner("success", "Senha alterada com sucesso. Faça login com a nova senha.");
       showNotice(
         "Password updated",
         "Your password has been changed successfully. Please sign in again with your new password."
