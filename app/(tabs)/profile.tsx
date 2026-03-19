@@ -742,26 +742,27 @@ const handleChangeAvatar = useCallback(async () => {
       return;
     }
 
-    const wasCommitted = relationshipStatus === "committed" || relationshipStatus === "other";
-    const willBeCommitted =
-      draftRelationshipStatus === "committed" ||
-      draftRelationshipStatus === "other";
+    const statusChanged = draftRelationshipStatus !== relationshipStatus;
 
-    if (!wasCommitted && willBeCommitted && relationshipStatusChangedAt) {
+    // Cooldown de 24h para qualquer mudança de status de relacionamento
+    if (statusChanged && relationshipStatusChangedAt) {
       const changedDate = new Date(relationshipStatusChangedAt).getTime();
       const now = Date.now();
       const hoursSince = (now - changedDate) / (1000 * 60 * 60);
       if (hoursSince < 24) {
         const hoursLeft = Math.ceil(24 - hoursSince);
+        const minutesLeft = Math.ceil((24 - hoursSince) * 60);
+        const timeLabel = hoursLeft >= 1
+          ? `${hoursLeft}h`
+          : `${minutesLeft} minuto${minutesLeft !== 1 ? "s" : ""}`;
         Alert.alert(
           "Aguarde um pouco ⏳",
-          `Você mudou seu status recentemente. Aguarde mais ${hoursLeft}h para alterar novamente.`
+          `Você alterou seu status de relacionamento recentemente. Aguarde mais ${timeLabel} para poder alterar novamente.`
         );
         return;
       }
     }
 
-    const statusChanged = draftRelationshipStatus !== relationshipStatus;
     const changedAt = statusChanged
       ? new Date().toISOString()
       : relationshipStatusChangedAt;
