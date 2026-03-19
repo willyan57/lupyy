@@ -3,6 +3,7 @@ import StoryViewer, { type StoryItem } from "@/components/StoryViewer";
 import Colors from "@/constants/Colors";
 import { uploadStory } from "@/lib/storage";
 import { supabase } from "@/lib/supabase";
+import { useFocusEffect } from "@react-navigation/native";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import * as FileSystem from "expo-file-system";
 import { Image as ExpoImage } from "expo-image";
@@ -741,12 +742,11 @@ const handleChangeAvatar = useCallback(async () => {
       return;
     }
 
-    // ── 24h ANTI-ABUSE DELAY ──
     const wasCommitted = relationshipStatus === "committed" || relationshipStatus === "other";
-    const willBeCommitted = draftRelationshipStatus === "committed" || draftRelationshipStatus === "other";
-    const willBeSingle = draftRelationshipStatus === "single" || !draftRelationshipStatus;
+    const willBeCommitted =
+      draftRelationshipStatus === "committed" ||
+      draftRelationshipStatus === "other";
 
-    // If going from single → committed, check 24h cooldown
     if (!wasCommitted && willBeCommitted && relationshipStatusChangedAt) {
       const changedDate = new Date(relationshipStatusChangedAt).getTime();
       const now = Date.now();
@@ -761,8 +761,10 @@ const handleChangeAvatar = useCallback(async () => {
       }
     }
 
-    // Track if relationship status actually changed
     const statusChanged = draftRelationshipStatus !== relationshipStatus;
+    const changedAt = statusChanged
+      ? new Date().toISOString()
+      : relationshipStatusChangedAt;
 
     try {
       setSavingProfile(true);
@@ -771,7 +773,6 @@ const handleChangeAvatar = useCallback(async () => {
       const bioClean = draftBio.trim();
 
       const updatePayload: any = {
-        id: userId,
         username: usernameClean,
         full_name: fullNameClean || null,
         bio: bioClean || null,
@@ -780,29 +781,54 @@ const handleChangeAvatar = useCallback(async () => {
         gender: draftGender.trim() || null,
       };
 
-      // If status changed, persist the timestamp
       if (statusChanged) {
-        updatePayload.relationship_status_changed_at = new Date().toISOString();
+        updatePayload.relationship_status_changed_at = changedAt;
       }
 
-      const { data, error } = await supabase
+      const { data: updatedRow, error: updateError } = await supabase
         .from("profiles")
-        .upsert(updatePayload, { onConflict: "id" })
+        .update(updatePayload)
+        .eq("id", userId)
         .select("*")
-        .single();
+        .maybeSingle();
 
-      if (error) throw error;
+      let savedRow = updatedRow as ProfileRow | null;
 
-      const r = data as ProfileRow;
-      setProfileRow(r);
-      setUsername(usernameClean);
-      setFullName(fullNameClean);
-      setBio(bioClean);
-      setRelationshipStatus(draftRelationshipStatus);
-      if (statusChanged) {
-        setRelationshipStatusChangedAt(new Date().toISOString());
+      if (updateError) {
+        throw updateError;
       }
-      setGender(draftGender.trim());
+
+      if (!savedRow) {
+        const { data: insertedRow, error: insertError } = await supabase
+          .from("profiles")
+          .upsert(
+            {
+              id: userId,
+              ...updatePayload,
+            },
+            { onConflict: "id" }
+          )
+          .select("*")
+          .single();
+
+        if (insertError) throw insertError;
+        savedRow = insertedRow as ProfileRow;
+      }
+
+      const nextStatus = savedRow.relationship_status ?? null;
+      const nextGender = savedRow.gender ?? "";
+      const nextChangedAt = savedRow.relationship_status_changed_at ?? changedAt ?? null;
+
+      setProfileRow(savedRow);
+      setUsername(savedRow.username || usernameClean);
+      setFullName(savedRow.full_name || fullNameClean);
+      setBio(savedRow.bio || bioClean);
+      setRelationshipStatus(nextStatus);
+      setMyRelationshipStatus(nextStatus);
+      setRelationshipStatusChangedAt(nextChangedAt);
+      setGender(nextGender);
+      setDraftGender(nextGender);
+      setDraftRelationshipStatus(nextStatus);
       setEditing(false);
       Alert.alert("Perfil atualizado", "Seu perfil foi salvo com sucesso.");
     } catch (e: any) {
@@ -812,11 +838,15 @@ const handleChangeAvatar = useCallback(async () => {
     }
   }, [
     userId,
+    isOwnProfile,
     draftUsername,
     draftFullName,
     draftBio,
+    draftRelationshipStatus,
+    draftGender,
     avatarUrl,
-    isOwnProfile,
+    relationshipStatus,
+    relationshipStatusChangedAt,
   ]);
 
   const signOut = useCallback(async () => {
@@ -1216,11 +1246,28 @@ const handleChangeAvatar = useCallback(async () => {
       currentInterestType === "silent_crush") &&
     (theirInterestType === "crush" || theirInterestType === "silent_crush");
 
-  const canOpenConversation = isMutualFriend || isCrushMatch;
+  const viewerIsCommitted =
+    myRelationshipStatus === "committed" || myRelationshipStatus === "other";
+  const targetIsCommitted =
+    relationshipStatus === "committed" || relationshipStatus === "other";
+  const canOpenCrushConversation =
+    isCrushMatch && !viewerIsCommitted && !targetIsCommitted;
+  const canOpenConversation = isMutualFriend || canOpenCrushConversation;
 
   const openConversation = useCallback(
     async (conversationType: ConversationType) => {
       if (!authUserId || !userId) return;
+      if (
+        conversationType === "crush" &&
+        (viewerIsCommitted || targetIsCommitted)
+      ) {
+        Alert.alert(
+          "🔒 Conversa bloqueada",
+          "Conversas de crush ficam indisponíveis quando um dos dois está namorando ou casado(a)."
+        );
+        return;
+      }
+
       try {
         const conversation = await getOrCreateConversation({
           currentUserId: authUserId,
@@ -1239,12 +1286,18 @@ const handleChangeAvatar = useCallback(async () => {
         );
       }
     },
-    [authUserId, userId, router]
+    [authUserId, userId, router, viewerIsCommitted, targetIsCommitted]
   );
 
   useEffect(() => {
     bootstrap();
   }, [bootstrap]);
+
+  useFocusEffect(
+    useCallback(() => {
+      bootstrap();
+    }, [bootstrap])
+  );
 
   useEffect(() => {
     if (userId) {

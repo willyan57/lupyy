@@ -111,27 +111,26 @@ export default function ConversationsScreen() {
     await refreshUnreadCountsForLists();
   };
 
-  useEffect(() => {
-    const loadUser = async () => {
-      const { data, error } = await supabase.auth.getUser();
-      if (error || !data.user) return;
-      setCurrentUserId(data.user.id);
+  const loadViewerContext = useCallback(async () => {
+    const { data, error } = await supabase.auth.getUser();
+    if (error || !data.user) return null;
 
-      // Fetch relationship status
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("relationship_status")
-        .eq("id", data.user.id)
-        .maybeSingle();
-      if (profile?.relationship_status) {
-        setMyRelationshipStatus(profile.relationship_status);
-      }
-    };
-    loadUser();
+    const viewerId = data.user.id;
+    setCurrentUserId(viewerId);
+
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("relationship_status")
+      .eq("id", viewerId)
+      .maybeSingle();
+
+    setMyRelationshipStatus((profile as any)?.relationship_status ?? null);
+    return viewerId;
   }, []);
 
-  const loadConversations = useCallback(async () => {
-    if (!currentUserId) return;
+  const loadConversations = useCallback(async (viewerId?: string | null) => {
+    const activeUserId = viewerId ?? currentUserId;
+    if (!activeUserId) return;
     setLoading(true);
     try {
       const { data, error } = await supabase.rpc("get_user_conversations_full");
@@ -155,14 +154,29 @@ export default function ConversationsScreen() {
   }, [currentUserId]);
 
   useEffect(() => {
-    loadConversations();
-  }, [loadConversations]);
+    (async () => {
+      const viewerId = await loadViewerContext();
+      if (viewerId) {
+        await loadConversations(viewerId);
+      }
+    })();
+  }, [loadViewerContext, loadConversations]);
 
-  // ── Refresh on screen focus ──
   useFocusEffect(
     useCallback(() => {
-      loadConversations();
-    }, [loadConversations])
+      let isActive = true;
+
+      (async () => {
+        const viewerId = await loadViewerContext();
+        if (isActive && viewerId) {
+          await loadConversations(viewerId);
+        }
+      })();
+
+      return () => {
+        isActive = false;
+      };
+    }, [loadViewerContext, loadConversations])
   );
 
   useEffect(() => {

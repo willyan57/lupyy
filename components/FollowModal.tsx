@@ -59,12 +59,15 @@ function FollowModalComponent({
   existingInterestType,
   loading,
 }: Props) {
+  const isCommitted = (status?: RelationshipStatus | null) =>
+    status === "committed" || status === "other";
+
   // Backwards compat: if new props not provided, fall back to old prop
   const myStatus = myRelationshipStatus ?? relationshipStatus ?? "single";
   const targetStatus = targetRelationshipStatus ?? "single";
 
-  const iAmCommitted = myStatus === "committed";
-  const targetIsCommitted = targetStatus === "committed";
+  const iAmCommitted = isCommitted(myStatus);
+  const targetIsCommitted = isCommitted(targetStatus);
   const isCrushBlocked = iAmCommitted || targetIsCommitted;
 
   const blockedMessage = useMemo(() => {

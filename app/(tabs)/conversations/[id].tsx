@@ -4,6 +4,7 @@ import { touchUserPresence, useUserPresence } from "@/lib/presence";
 import { supabase } from "@/lib/supabase";
 import { useTypingIndicator } from "@/lib/useTypingIndicator";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
+import { useFocusEffect } from "@react-navigation/native";
 import * as Clipboard from "expo-clipboard";
 import * as FileSystem from "expo-file-system";
 import * as ImagePicker from "expo-image-picker";
@@ -56,6 +57,7 @@ type ProfileHeader = {
   username: string | null;
   full_name: string | null;
   avatar_url: string | null;
+  relationship_status?: string | null;
 };
 
 export default function ConversationScreen() {
@@ -76,10 +78,15 @@ export default function ConversationScreen() {
   const [sending, setSending] = useState(false);
   const [uploadingMedia, setUploadingMedia] = useState(false);
 
+  const isCommittedStatus = (status?: string | null) =>
+    status === "committed" || status === "other";
+
   // ── Crush lock state ──
   const [myRelationshipStatus, setMyRelationshipStatus] = useState<string | null>(null);
-  const isCrushLocked = (conversationType === "crush") &&
-    (myRelationshipStatus === "committed" || myRelationshipStatus === "other");
+  const isCrushLocked =
+    conversationType === "crush" &&
+    (isCommittedStatus(myRelationshipStatus) ||
+      isCommittedStatus(otherProfile?.relationship_status));
 
   const [selectedMessage, setSelectedMessage] = useState<DbMessage | null>(null);
   const [showMessageMenu, setShowMessageMenu] = useState(false);
@@ -230,6 +237,55 @@ export default function ConversationScreen() {
     });
   };
 
+  const refreshRelationshipLock = useCallback(async () => {
+    const { data: auth } = await supabase.auth.getUser();
+    const uid = auth?.user?.id ?? null;
+    if (!uid) return;
+
+    setAuthUserId(uid);
+
+    const { data: myProfile } = await supabase
+      .from("profiles")
+      .select("relationship_status")
+      .eq("id", uid)
+      .maybeSingle();
+
+    setMyRelationshipStatus((myProfile as any)?.relationship_status ?? null);
+
+    if (!conversationId) return;
+
+    const { data: conv } = await supabase
+      .from("conversations")
+      .select("id, user1, user2, conversation_type")
+      .eq("id", conversationId)
+      .maybeSingle();
+
+    if (!conv) return;
+
+    const conversation = conv as ConversationRow;
+    const other =
+      conversation.user1 === uid
+        ? conversation.user2
+        : conversation.user2 === uid
+        ? conversation.user1
+        : null;
+
+    setConversationType(conversation.conversation_type);
+    setOtherUserId(other);
+
+    if (!other) return;
+
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("id, username, full_name, avatar_url, relationship_status")
+      .eq("id", other)
+      .maybeSingle();
+
+    if (profile) {
+      setOtherProfile(profile as ProfileHeader);
+    }
+  }, [conversationId]);
+
   // ── Delete entire conversation (hide for current user) ──
   async function handleDeleteConversation() {
     if (!authUserId || !conversationId) return;
@@ -289,15 +345,12 @@ export default function ConversationScreen() {
         const uid = auth.user.id;
         setAuthUserId(uid);
 
-        // Fetch my relationship status for crush lock
         const { data: myProfile } = await supabase
           .from("profiles")
           .select("relationship_status")
           .eq("id", uid)
           .maybeSingle();
-        if (myProfile?.relationship_status) {
-          setMyRelationshipStatus(myProfile.relationship_status);
-        }
+        setMyRelationshipStatus((myProfile as any)?.relationship_status ?? null);
 
         const { data: conv, error: convErr } = await supabase
           .from("conversations")
@@ -319,7 +372,7 @@ export default function ConversationScreen() {
         if (other) {
           const { data: profile } = await supabase
             .from("profiles")
-            .select("id, username, full_name, avatar_url")
+            .select("id, username, full_name, avatar_url, relationship_status")
             .eq("id", other)
             .maybeSingle();
 
@@ -348,6 +401,12 @@ export default function ConversationScreen() {
       isMounted = false;
     };
   }, [conversationId, router]);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshRelationshipLock();
+    }, [refreshRelationshipLock])
+  );
 
   useEffect(() => {
     if (!conversationId) return;
@@ -424,6 +483,13 @@ export default function ConversationScreen() {
   async function handleSend() {
     const text = input.trim();
     if (!text || !authUserId || !conversationId || sending) return;
+    if (isCrushLocked) {
+      Alert.alert(
+        "🔒 Conversa bloqueada",
+        "Você não pode enviar mensagens de crush enquanto um dos perfis estiver namorando ou casado(a)."
+      );
+      return;
+    }
 
     setSending(true);
     setInput("");
@@ -474,8 +540,14 @@ export default function ConversationScreen() {
           last_message_at: new Date().toISOString(),
         })
         .eq("id", conversationId);
-    } catch {
+    } catch (e: any) {
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
+      if ((e?.message ?? "").includes("CRUSH_CHAT_LOCKED")) {
+        Alert.alert(
+          "🔒 Conversa bloqueada",
+          "O banco bloqueou essa mensagem porque a conversa de crush não está mais disponível."
+        );
+      }
     } finally {
       setSending(false);
       setReplyingTo(null);
@@ -484,6 +556,13 @@ export default function ConversationScreen() {
 
   async function handlePickMedia() {
     if (!authUserId || !conversationId || uploadingMedia) return;
+    if (isCrushLocked) {
+      Alert.alert(
+        "🔒 Conversa bloqueada",
+        "Você não pode enviar mídia em conversa de crush enquanto um dos perfis estiver namorando ou casado(a)."
+      );
+      return;
+    }
 
     try {
       const { status } =
@@ -505,7 +584,6 @@ export default function ConversationScreen() {
       const asset = result.assets[0];
       setUploadingMedia(true);
 
-      // Optimistic: show image immediately
       const tempId = `temp-media-${Date.now()}`;
       const optimisticMsg: DbMessage = {
         id: tempId,
@@ -556,9 +634,7 @@ export default function ConversationScreen() {
         .single();
 
       if (insertError) {
-        setMessages((prev) => prev.filter((m) => m.id !== tempId));
-        setUploadingMedia(false);
-        return;
+        throw insertError;
       }
 
       const real = inserted as DbMessage;
@@ -578,7 +654,13 @@ export default function ConversationScreen() {
           last_message_at: new Date().toISOString(),
         })
         .eq("id", conversationId);
-    } catch {
+    } catch (e: any) {
+      if ((e?.message ?? "").includes("CRUSH_CHAT_LOCKED")) {
+        Alert.alert(
+          "🔒 Conversa bloqueada",
+          "O banco bloqueou essa mídia porque a conversa de crush não está mais disponível."
+        );
+      }
     } finally {
       setUploadingMedia(false);
     }
