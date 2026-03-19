@@ -50,6 +50,15 @@ const previewHeight = isWeb ? height * 0.85 : height;
 
 type CaptureMode = "post" | "story" | "reel";
 type FilterId = "none" | "face_enhance" | "studio_glow" | "cartoon_soft" | "bw_art" | "soft_skin_ig" | "clean_portrait" | "cinematic_gold" | "blue_teal_2026" | "pastel_dream" | "tokyo_night" | "desert_warm" | "vintage_film" | "sakura" | "neon_glow" | "miami_vibes" | "deep_contrast" | "moody_forest" | "winter_lowsat" | "summer_pop" | "aqua_fresh" | "pink_rose" | "sepia_clean" | "urban_grit" | "cream_tone";
+type ExtendedBeautifyParams = BeautifyParams & {
+  sharpness?: number;
+  temperature?: number;
+  vignette?: number;
+  grain?: number;
+  fade?: number;
+  highlights?: number;
+  shadows?: number;
+};
 
 const mapPreviewFilterToExport = (id: FilterId): ExportFilterId => {
   if (id === "none") return "none";
@@ -285,7 +294,7 @@ export default function CapturePreview() {
   const router = useRouter();
   const params = useLocalSearchParams();
 
-  const uri = useMemo(() => String(params.uri ?? ""), [params.uri]);
+  const rawUri = useMemo(() => String(params.uri ?? ""), [params.uri]);
   const mediaType = useMemo(
     () => String(params.mediaType ?? "image") as "image" | "video",
     [params.mediaType]
@@ -297,6 +306,56 @@ export default function CapturePreview() {
   const nonce = useMemo(() => String(params.nonce ?? ""), [params.nonce]);
   const facing = useMemo(() => String(params.facing ?? "back"), [params.facing]);
   const isFrontCamera = facing === "front";
+  const cameFromCamera = facing === "front" || facing === "back";
+  const normalizedWidthParam = useMemo(() => Number(params.width ?? 0), [params.width]);
+  const normalizedHeightParam = useMemo(() => Number(params.height ?? 0), [params.height]);
+  const hasNormalizedDimensions =
+    normalizedWidthParam > 0 && normalizedHeightParam > 0;
+
+  // Fallback para links/rotas antigas que ainda chegam com EXIF cru no APK.
+  const [normalizedUri, setNormalizedUri] = useState<string | null>(null);
+  const needsNormalization =
+    Platform.OS !== "web" &&
+    mediaType === "image" &&
+    cameFromCamera &&
+    !hasNormalizedDimensions;
+
+  useEffect(() => {
+    if (!needsNormalization || !rawUri) {
+      setNormalizedUri(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const ImageManipulator = await import("expo-image-manipulator");
+        const result = await ImageManipulator.manipulateAsync(
+          rawUri,
+          [{ rotate: 0 }],
+          {
+            compress: 1,
+            format: ImageManipulator.SaveFormat.JPEG,
+          }
+        );
+
+        if (!cancelled && result?.uri) {
+          setNormalizedUri(result.uri);
+        }
+      } catch (err) {
+        console.warn("Falha ao normalizar orientacao da imagem:", err);
+        if (!cancelled) setNormalizedUri(rawUri);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [rawUri, needsNormalization]);
+
+  const isPreparingImage = needsNormalization && !normalizedUri;
+  const uri = needsNormalization ? normalizedUri || "" : rawUri;
 
   const insets = useSafeAreaInsets();
 
@@ -346,13 +405,12 @@ export default function CapturePreview() {
   const labelScale = useRef(new Animated.Value(0.96)).current;
   const hideLabelRef = useRef<any>(null);
 
-  const listRef = useRef<FlatList<any> | null>(null);
+  const listRef = useRef<any>(null);
   const syncScrollRef = useRef(false);
 
   const [userId, setUserId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [mediaLoaded, setMediaLoaded] = useState(false);
-  const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
 
   const [toolsCollapsed, setToolsCollapsed] = useState(true);
   const [caption, setCaption] = useState("");
@@ -394,7 +452,7 @@ export default function CapturePreview() {
       return initial;
     }
   );
-  const beautifyTrackRef = useRef<View>(null);
+  const beautifyTrackRef = useRef<any>(null);
   const [beautifyTrackWidth, setBeautifyTrackWidth] = useState(0);
   const [beautifyTrackX, setBeautifyTrackX] = useState(0);
 
@@ -402,9 +460,73 @@ export default function CapturePreview() {
   const [aiTempUri, setAiTempUri] = useState<string | null>(null);
 
   const effectiveUri = aiTempUri || uri;
+  const [mediaDimensions, setMediaDimensions] = useState<{
+    width: number;
+    height: number;
+  } | null>(
+    hasNormalizedDimensions
+      ? { width: normalizedWidthParam, height: normalizedHeightParam }
+      : null
+  );
+
+  useEffect(() => {
+    setMediaDimensions(
+      hasNormalizedDimensions
+        ? { width: normalizedWidthParam, height: normalizedHeightParam }
+        : null
+    );
+  }, [hasNormalizedDimensions, normalizedWidthParam, normalizedHeightParam]);
+
+  useEffect(() => {
+    if (mediaType !== "image" || !effectiveUri || hasNormalizedDimensions) return;
+
+    let cancelled = false;
+
+    (Image as any).getSize(
+      effectiveUri,
+      (imgWidth: number, imgHeight: number) => {
+        if (!cancelled && imgWidth > 0 && imgHeight > 0) {
+          setMediaDimensions({ width: imgWidth, height: imgHeight });
+        }
+      },
+      () => {
+        if (!cancelled) setMediaDimensions(null);
+      }
+    );
+
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveUri, mediaType, hasNormalizedDimensions]);
+
+  const previewMediaStyle = useMemo(() => {
+    const boundsWidth = width;
+    const boundsHeight = previewHeight;
+    const mediaWidth = mediaDimensions?.width ?? boundsWidth;
+    const mediaHeight = mediaDimensions?.height ?? boundsHeight;
+
+    if (mediaWidth <= 0 || mediaHeight <= 0) {
+      return { width: boundsWidth, height: boundsHeight };
+    }
+
+    const mediaAspect = mediaWidth / mediaHeight;
+    const boundsAspect = boundsWidth / boundsHeight;
+
+    if (mediaAspect > boundsAspect) {
+      return {
+        width: boundsWidth,
+        height: boundsWidth / mediaAspect,
+      };
+    }
+
+    return {
+      width: boundsHeight * mediaAspect,
+      height: boundsHeight,
+    };
+  }, [mediaDimensions]);
 
   // BeautifyParams para o shader — ATUALIZADO com campos avancados
-  const beautifyParams = useMemo<BeautifyParams>(() => {
+  const beautifyParams = useMemo<ExtendedBeautifyParams>(() => {
     const smoothRaw = (beautifyValues["Suavizar"] ?? 60) / 100;
     const contrastRaw = (beautifyValues["Contraste"] ?? 60) / 100;
     const teethRaw = (beautifyValues["Dente"] ?? 60) / 100;
@@ -589,31 +711,6 @@ export default function CapturePreview() {
   useEffect(() => {
     setMediaLoaded(false);
   }, [uri, nonce, mediaType]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    if (mediaType !== "image" || !effectiveUri) {
-      setImageSize(null);
-      return;
-    }
-
-    Image.getSize(
-      effectiveUri,
-      (width, height) => {
-        if (!cancelled && width > 0 && height > 0) {
-          setImageSize({ width, height });
-        }
-      },
-      () => {
-        if (!cancelled) setImageSize(null);
-      }
-    );
-
-    return () => {
-      cancelled = true;
-    };
-  }, [effectiveUri, mediaType]);
 
   useEffect(() => {
     const next = activeFilter.overlay ?? null;
@@ -1052,22 +1149,6 @@ export default function CapturePreview() {
     void performSendWithUri(effectiveUri);
   };
 
-  const glFlipY = Platform.OS === "web";
-
-  const exportSize = useMemo(() => {
-    if (!imageSize?.width || !imageSize?.height) {
-      return { width: 1080, height: 1350 };
-    }
-
-    const maxDim = 2048;
-    const ratio = Math.min(maxDim / imageSize.width, maxDim / imageSize.height, 1);
-
-    return {
-      width: Math.max(1, Math.round(imageSize.width * ratio)),
-      height: Math.max(1, Math.round(imageSize.height * ratio)),
-    };
-  }, [imageSize]);
-
   const label =
     mode === "story" ? "Publicar Story" : mode === "reel" ? "Avancar" : "Avancar";
 
@@ -1304,9 +1385,8 @@ export default function CapturePreview() {
           sourceUri={bakeJob.uri}
           filter={bakeJob.filterId}
           beautify={bakeJob.beautify}
-          exportWidth={exportSize.width}
-          exportHeight={exportSize.height}
-          flipY={glFlipY}
+          exportWidth={1080}
+          exportHeight={1350}
           onFinish={(u) => {
             const out = u || bakeJob.uri;
             const r = bakeJob.resolve;
@@ -1317,23 +1397,30 @@ export default function CapturePreview() {
       ) : null}
 
       {/* Preview da mídia */}
-      <View style={{ flex: 1 }}>
-        {mediaType === "image" && needsGlPreview ? (
+      <View style={styles.previewStage}>
+        {isPreparingImage ? null : mediaType === "image" && needsGlPreview ? (
           <LutRenderer
             key={`gl-${effectiveUri}-${filter}-${filterIntensity}-${JSON.stringify(beautifyParams)}`}
             sourceUri={effectiveUri}
             lut={previewLutSource}
             intensity={filterIntensity}
             beautify={beautifyParams}
-            flipY={glFlipY}
-            style={[styles.preview, isFrontCamera && { transform: [{ scaleX: -1 }] }]}
+            style={
+              (isFrontCamera
+                ? [styles.preview, previewMediaStyle, { transform: [{ scaleX: -1 }] }]
+                : [styles.preview, previewMediaStyle]) as any
+            }
             onReady={() => setMediaLoaded(true)}
           />
         ) : mediaType === "image" ? (
           <Image
             key={`${effectiveUri}::${nonce}::${filter}`}
             source={{ uri: effectiveUri }}
-            style={[styles.preview, isFrontCamera && { transform: [{ scaleX: -1 }] }]}
+            style={
+              (isFrontCamera
+                ? [styles.preview, previewMediaStyle, { transform: [{ scaleX: -1 }] }]
+                : [styles.preview, previewMediaStyle]) as any
+            }
             resizeMode="contain"
             onLoadEnd={() => setMediaLoaded(true)}
           />
@@ -1341,8 +1428,8 @@ export default function CapturePreview() {
           <Video
             key={`${uri}::${nonce}`}
             source={{ uri }}
-            style={styles.preview}
-            resizeMode={isWeb ? ResizeMode.CONTAIN : ResizeMode.COVER}
+            style={[styles.preview, styles.videoPreview] as any}
+            resizeMode={ResizeMode.CONTAIN}
             shouldPlay
             isLooping
             onLoad={() => setMediaLoaded(true)}
@@ -1556,7 +1643,7 @@ export default function CapturePreview() {
                 style={styles.beautifySliderTrack}
                 ref={beautifyTrackRef}
                 onLayout={() => {
-                  beautifyTrackRef.current?.measureInWindow((x, _y, w) => {
+                  beautifyTrackRef.current?.measureInWindow((x: number, _y: number, w: number) => {
                     setBeautifyTrackX(x);
                     setBeautifyTrackWidth(w);
                   });
@@ -2104,7 +2191,19 @@ export default function CapturePreview() {
 }
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  preview: { width, height: previewHeight, position: "absolute", top: 0, left: 0, resizeMode: "contain" as any },
+  previewStage: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "flex-start",
+  },
+  preview: {
+    maxWidth: width,
+    maxHeight: previewHeight,
+  },
+  videoPreview: {
+    width,
+    height: previewHeight,
+  },
   loadingOverlay: {
     ...StyleSheet.absoluteFill as any,
     alignItems: "center",

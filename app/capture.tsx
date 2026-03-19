@@ -215,24 +215,60 @@ export default function CaptureScreen() {
     try {
       setLoadingCapture(true);
       const photo: any = await Promise.race([
-        cameraRef.current.takePictureAsync({ quality: 0.92, skipProcessing: true, exif: false } as any),
+        cameraRef.current.takePictureAsync({
+          quality: Platform.OS === "web" ? 0.92 : 1,
+          skipProcessing: Platform.OS === "web",
+          exif: Platform.OS !== "web",
+        } as any),
         new Promise<never>((_, rej) => setTimeout(() => rej(new Error("timeout")), 10000)),
       ]);
-      setLoadingCapture(false);
+
       if (photo?.uri) {
+        let previewUri = photo.uri;
+        let previewWidth = Number(photo?.width ?? 0);
+        let previewHeight = Number(photo?.height ?? 0);
+
+        if (Platform.OS !== "web") {
+          try {
+            const ImageManipulator = await import("expo-image-manipulator");
+            const normalized = await ImageManipulator.manipulateAsync(
+              photo.uri,
+              [{ rotate: 0 }],
+              {
+                compress: 1,
+                format: ImageManipulator.SaveFormat.JPEG,
+              }
+            );
+
+            if (normalized?.uri) {
+              previewUri = normalized.uri;
+              previewWidth = Number(normalized?.width ?? previewWidth);
+              previewHeight = Number(normalized?.height ?? previewHeight);
+            }
+          } catch (normalizationError) {
+            console.warn("Falha ao normalizar foto capturada:", normalizationError);
+          }
+        }
+
+        setLoadingCapture(false);
         router.push({
           pathname: "/capturePreview" as any,
           params: {
-            uri: photo.uri,
+            uri: previewUri,
             mediaType: "image",
             mode,
             filter,
             facing,
             aspectRatio,
+            width: previewWidth > 0 ? String(previewWidth) : undefined,
+            height: previewHeight > 0 ? String(previewHeight) : undefined,
             nonce: String(Date.now()),
           },
         });
+        return;
       }
+
+      setLoadingCapture(false);
     } catch {
       setLoadingCapture(false);
       Alert.alert("Erro na captura", "Não foi possível tirar a foto.");

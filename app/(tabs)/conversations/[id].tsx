@@ -1,3 +1,4 @@
+// app/conversations/[id].tsx
 import Colors from "@/constants/Colors";
 import { touchUserPresence, useUserPresence } from "@/lib/presence";
 import { supabase } from "@/lib/supabase";
@@ -7,16 +8,20 @@ import * as Clipboard from "expo-clipboard";
 import * as FileSystem from "expo-file-system";
 import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
   FlatList,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
+  Animated as RNAnimated,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -24,6 +29,8 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
 type DbMessage = {
   id: string | number;
@@ -53,7 +60,7 @@ type ProfileHeader = {
 
 export default function ConversationScreen() {
   const router = useRouter();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id } = useLocalSearchParams();
   const conversationId = typeof id === "string" ? id : "";
 
   const [authUserId, setAuthUserId] = useState<string | null>(null);
@@ -76,10 +83,22 @@ export default function ConversationScreen() {
     {}
   );
 
-  const listRef = useRef<FlatList<DbMessage>>(null);
-  const inputRef = useRef<TextInput | null>(null);
+  // ── Fullscreen image viewer ──
+  const [fullscreenImageUri, setFullscreenImageUri] = useState<string | null>(null);
+
+  // ── Keyboard height tracking for Android ──
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  const listRef = useRef<any>(null);
+  const inputRef = useRef<any>(null);
   const insets = useSafeAreaInsets();
-  const tabBarHeight = useBottomTabBarHeight();
+
+  let tabBarHeight = 0;
+  try {
+    tabBarHeight = useBottomTabBarHeight();
+  } catch {
+    tabBarHeight = 0;
+  }
 
   const { label: presenceLabel, isOnline } = useUserPresence(otherUserId);
   const { isSomeoneTyping, reportTyping } = useTypingIndicator({
@@ -89,6 +108,55 @@ export default function ConversationScreen() {
 
   const isWeb = Platform.OS === "web";
   const isCrush = conversationType === "crush";
+
+  // ── Typing timeout: auto-clear after 3s of no input ──
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleInputChange = useCallback(
+    (text: string) => {
+      setInput(text);
+      if (text.trim().length > 0) {
+        reportTyping(true);
+        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = setTimeout(() => {
+          reportTyping(false);
+        }, 3000);
+      } else {
+        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+        reportTyping(false);
+      }
+    },
+    [reportTyping]
+  );
+
+  // ── Android keyboard listener ──
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+
+    const showSub = Keyboard.addListener("keyboardDidShow", (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener("keyboardDidHide", () => {
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  // ── Message entry animation ──
+  const fadeAnim = useRef(new RNAnimated.Value(0)).current;
+  useEffect(() => {
+    if (messages.length > 0) {
+      RNAnimated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 200,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [messages.length]);
 
   async function ensureLocalFileUri(inputUri: string): Promise<string> {
     if (!inputUri) return inputUri;
@@ -149,15 +217,43 @@ export default function ConversationScreen() {
     return base64ToUint8Array(base64);
   }
 
+  const handleOpenProfileFromHeader = () => {
+    if (!otherUserId) return;
+    router.push({
+      pathname: "/(tabs)/profile",
+      params: { userId: otherUserId },
+    });
+  };
 
+  // ── Delete entire conversation (hide for current user) ──
+  async function handleDeleteConversation() {
+    if (!authUserId || !conversationId) return;
 
-const handleOpenProfileFromHeader = () => {
-  if (!otherUserId) return;
-  router.push({
-    pathname: "/(tabs)/profile",
-    params: { userId: otherUserId },
-  });
-};
+    Alert.alert(
+      "Excluir conversa",
+      "Tem certeza que deseja excluir esta conversa? Ela será removida da sua lista.",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Excluir",
+          style: "destructive",
+          onPress: async () => {
+            await supabase
+              .from("conversation_deletions")
+              .upsert(
+                {
+                  conversation_id: conversationId,
+                  user_id: authUserId,
+                  deleted_at: new Date().toISOString(),
+                },
+                { onConflict: "conversation_id,user_id" }
+              );
+            router.back();
+          },
+        },
+      ]
+    );
+  }
 
   const displayName =
     otherProfile?.full_name?.trim() ||
@@ -166,7 +262,9 @@ const handleOpenProfileFromHeader = () => {
 
   useEffect(() => {
     if (!messages.length) return;
-    listRef.current?.scrollToEnd({ animated: true });
+    setTimeout(() => {
+      listRef.current?.scrollToEnd({ animated: true });
+    }, 100);
   }, [messages.length]);
 
   useEffect(() => {
@@ -253,7 +351,7 @@ const handleOpenProfileFromHeader = () => {
           const msg = payload.new as DbMessage;
           setMessages((prev) => {
             if (prev.some((m) => m.id === msg.id)) return prev;
-            return [...prev, msg].sort((a, b) =>
+            return [...prev, msg].sort((a: DbMessage, b: DbMessage) =>
               a.created_at.localeCompare(b.created_at)
             );
           });
@@ -272,7 +370,7 @@ const handleOpenProfileFromHeader = () => {
           setMessages((prev) =>
             prev
               .map((m) => (m.id === updated.id ? updated : m))
-              .sort((a, b) => a.created_at.localeCompare(b.created_at))
+              .sort((a: DbMessage, b: DbMessage) => a.created_at.localeCompare(b.created_at))
           );
         }
       )
@@ -315,6 +413,7 @@ const handleOpenProfileFromHeader = () => {
     setSending(true);
     setInput("");
     reportTyping(false);
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
 
     const tempId = `temp-${Date.now()}`;
     const optimistic: DbMessage = {
@@ -347,7 +446,8 @@ const handleOpenProfileFromHeader = () => {
 
       setMessages((prev) => {
         const withoutTemp = prev.filter((m) => m.id !== tempId);
-        return [...withoutTemp, real].sort((a, b) =>
+        if (withoutTemp.some((m) => m.id === real.id)) return withoutTemp;
+        return [...withoutTemp, real].sort((a: DbMessage, b: DbMessage) =>
           a.created_at.localeCompare(b.created_at)
         );
       });
@@ -390,15 +490,24 @@ const handleOpenProfileFromHeader = () => {
       const asset = result.assets[0];
       setUploadingMedia(true);
 
+      // Optimistic: show image immediately
+      const tempId = `temp-media-${Date.now()}`;
+      const optimisticMsg: DbMessage = {
+        id: tempId,
+        conversation_id: conversationId,
+        sender: authUserId,
+        content: "",
+        media_url: asset.uri,
+        created_at: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, optimisticMsg]);
+
       const uri = await ensureLocalFileUri(asset.uri);
       const guessedName =
         (asset as any).fileName ?? uri.split("/").pop() ?? "image";
       const fileExt = guessedName.split(".").pop() ?? "jpg";
       const filePath = `${conversationId}/${Date.now()}-${authUserId}.${fileExt}`;
 
-      // Upload unificado (Web + Native) via blob.
-      // Evita bug clássico no Android quando o picker retorna content://
-      // e o arquivo não é lido corretamente pelo storage SDK.
       const body = await getUploadBodyFromUri(uri);
 
       const { error: uploadError } = await supabase.storage
@@ -409,6 +518,7 @@ const handleOpenProfileFromHeader = () => {
         });
 
       if (uploadError) {
+        setMessages((prev) => prev.filter((m) => m.id !== tempId));
         setUploadingMedia(false);
         return;
       }
@@ -431,6 +541,7 @@ const handleOpenProfileFromHeader = () => {
         .single();
 
       if (insertError) {
+        setMessages((prev) => prev.filter((m) => m.id !== tempId));
         setUploadingMedia(false);
         return;
       }
@@ -438,9 +549,9 @@ const handleOpenProfileFromHeader = () => {
       const real = inserted as DbMessage;
 
       setMessages((prev) => {
-        if (prev.some((m) => m.id === real.id)) return prev;
-        const merged = [...prev, real];
-        return merged.sort((a, b) =>
+        const withoutTemp = prev.filter((m) => m.id !== tempId);
+        if (withoutTemp.some((m) => m.id === real.id)) return withoutTemp;
+        return [...withoutTemp, real].sort((a: DbMessage, b: DbMessage) =>
           a.created_at.localeCompare(b.created_at)
         );
       });
@@ -536,7 +647,17 @@ const handleOpenProfileFromHeader = () => {
 
   const isDisabled = !input.trim() || sending;
 
-  const renderItem = ({ item }: { item: DbMessage }) => {
+  // ── Format timestamp ──
+  function formatTime(dateStr: string) {
+    try {
+      const d = new Date(dateStr);
+      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    } catch {
+      return "";
+    }
+  }
+
+  const renderItem = ({ item, index }: { item: DbMessage; index: number }) => {
     const isMine = item.sender === authUserId;
 
     if (item.is_deleted_for_all) {
@@ -569,12 +690,14 @@ const handleOpenProfileFromHeader = () => {
         : undefined;
 
     const reaction = localReactions[String(item.id)];
+    const time = formatTime(item.created_at);
 
     return (
-      <View
+      <RNAnimated.View
         style={[
           styles.messageRow,
           { justifyContent: isMine ? "flex-end" : "flex-start" },
+          { opacity: fadeAnim },
         ]}
       >
         <View style={styles.messageBubbleWrapper}>
@@ -603,7 +726,7 @@ const handleOpenProfileFromHeader = () => {
                   ]}
                 >
                   <Text style={styles.replyPreviewLabel}>
-                    {repliedMessage.sender === authUserId ? "Você" : "Contato"}
+                    {repliedMessage.sender === authUserId ? "Você" : displayName}
                   </Text>
                   <Text style={styles.replyPreviewText} numberOfLines={1}>
                     {repliedMessage.content && repliedMessage.content.trim()
@@ -614,11 +737,16 @@ const handleOpenProfileFromHeader = () => {
               )}
 
               {hasMedia && (
-                <Image
-                  source={{ uri: item.media_url! }}
-                  style={styles.messageImage}
-                  resizeMode="cover"
-                />
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => setFullscreenImageUri(item.media_url!)}
+                >
+                  <Image
+                    source={{ uri: item.media_url! }}
+                    style={styles.messageImage}
+                    resizeMode="cover"
+                  />
+                </TouchableOpacity>
               )}
 
               {hasText && (
@@ -628,6 +756,8 @@ const handleOpenProfileFromHeader = () => {
                   {displayText}
                 </Text>
               )}
+
+              <Text style={styles.timestampText}>{time}</Text>
             </View>
           </TouchableOpacity>
 
@@ -642,9 +772,12 @@ const handleOpenProfileFromHeader = () => {
             </View>
           )}
         </View>
-      </View>
+      </RNAnimated.View>
     );
   };
+
+  // ── Compute bottom padding for Android keyboard ──
+  const androidBottomPad = Platform.OS === "android" ? keyboardHeight : 0;
 
   return (
     <SafeAreaView
@@ -652,10 +785,11 @@ const handleOpenProfileFromHeader = () => {
       edges={["top", "right", "left"]}
     >
       <KeyboardAvoidingView
-        style={styles.safe}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={styles.flex1}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         keyboardVerticalOffset={Platform.OS === "ios" ? tabBarHeight : 0}
       >
+        {/* ── Header ── */}
         <View style={[styles.header, isCrush && styles.headerCrush]}>
           <TouchableOpacity
             onPress={() => router.back()}
@@ -691,7 +825,9 @@ const handleOpenProfileFromHeader = () => {
                 {isCrush && <Text style={styles.headerCrushPill}>💘 Crush</Text>}
               </View>
 
-              {!!presenceLabel && (
+              {isSomeoneTyping ? (
+                <Text style={styles.typingInlineText}>digitando...</Text>
+              ) : presenceLabel ? (
                 <View style={styles.presenceRow}>
                   <View
                     style={[
@@ -701,42 +837,47 @@ const handleOpenProfileFromHeader = () => {
                   />
                   <Text style={styles.presenceText}>{presenceLabel}</Text>
                 </View>
-              )}
+              ) : null}
             </View>
           </TouchableOpacity>
 
-          <View style={styles.headerRightSpacer} />
+          <TouchableOpacity
+            onPress={handleDeleteConversation}
+            style={styles.headerMenuButton}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.headerMenuIcon}>⋯</Text>
+          </TouchableOpacity>
         </View>
 
         {loading ? (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator />
+            <ActivityIndicator color="#888" />
           </View>
         ) : (
-          <>
+          <View style={styles.flex1}>
             <FlatList
               ref={listRef}
               data={messages}
               keyExtractor={(item) => String(item.id)}
               renderItem={renderItem}
-              contentContainerStyle={styles.listContent}
+              contentContainerStyle={[
+                styles.listContent,
+                Platform.OS === "android" && { paddingBottom: 8 },
+              ]}
               onContentSizeChange={() =>
                 listRef.current?.scrollToEnd({ animated: true })
               }
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="interactive"
             />
-
-            {isSomeoneTyping && (
-              <View style={styles.typingContainer}>
-                <Text style={styles.typingText}>Alguém está digitando...</Text>
-              </View>
-            )}
 
             {replyingTo && (
               <View style={styles.replyBanner}>
                 <View style={styles.replyBannerLeft}>
                   <Text style={styles.replyBannerLabel}>
                     Respondendo a{" "}
-                    {replyingTo.sender === authUserId ? "você" : "contato"}
+                    {replyingTo.sender === authUserId ? "você" : displayName}
                   </Text>
                   <Text style={styles.replyBannerText} numberOfLines={1}>
                     {replyingTo.content && replyingTo.content.trim()
@@ -757,7 +898,13 @@ const handleOpenProfileFromHeader = () => {
             <View
               style={[
                 styles.inputBar,
-                { paddingBottom: 10 + (Platform.OS === "android" ? Math.min(insets.bottom, 8) : insets.bottom) },
+                {
+                  paddingBottom:
+                    10 +
+                    (Platform.OS === "android"
+                      ? Math.min(insets.bottom, 8)
+                      : insets.bottom),
+                },
               ]}
             >
               <TouchableOpacity
@@ -777,12 +924,9 @@ const handleOpenProfileFromHeader = () => {
                 ref={inputRef}
                 style={styles.input}
                 placeholder="Escreva uma mensagem..."
-                placeholderTextColor="#777"
+                placeholderTextColor="#666"
                 value={input}
-                onChangeText={(text) => {
-                  setInput(text);
-                  reportTyping(text.trim().length > 0);
-                }}
+                onChangeText={handleInputChange}
                 multiline
               />
 
@@ -790,7 +934,7 @@ const handleOpenProfileFromHeader = () => {
                 style={[
                   styles.sendButton,
                   isCrush ? styles.sendButtonCrush : styles.sendButtonFriend,
-                  isDisabled && { opacity: 0.5 },
+                  isDisabled && { opacity: 0.4 },
                 ]}
                 disabled={isDisabled}
                 onPress={handleSend}
@@ -799,13 +943,14 @@ const handleOpenProfileFromHeader = () => {
                 {sending ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
-                  <Text style={styles.sendText}>Enviar</Text>
+                  <Text style={styles.sendText}>➤</Text>
                 )}
               </TouchableOpacity>
             </View>
-          </>
+          </View>
         )}
 
+        {/* ── Message action menu ── */}
         <Modal
           visible={showMessageMenu && !!selectedMessage}
           transparent
@@ -837,15 +982,15 @@ const handleOpenProfileFromHeader = () => {
                 style={styles.menuItem}
                 onPress={handleReplyToMessage}
               >
-                <Text style={styles.menuItemText}>Responder</Text>
+                <Text style={styles.menuItemText}>↩ Responder</Text>
               </Pressable>
 
               <Pressable style={styles.menuItem} onPress={handleForwardMessage}>
-                <Text style={styles.menuItemText}>Encaminhar</Text>
+                <Text style={styles.menuItemText}>↗ Encaminhar</Text>
               </Pressable>
 
               <Pressable style={styles.menuItem} onPress={handleCopyMessage}>
-                <Text style={styles.menuItemText}>Copiar</Text>
+                <Text style={styles.menuItemText}>📋 Copiar</Text>
               </Pressable>
 
               {selectedMessage &&
@@ -861,12 +1006,49 @@ const handleOpenProfileFromHeader = () => {
                         styles.menuItemDestructive,
                       ]}
                     >
-                      Cancelar envio
+                      🗑 Cancelar envio
                     </Text>
                   </Pressable>
                 )}
             </View>
           </Pressable>
+        </Modal>
+
+        {/* ── Fullscreen image viewer ── */}
+        <Modal
+          visible={!!fullscreenImageUri}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setFullscreenImageUri(null)}
+        >
+          <View style={styles.fullscreenOverlay}>
+            <TouchableOpacity
+              style={styles.fullscreenCloseBtn}
+              onPress={() => setFullscreenImageUri(null)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.fullscreenCloseText}>✕</Text>
+            </TouchableOpacity>
+
+            <ScrollView
+              style={styles.flex1}
+              contentContainerStyle={styles.fullscreenScrollContent}
+              maximumZoomScale={4}
+              minimumZoomScale={1}
+              bouncesZoom
+              centerContent
+              showsVerticalScrollIndicator={false}
+              showsHorizontalScrollIndicator={false}
+            >
+              {fullscreenImageUri && (
+                <Image
+                  source={{ uri: fullscreenImageUri }}
+                  style={styles.fullscreenImage}
+                  resizeMode="contain"
+                />
+              )}
+            </ScrollView>
+          </View>
         </Modal>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -874,12 +1056,15 @@ const handleOpenProfileFromHeader = () => {
 }
 
 const styles = StyleSheet.create({
+  flex1: {
+    flex: 1,
+  },
   safe: {
     flex: 1,
-    backgroundColor: "#05050a",
+    backgroundColor: "#06060e",
   },
   safeCrush: {
-    backgroundColor: "#08030c",
+    backgroundColor: "#0a0410",
   },
   header: {
     height: 64,
@@ -887,12 +1072,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#1f1f28",
-    backgroundColor: "#05050a",
+    borderBottomColor: "#1a1a24",
+    backgroundColor: "#08080f",
   },
   headerCrush: {
-    backgroundColor: "#12020f",
-    borderBottomColor: "#ff4d6d",
+    backgroundColor: "#10050e",
+    borderBottomColor: "#ff4d6d44",
   },
   backButton: {
     width: 40,
@@ -902,7 +1087,8 @@ const styles = StyleSheet.create({
   },
   backIcon: {
     color: "#fff",
-    fontSize: 22,
+    fontSize: 26,
+    fontWeight: "300",
   },
   headerCenterRow: {
     flex: 1,
@@ -911,18 +1097,22 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   headerAvatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: "#222",
+    borderWidth: 1.5,
+    borderColor: "#2a2a3a",
   },
   headerAvatarFallback: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: "#26263b",
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#1e1e30",
     alignItems: "center",
     justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: "#2a2a3a",
   },
   headerAvatarLetter: {
     color: "#fff",
@@ -935,13 +1125,13 @@ const styles = StyleSheet.create({
   headerTitleRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
     gap: 8,
   },
   headerTitle: {
     color: "#fff",
     fontSize: 16,
     fontWeight: "700",
+    flexShrink: 1,
   },
   headerCrushPill: {
     paddingHorizontal: 8,
@@ -949,8 +1139,21 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: "#ff4d6d22",
     color: "#ff7a9a",
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "600",
+    overflow: "hidden",
+  },
+  headerMenuButton: {
+    width: 36,
+    height: 36,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 18,
+  },
+  headerMenuIcon: {
+    color: "#aaa",
+    fontSize: 20,
+    fontWeight: "700",
   },
   presenceRow: {
     marginTop: 2,
@@ -958,10 +1161,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 4,
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    marginRight: 5,
   },
   statusDotOnline: {
     backgroundColor: "#32d74b",
@@ -970,100 +1173,109 @@ const styles = StyleSheet.create({
     backgroundColor: "#555",
   },
   presenceText: {
-    color: "#b0b0c0",
+    color: "#888",
     fontSize: 11,
   },
-  headerRightSpacer: {
-    width: 32,
+  typingInlineText: {
+    marginTop: 2,
+    color: "#32d74b",
+    fontSize: 11,
+    fontStyle: "italic",
   },
   loadingContainer: {
     flex: 1,
     justifyContent: "center",
+    alignItems: "center",
   },
   listContent: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexGrow: 1,
+    justifyContent: "flex-end",
   },
   messageRow: {
     flexDirection: "row",
-    marginVertical: 4,
+    marginVertical: 3,
   },
   messageBubbleWrapper: {
-    maxWidth: "80%",
+    maxWidth: "78%",
     position: "relative",
   },
   bubble: {
     maxWidth: "100%",
-    paddingHorizontal: 13,
-    paddingVertical: 9,
-    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 20,
     shadowColor: "#000",
-    shadowOpacity: 0.28,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
     elevation: 3,
   },
   bubbleMineFriend: {
     backgroundColor: (Colors as any).brandStart ?? "#6C63FF",
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    borderBottomLeftRadius: 18,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderBottomLeftRadius: 20,
     borderBottomRightRadius: 6,
   },
   bubbleMineCrush: {
     backgroundColor: "#ff4d6d",
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    borderBottomLeftRadius: 18,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderBottomLeftRadius: 20,
     borderBottomRightRadius: 6,
   },
   bubbleOther: {
-    backgroundColor: "#181820",
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    borderBottomRightRadius: 18,
+    backgroundColor: "#151520",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderBottomRightRadius: 20,
     borderBottomLeftRadius: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "#222233",
   },
   bubbleTextMine: {
     color: "#fff",
-    fontSize: 14,
+    fontSize: 14.5,
+    lineHeight: 20,
   },
   bubbleTextOther: {
-    color: "#f5f5f5",
-    fontSize: 14,
+    color: "#eee",
+    fontSize: 14.5,
+    lineHeight: 20,
+  },
+  timestampText: {
+    color: "rgba(255,255,255,0.4)",
+    fontSize: 10,
+    textAlign: "right",
+    marginTop: 4,
   },
   messageImage: {
     width: 220,
     height: 260,
-    borderRadius: 14,
+    borderRadius: 16,
     backgroundColor: "#111",
     marginBottom: 4,
   },
-  typingContainer: {
-    paddingHorizontal: 20,
-    paddingBottom: 4,
-  },
-  typingText: {
-    fontSize: 12,
-    color: "#aaa",
-  },
   inputBar: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-end",
     paddingHorizontal: 12,
     paddingTop: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#191922",
-    backgroundColor: "#05050a",
+    borderTopColor: "#1a1a24",
+    backgroundColor: "#08080f",
   },
   mediaButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 999,
-    backgroundColor: "#181820",
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#1a1a28",
     alignItems: "center",
     justifyContent: "center",
     marginRight: 6,
+    marginBottom: 1,
   },
   mediaIcon: {
     color: "#fff",
@@ -1075,23 +1287,23 @@ const styles = StyleSheet.create({
     minHeight: 40,
     maxHeight: 120,
     borderRadius: 22,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    backgroundColor: "#0b0b13",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: "#0d0d16",
     borderWidth: 1,
-    borderColor: "#232336",
+    borderColor: "#1e1e30",
     color: "#fff",
     fontSize: 14,
   },
   sendButton: {
     marginLeft: 8,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 999,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
     shadowColor: "#000",
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.25,
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 2 },
     elevation: 3,
@@ -1105,17 +1317,17 @@ const styles = StyleSheet.create({
   sendText: {
     color: "#fff",
     fontWeight: "700",
-    fontSize: 13,
+    fontSize: 18,
   },
   deletedBubble: {
     backgroundColor: "transparent",
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#444",
+    borderColor: "#333",
     shadowOpacity: 0,
     elevation: 0,
   },
   deletedText: {
-    color: "#888",
+    color: "#666",
     fontSize: 12,
     fontStyle: "italic",
   },
@@ -1125,35 +1337,36 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#222",
-    backgroundColor: "#101010",
+    borderTopColor: "#1a1a24",
+    backgroundColor: "#0c0c14",
   },
   replyBannerLeft: {
     flex: 1,
   },
   replyBannerLabel: {
-    color: "#aaa",
+    color: "#888",
     fontSize: 11,
     marginBottom: 2,
   },
   replyBannerText: {
-    color: "#fff",
+    color: "#ddd",
     fontSize: 13,
   },
   replyBannerClose: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: "#1a1a28",
   },
   replyBannerCloseText: {
     color: "#fff",
     fontSize: 16,
   },
   replyPreviewInBubble: {
-    paddingLeft: 6,
-    marginBottom: 4,
+    paddingLeft: 8,
+    marginBottom: 6,
   },
   replyPreviewMineBorder: {
     borderLeftWidth: 2,
@@ -1161,7 +1374,7 @@ const styles = StyleSheet.create({
   },
   replyPreviewOtherBorder: {
     borderLeftWidth: 2,
-    borderLeftColor: "rgba(255,255,255,0.35)",
+    borderLeftColor: "rgba(255,255,255,0.3)",
   },
   replyPreviewLabel: {
     color: "#ddd",
@@ -1169,7 +1382,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   replyPreviewText: {
-    color: "#ccc",
+    color: "#bbb",
     fontSize: 12,
   },
   reactionBadge: {
@@ -1178,9 +1391,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 12,
-    backgroundColor: "#15151f",
+    backgroundColor: "#12121e",
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#33384a",
+    borderColor: "#2a2a3a",
   },
   reactionBadgeRight: {
     right: 6,
@@ -1193,7 +1406,7 @@ const styles = StyleSheet.create({
   },
   menuOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.45)",
+    backgroundColor: "rgba(0,0,0,0.55)",
     justifyContent: "flex-end",
     paddingBottom: 24,
     paddingHorizontal: 12,
@@ -1204,10 +1417,10 @@ const styles = StyleSheet.create({
     paddingBottom: 0,
   },
   menuContainer: {
-    borderRadius: 20,
-    backgroundColor: "#151515",
-    paddingVertical: 10,
-    paddingHorizontal: 10,
+    borderRadius: 22,
+    backgroundColor: "#141420",
+    paddingVertical: 12,
+    paddingHorizontal: 12,
     width: "100%",
   },
   menuContainerWeb: {
@@ -1218,29 +1431,60 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-around",
     paddingHorizontal: 8,
-    paddingBottom: 6,
+    paddingBottom: 8,
   },
   reactionButton: {
-    paddingHorizontal: 4,
-    paddingVertical: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
   },
   reactionEmoji: {
-    fontSize: 24,
+    fontSize: 28,
   },
   menuDivider: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: "#333",
+    backgroundColor: "#2a2a3a",
     marginVertical: 6,
   },
   menuItem: {
-    paddingVertical: 10,
-    paddingHorizontal: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
   },
   menuItemText: {
-    color: "#fff",
+    color: "#eee",
     fontSize: 15,
   },
   menuItemDestructive: {
     color: "#ff4d6d",
+  },
+  // ── Fullscreen image viewer ──
+  fullscreenOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.95)",
+  },
+  fullscreenCloseBtn: {
+    position: "absolute",
+    top: 50,
+    right: 20,
+    zIndex: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  fullscreenCloseText: {
+    color: "#fff",
+    fontSize: 20,
+    fontWeight: "600",
+  },
+  fullscreenScrollContent: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  fullscreenImage: {
+    width: SCREEN_W,
+    height: SCREEN_H * 0.8,
   },
 });

@@ -1,14 +1,12 @@
-import {
-  Conversation,
-  ConversationType,
-  fetchConversationsByType,
-} from "@/lib/conversations";
+// app/(tabs)/conversations/index.tsx
 import { supabase } from "@/lib/supabase";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
+  Animated,
   BackHandler,
   FlatList,
   Image,
@@ -19,38 +17,53 @@ import {
   View,
 } from "react-native";
 
-type ProfileSummary = {
+type RpcConversation = {
   id: string;
-  username: string | null;
-  full_name: string | null;
-  avatar_url: string | null;
-};
-
-type ConversationWithProfile = Conversation & {
-  otherProfile?: ProfileSummary;
+  conversation_type: string | null;
+  last_message: string | null;
+  last_message_at: string | null;
+  created_at: string | null;
+  other_user_id: string | null;
+  other_user_username: string | null;
+  other_user_full_name: string | null;
+  other_user_avatar: string | null;
 };
 
 export default function ConversationsScreen() {
   const router = useRouter();
 
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<ConversationType>("friend");
+  const [activeTab, setActiveTab] = useState<"friend" | "crush">("friend");
 
-  const [friendConversations, setFriendConversations] = useState<
-    ConversationWithProfile[]
-  >([]);
-  const [crushConversations, setCrushConversations] = useState<
-    ConversationWithProfile[]
-  >([]);
+  const [friendConversations, setFriendConversations] = useState<RpcConversation[]>([]);
+  const [crushConversations, setCrushConversations] = useState<RpcConversation[]>([]);
 
   const [unreadMap, setUnreadMap] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
 
   const [search, setSearch] = useState("");
 
+  // ── Animated badge scale ──
+  const badgeScale = useRef(new Animated.Value(1)).current;
+
+  const animateBadge = useCallback(() => {
+    Animated.sequence([
+      Animated.timing(badgeScale, {
+        toValue: 1.3,
+        duration: 150,
+        useNativeDriver: true,
+      }),
+      Animated.timing(badgeScale, {
+        toValue: 1,
+        duration: 150,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [badgeScale]);
+
   const refreshUnreadCountsForLists = async (
-    friendsList?: ConversationWithProfile[],
-    crushList?: ConversationWithProfile[]
+    friendsList?: RpcConversation[],
+    crushList?: RpcConversation[]
   ) => {
     const baseFriends = friendsList ?? friendConversations;
     const baseCrushes = crushList ?? crushConversations;
@@ -69,9 +82,14 @@ export default function ConversationsScreen() {
     if (error || !data) return;
 
     const map: Record<string, number> = {};
-    (data as { conversation_id: string; unread: number }[]).forEach((row) => {
+    (data as { conversation_id: string; unread: number }[]).forEach((row: any) => {
       map[row.conversation_id] = row.unread;
     });
+
+    const prevTotal = Object.values(unreadMap).reduce((s, v) => s + v, 0);
+    const newTotal = Object.values(map).reduce((s, v) => s + v, 0);
+    if (newTotal > prevTotal) animateBadge();
+
     setUnreadMap(map);
   };
 
@@ -86,11 +104,7 @@ export default function ConversationsScreen() {
       .update({ is_read: true })
       .eq("conversation_id", conversationId);
 
-    if (error) {
-      await refreshUnreadCountsForLists();
-    } else {
-      await refreshUnreadCountsForLists();
-    }
+    await refreshUnreadCountsForLists();
   };
 
   useEffect(() => {
@@ -102,78 +116,40 @@ export default function ConversationsScreen() {
     loadUser();
   }, []);
 
-  useEffect(() => {
+  const loadConversations = useCallback(async () => {
     if (!currentUserId) return;
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.rpc("get_user_conversations_full");
 
-    const load = async () => {
-      setLoading(true);
-      try {
-        const [friends, crushes] = await Promise.all([
-          fetchConversationsByType({
-            currentUserId,
-            conversationType: "friend",
-          }),
-          fetchConversationsByType({
-            currentUserId,
-            conversationType: "crush",
-          }),
-        ]);
-
-        const allOtherIds = Array.from(
-          new Set(
-            [...friends, ...crushes].map((c) =>
-              c.user1 === currentUserId ? c.user2 : c.user1
-            )
-          )
-        ).filter(Boolean) as string[];
-
-        let profilesMap: Record<string, ProfileSummary> = {};
-
-        if (allOtherIds.length > 0) {
-          const { data: profiles, error } = await supabase
-            .from("profiles")
-            .select("id, username, full_name, avatar_url")
-            .in("id", allOtherIds);
-
-          if (!error && profiles) {
-            profilesMap = (profiles as ProfileSummary[]).reduce(
-              (acc: Record<string, ProfileSummary>, p: ProfileSummary) => {
-                acc[p.id] = p;
-                return acc;
-              },
-              {} as Record<string, ProfileSummary>
-            );
-          }
-        }
-
-        const mapWithProfile = (
-          list: Conversation[]
-        ): ConversationWithProfile[] =>
-          list.map((c) => {
-            const otherId = c.user1 === currentUserId ? c.user2 : c.user1;
-            return {
-              ...c,
-              otherProfile: profilesMap[otherId],
-            };
-          });
-
-        const friendsWithProfile = mapWithProfile(friends);
-        const crushesWithProfile = mapWithProfile(crushes);
-
-        setFriendConversations(friendsWithProfile);
-        setCrushConversations(crushesWithProfile);
-
-        await refreshUnreadCountsForLists(
-          friendsWithProfile,
-          crushesWithProfile
-        );
-      } finally {
-        setLoading(false);
+      if (error || !data) {
+        console.error("RPC error:", error);
+        return;
       }
-    };
 
-    load();
+      const all = data as RpcConversation[];
+      const friends = all.filter((c) => c.conversation_type === "friend");
+      const crushes = all.filter((c) => c.conversation_type === "crush");
+
+      setFriendConversations(friends);
+      setCrushConversations(crushes);
+
+      await refreshUnreadCountsForLists(friends, crushes);
+    } finally {
+      setLoading(false);
+    }
   }, [currentUserId]);
+
+  useEffect(() => {
+    loadConversations();
+  }, [loadConversations]);
+
+  // ── Refresh on screen focus ──
+  useFocusEffect(
+    useCallback(() => {
+      loadConversations();
+    }, [loadConversations])
+  );
 
   useEffect(() => {
     const channel = supabase
@@ -217,6 +193,45 @@ export default function ConversationsScreen() {
     }, [router])
   );
 
+  // ── Delete conversation ──
+  const handleDeleteConversation = useCallback(
+    async (conversationId: string) => {
+      if (!currentUserId) return;
+      Alert.alert(
+        "Excluir conversa",
+        "Tem certeza? A conversa será removida da sua lista.",
+        [
+          { text: "Cancelar", style: "cancel" },
+          {
+            text: "Excluir",
+            style: "destructive",
+            onPress: async () => {
+              await supabase
+                .from("conversation_deletions")
+                .upsert(
+                  {
+                    conversation_id: conversationId,
+                    user_id: currentUserId,
+                    deleted_at: new Date().toISOString(),
+                  },
+                  { onConflict: "conversation_id,user_id" }
+                );
+
+              // Remove from local state immediately
+              setFriendConversations((prev) =>
+                prev.filter((c) => c.id !== conversationId)
+              );
+              setCrushConversations((prev) =>
+                prev.filter((c) => c.id !== conversationId)
+              );
+            },
+          },
+        ]
+      );
+    },
+    [currentUserId]
+  );
+
   const data =
     activeTab === "friend" ? friendConversations : crushConversations;
 
@@ -224,8 +239,8 @@ export default function ConversationsScreen() {
   const filteredData = normalizedSearch
     ? data.filter((item) => {
         const name =
-          item.otherProfile?.username ||
-          item.otherProfile?.full_name ||
+          item.other_user_full_name ||
+          item.other_user_username ||
           "Usuário";
         const preview = item.last_message || "";
         const n = name.toLowerCase();
@@ -251,52 +266,99 @@ export default function ConversationsScreen() {
     });
   };
 
-  const renderItem = ({ item }: { item: ConversationWithProfile }) => {
+  // ── Format relative time ──
+  function formatRelativeTime(dateStr?: string | null) {
+    if (!dateStr) return "";
+    try {
+      const d = new Date(dateStr);
+      const now = new Date();
+      const diffMs = now.getTime() - d.getTime();
+      const diffMin = Math.floor(diffMs / 60000);
+      if (diffMin < 1) return "agora";
+      if (diffMin < 60) return `${diffMin}m`;
+      const diffH = Math.floor(diffMin / 60);
+      if (diffH < 24) return `${diffH}h`;
+      const diffD = Math.floor(diffH / 24);
+      if (diffD < 7) return `${diffD}d`;
+      return d.toLocaleDateString([], { day: "2-digit", month: "2-digit" });
+    } catch {
+      return "";
+    }
+  }
+
+  const renderItem = ({ item }: { item: RpcConversation }) => {
     const name =
-      item.otherProfile?.username ||
-      item.otherProfile?.full_name ||
+      item.other_user_full_name?.trim() ||
+      item.other_user_username?.trim() ||
       "Usuário";
     const preview = item.last_message || "Comece a conversa";
     const unreadCount = unreadMap[item.id] || 0;
+    const timeStr = formatRelativeTime(item.last_message_at);
 
     return (
       <TouchableOpacity
         style={styles.row}
         onPress={() => handleOpenConversation(item.id)}
+        onLongPress={() => handleDeleteConversation(item.id)}
+        delayLongPress={500}
+        activeOpacity={0.7}
       >
-        {item.otherProfile?.avatar_url ? (
-          <Image
-            source={{ uri: item.otherProfile.avatar_url }}
-            style={styles.avatarImage}
-          />
-        ) : (
-          <View style={styles.avatarCircle}>
-            <Text style={styles.avatarLetter}>
-              {name.substring(0, 1).toUpperCase()}
-            </Text>
-          </View>
-        )}
+        {/* Avatar */}
+        <View style={styles.avatarContainer}>
+          {item.other_user_avatar ? (
+            <Image
+              source={{ uri: item.other_user_avatar }}
+              style={styles.avatarImage}
+            />
+          ) : (
+            <View style={styles.avatarCircle}>
+              <Text style={styles.avatarLetter}>
+                {name.substring(0, 1).toUpperCase()}
+              </Text>
+            </View>
+          )}
+          {item.conversation_type === "crush" && (
+            <View style={styles.crushIndicator}>
+              <Text style={{ fontSize: 10 }}>💘</Text>
+            </View>
+          )}
+        </View>
 
+        {/* Text */}
         <View style={styles.rowText}>
-          <Text style={styles.rowName}>{name}</Text>
-          <Text style={styles.rowPreview} numberOfLines={1}>
+          <View style={styles.rowTopLine}>
+            <Text
+              style={[
+                styles.rowName,
+                unreadCount > 0 && styles.rowNameUnread,
+              ]}
+              numberOfLines={1}
+            >
+              {name}
+            </Text>
+            <Text style={styles.rowTime}>{timeStr}</Text>
+          </View>
+          <Text
+            style={[
+              styles.rowPreview,
+              unreadCount > 0 && styles.rowPreviewUnread,
+            ]}
+            numberOfLines={1}
+          >
             {preview}
           </Text>
         </View>
 
-        <View style={styles.badgeWrapper}>
-          {unreadCount > 0 && (
-            <View style={styles.unreadBadge}>
-              <Text style={styles.unreadBadgeText}>
-                {unreadCount > 9 ? "9+" : unreadCount}
-              </Text>
-            </View>
-          )}
-
-          {item.conversation_type === "crush" && (
-            <Text style={styles.crushBadge}>💘</Text>
-          )}
-        </View>
+        {/* Badge */}
+        {unreadCount > 0 && (
+          <Animated.View
+            style={[styles.unreadBadge, { transform: [{ scale: badgeScale }] }]}
+          >
+            <Text style={styles.unreadBadgeText}>
+              {unreadCount > 99 ? "99+" : unreadCount}
+            </Text>
+          </Animated.View>
+        )}
       </TouchableOpacity>
     );
   };
@@ -304,13 +366,14 @@ export default function ConversationsScreen() {
   if (!currentUserId) {
     return (
       <View style={styles.container}>
-        <ActivityIndicator />
+        <ActivityIndicator color="#888" />
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
+      {/* ── Tabs ── */}
       <View style={styles.tabs}>
         <TouchableOpacity
           style={[
@@ -318,6 +381,7 @@ export default function ConversationsScreen() {
             activeTab === "friend" && styles.tabButtonActive,
           ]}
           onPress={() => setActiveTab("friend")}
+          activeOpacity={0.8}
         >
           <View style={styles.tabLabelWrapper}>
             <Text
@@ -329,11 +393,17 @@ export default function ConversationsScreen() {
               Mensagens
             </Text>
             {friendUnreadTotal > 0 && (
-              <View style={styles.tabBadge}>
+              <Animated.View
+                style={[
+                  styles.tabBadge,
+                  activeTab !== "friend" && styles.tabBadgeInactive,
+                  { transform: [{ scale: badgeScale }] },
+                ]}
+              >
                 <Text style={styles.tabBadgeText}>
                   {friendUnreadTotal > 9 ? "9+" : friendUnreadTotal}
                 </Text>
-              </View>
+              </Animated.View>
             )}
           </View>
         </TouchableOpacity>
@@ -344,6 +414,7 @@ export default function ConversationsScreen() {
             activeTab === "crush" && styles.tabButtonActive,
           ]}
           onPress={() => setActiveTab("crush")}
+          activeOpacity={0.8}
         >
           <View style={styles.tabLabelWrapper}>
             <Text
@@ -352,25 +423,31 @@ export default function ConversationsScreen() {
                 activeTab === "crush" && styles.tabTextActive,
               ]}
             >
-              Crushes
+              Crushes 💘
             </Text>
             {crushUnreadTotal > 0 && (
-              <View style={styles.tabBadge}>
+              <Animated.View
+                style={[
+                  styles.tabBadge,
+                  activeTab !== "crush" && styles.tabBadgeCrush,
+                  { transform: [{ scale: badgeScale }] },
+                ]}
+              >
                 <Text style={styles.tabBadgeText}>
                   {crushUnreadTotal > 9 ? "9+" : crushUnreadTotal}
                 </Text>
-              </View>
+              </Animated.View>
             )}
           </View>
         </TouchableOpacity>
       </View>
 
-
+      {/* ── Search ── */}
       <View style={styles.searchContainer}>
         <TextInput
           style={styles.searchInput}
           placeholder="Buscar conversas..."
-          placeholderTextColor="#777"
+          placeholderTextColor="#555"
           value={search}
           onChangeText={setSearch}
         />
@@ -378,13 +455,19 @@ export default function ConversationsScreen() {
 
       {loading ? (
         <View style={styles.loadingArea}>
-          <ActivityIndicator />
+          <ActivityIndicator color="#888" />
         </View>
       ) : filteredData.length === 0 ? (
         <View style={styles.emptyArea}>
+          <Text style={styles.emptyEmoji}>
+            {activeTab === "friend" ? "💬" : "💘"}
+          </Text>
           <Text style={styles.emptyText}>
-            Nenhuma conversa ainda em{" "}
-            {activeTab === "friend" ? "Mensagens" : "Crushes"}.
+            Nenhuma conversa em{" "}
+            {activeTab === "friend" ? "Mensagens" : "Crushes"}
+          </Text>
+          <Text style={styles.emptySubtext}>
+            Suas conversas aparecerão aqui
           </Text>
         </View>
       ) : (
@@ -402,26 +485,32 @@ export default function ConversationsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#02010A",
+    backgroundColor: "#06060e",
   },
   tabs: {
     flexDirection: "row",
     paddingHorizontal: 16,
     paddingTop: 16,
-    paddingBottom: 8,
-    gap: 8,
+    paddingBottom: 10,
+    gap: 10,
   },
   tabButton: {
     flex: 1,
     paddingVertical: 10,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: "#333",
+    borderColor: "#1e1e30",
     alignItems: "center",
+    backgroundColor: "#0c0c16",
   },
   tabButtonActive: {
     backgroundColor: "#FF4D6D",
     borderColor: "#FF4D6D",
+    shadowColor: "#FF4D6D",
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
   },
   tabLabelWrapper: {
     flexDirection: "row",
@@ -429,9 +518,9 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   tabText: {
-    color: "#ccc",
+    color: "#888",
     fontSize: 14,
-    fontWeight: "500",
+    fontWeight: "600",
   },
   tabTextActive: {
     color: "#fff",
@@ -441,9 +530,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 999,
-    backgroundColor: "#FF4D6D",
+    backgroundColor: "rgba(255,255,255,0.25)",
     alignItems: "center",
     justifyContent: "center",
+  },
+  tabBadgeInactive: {
+    backgroundColor: "#FF4D6D",
+  },
+  tabBadgeCrush: {
+    backgroundColor: "#FF4D6D",
   },
   tabBadgeText: {
     color: "#fff",
@@ -461,91 +556,136 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 24,
   },
+  emptyEmoji: {
+    fontSize: 48,
+    marginBottom: 12,
+  },
   emptyText: {
-    color: "#888",
+    color: "#777",
     textAlign: "center",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  emptySubtext: {
+    color: "#555",
+    textAlign: "center",
+    fontSize: 13,
+    marginTop: 4,
   },
   listContent: {
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 4,
   },
   searchContainer: {
     paddingHorizontal: 16,
     paddingBottom: 8,
   },
   searchInput: {
-    backgroundColor: "#0b0b13",
+    backgroundColor: "#0c0c16",
     borderRadius: 999,
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 10,
     borderWidth: 1,
-    borderColor: "#232336",
+    borderColor: "#1e1e30",
     color: "#fff",
     fontSize: 14,
   },
   row: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#222",
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    marginVertical: 2,
+  },
+  avatarContainer: {
+    position: "relative",
+    marginRight: 12,
   },
   avatarImage: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    marginRight: 12,
-    backgroundColor: "#333",
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: "#1a1a28",
+    borderWidth: 1.5,
+    borderColor: "#2a2a3a",
   },
   avatarCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#333",
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: "#1e1e30",
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 12,
+    borderWidth: 1.5,
+    borderColor: "#2a2a3a",
   },
   avatarLetter: {
     color: "#fff",
-    fontWeight: "600",
-    fontSize: 18,
+    fontWeight: "700",
+    fontSize: 20,
+  },
+  crushIndicator: {
+    position: "absolute",
+    bottom: -2,
+    right: -2,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#06060e",
+    alignItems: "center",
+    justifyContent: "center",
   },
   rowText: {
     flex: 1,
   },
+  rowTopLine: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 3,
+  },
   rowName: {
-    color: "#fff",
+    color: "#ddd",
     fontSize: 15,
     fontWeight: "600",
-    marginBottom: 2,
+    flexShrink: 1,
+  },
+  rowNameUnread: {
+    color: "#fff",
+    fontWeight: "700",
+  },
+  rowTime: {
+    color: "#555",
+    fontSize: 11,
+    marginLeft: 8,
   },
   rowPreview: {
-    color: "#aaa",
+    color: "#666",
     fontSize: 13,
   },
-  badgeWrapper: {
-    marginLeft: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
+  rowPreviewUnread: {
+    color: "#aaa",
+    fontWeight: "500",
   },
   unreadBadge: {
-    minWidth: 20,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 999,
+    minWidth: 22,
+    height: 22,
+    paddingHorizontal: 7,
+    borderRadius: 11,
     backgroundColor: "#FF4D6D",
     alignItems: "center",
     justifyContent: "center",
+    marginLeft: 10,
+    shadowColor: "#FF4D6D",
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 3,
   },
   unreadBadgeText: {
     color: "#fff",
     fontSize: 11,
     fontWeight: "700",
-  },
-  crushBadge: {
-    fontSize: 18,
   },
 });
