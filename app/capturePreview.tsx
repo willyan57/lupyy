@@ -500,30 +500,9 @@ export default function CapturePreview() {
   }, [effectiveUri, mediaType, hasNormalizedDimensions]);
 
   const previewMediaStyle = useMemo(() => {
-    const boundsWidth = width;
-    const boundsHeight = previewHeight;
-    const mediaWidth = mediaDimensions?.width ?? boundsWidth;
-    const mediaHeight = mediaDimensions?.height ?? boundsHeight;
-
-    if (mediaWidth <= 0 || mediaHeight <= 0) {
-      return { width: boundsWidth, height: boundsHeight };
-    }
-
-    const mediaAspect = mediaWidth / mediaHeight;
-    const boundsAspect = boundsWidth / boundsHeight;
-
-    if (mediaAspect > boundsAspect) {
-      return {
-        width: boundsWidth,
-        height: boundsWidth / mediaAspect,
-      };
-    }
-
-    return {
-      width: boundsHeight * mediaAspect,
-      height: boundsHeight,
-    };
-  }, [mediaDimensions]);
+    // Cover mode: fill the entire bounds (like gallery photos)
+    return { width, height: previewHeight };
+  }, []);
 
   // BeautifyParams para o shader — ATUALIZADO com campos avancados
   const beautifyParams = useMemo<ExtendedBeautifyParams>(() => {
@@ -1421,7 +1400,7 @@ export default function CapturePreview() {
                 ? [styles.preview, previewMediaStyle, { transform: [{ scaleX: -1 }] }]
                 : [styles.preview, previewMediaStyle]) as any
             }
-            resizeMode="contain"
+            resizeMode="cover"
             onLoadEnd={() => setMediaLoaded(true)}
           />
         ) : (
@@ -2195,10 +2174,11 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "flex-start",
+    overflow: "hidden",
   },
   preview: {
-    maxWidth: width,
-    maxHeight: previewHeight,
+    width: width,
+    height: previewHeight,
   },
   videoPreview: {
     width,

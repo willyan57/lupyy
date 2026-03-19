@@ -1,10 +1,11 @@
 // app/capture.tsx — Premium Instagram-style Camera
+import { useFocusEffect } from "@react-navigation/native";
 import { CameraType, CameraView, useCameraPermissions } from "expo-camera";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import * as MediaLibrary from "expo-media-library";
 import { useRouter } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -25,14 +26,6 @@ const isWeb = Platform.OS === "web";
 
 type CaptureMode = "post" | "story" | "reel";
 type FilterId = "none" | "warm" | "cool" | "night" | "pink" | "gold";
-type AspectRatio = "4:5" | "1:1" | "9:16" | "16:9";
-
-const ASPECT_RATIOS: { key: AspectRatio; label: string; ratio: number }[] = [
-  { key: "4:5", label: "4:5", ratio: 4 / 5 },
-  { key: "1:1", label: "1:1", ratio: 1 },
-  { key: "9:16", label: "9:16", ratio: 9 / 16 },
-  { key: "16:9", label: "16:9", ratio: 16 / 9 },
-];
 
 const GALLERY_THUMB = (W - 4) / 4; // 4 columns, 1px gap
 
@@ -56,16 +49,10 @@ export default function CaptureScreen() {
   const [showGrid, setShowGrid] = useState(false);
   const [timerSeconds, setTimerSeconds] = useState(0);
   const [timerCountdown, setTimerCountdown] = useState<number | null>(null);
-  const [aspectRatio, setAspectRatio] = useState<AspectRatio>("9:16");
-  const [showAspectMenu, setShowAspectMenu] = useState(false);
-  const [exposure, setExposure] = useState(0);
-  const [showExposure, setShowExposure] = useState(false);
-  const exposureTrackRef = useRef<any>(null);
-  const [exposureTrackY, setExposureTrackY] = useState(0);
-  const [exposureTrackH, setExposureTrackH] = useState(0);
 
-  // Right tools expand/collapse
-  const [toolsExpanded, setToolsExpanded] = useState(false);
+  // Camera ready state — prevents capture when camera isn't ready
+  const [cameraReady, setCameraReady] = useState(false);
+  const [cameraKey, setCameraKey] = useState(0); // force remount on focus
 
   // Gallery state (Post mode bottom gallery)
   const [galleryAssets, setGalleryAssets] = useState<MediaLibrary.Asset[]>([]);
@@ -83,6 +70,14 @@ export default function CaptureScreen() {
   const shotScale = useRef(new Animated.Value(1)).current;
 
   const cameraRef = useRef<any>(null);
+
+  // Re-mount camera when screen gains focus (fixes black screen on Android back)
+  useFocusEffect(
+    useCallback(() => {
+      setCameraReady(false);
+      setCameraKey((k) => k + 1);
+    }, [])
+  );
 
   // ── Permissions ──
   useEffect(() => {
@@ -211,7 +206,7 @@ export default function CaptureScreen() {
   };
 
   const executeCapture = async () => {
-    if (!cameraRef.current || loadingCapture) return;
+    if (!cameraRef.current || loadingCapture || !cameraReady) return;
     try {
       setLoadingCapture(true);
       const photo: any = await Promise.race([
@@ -259,7 +254,7 @@ export default function CaptureScreen() {
             mode,
             filter,
             facing,
-            aspectRatio,
+            aspectRatio: "9:16",
             width: previewWidth > 0 ? String(previewWidth) : undefined,
             height: previewHeight > 0 ? String(previewHeight) : undefined,
             nonce: String(Date.now()),
@@ -313,7 +308,7 @@ export default function CaptureScreen() {
   };
 
   const handleShotPress = () => {
-    if (!cameraRef.current || loadingCapture) return;
+    if (!cameraRef.current || loadingCapture || !cameraReady) return;
     if (mode === "reel") {
       if (recording) { stopRecording(); return; }
       startRecording(60);
@@ -356,42 +351,26 @@ export default function CaptureScreen() {
     return `${m < 10 ? "0" + m : m}:${s < 10 ? "0" + s : s}`;
   };
 
-  const handleExposureGesture = (evt: any) => {
-    if (!exposureTrackH) return;
-    const pageY = evt?.nativeEvent?.pageY ?? evt?.nativeEvent?.changedTouches?.[0]?.pageY;
-    if (typeof pageY !== "number") return;
-    const relativeY = pageY - exposureTrackY;
-    const ratio = 1.0 - relativeY / exposureTrackH;
-    const clamped = Math.max(-1, Math.min(1, (ratio - 0.5) * 2));
-    setExposure(Math.round(clamped * 100) / 100);
-  };
-
   // ── Computed ──
   const isPostMode = mode === "post";
   const isVideoMode = mode === "reel" || (mode === "story" && recording);
   const showGallery = isPostMode && galleryPermission && !isWeb;
 
-  // Aspect ratio applied to camera view
-  const selectedAR = ASPECT_RATIOS.find((ar) => ar.key === aspectRatio) ?? ASPECT_RATIOS[2]; // default 9:16
+  // Always 9:16 — full screen
   const cameraHeight = showGallery
     ? (galleryExpanded ? H * 0.35 : H * 0.55)
-    : Math.min(H, W / selectedAR.ratio);
-  const cameraWidth = showGallery ? W : Math.min(W, cameraHeight * selectedAR.ratio);
+    : H;
+  const cameraWidth = W;
 
   const flipRotation = flipAnim.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "90deg"] });
 
-  // Primary right tools (always visible)
-  const primaryTools = [
+  // All tools always visible (no + button)
+  const rightTools = [
     { key: "flash", icon: flashOn ? "⚡" : "⚡︎", label: flashOn ? "On" : "Off", onPress: toggleFlash, active: flashOn },
-  ];
-
-  // Secondary tools (expand with +)
-  const secondaryTools = [
     { key: "timer", icon: "⏱", label: timerSeconds === 0 ? "Timer" : `${timerSeconds}s`, onPress: cycleTimer, active: timerSeconds > 0 },
     { key: "grid", icon: "⊞", label: "Grid", onPress: toggleGrid, active: showGrid },
-    { key: "aspect", icon: "⬒", label: aspectRatio, onPress: () => setShowAspectMenu((p) => !p) },
-    { key: "exposure", icon: "☀", label: "Exposição", onPress: () => setShowExposure((p) => !p) },
   ];
+
 
   // ── Render ──
   return (
@@ -409,11 +388,13 @@ export default function CaptureScreen() {
         ]}
       >
         <CameraView
+          key={`cam-${cameraKey}`}
           ref={(ref: any) => { cameraRef.current = ref; }}
           style={StyleSheet.absoluteFill}
           facing={facing}
           enableTorch={flashOn && facing === "back"}
           mode={(mode as string) === "reel" || isVideoMode ? "video" : "picture"}
+          onCameraReady={() => setCameraReady(true)}
         />
       </Animated.View>
 
@@ -481,10 +462,10 @@ export default function CaptureScreen() {
           </TouchableOpacity>
         )}
       </View>
-      {/* ── Right side tools ── */}
+      {/* ── Right side tools — always visible, no + button ── */}
       {!isPostMode && (
         <View style={styles.rightTools}>
-          {primaryTools.map((t) => (
+          {rightTools.map((t) => (
             <TouchableOpacity key={t.key} onPress={t.onPress} activeOpacity={0.7}>
               <View style={[styles.toolCircle, t.active && styles.toolCircleActive]}>
                 <Text style={styles.toolIcon}>{t.icon}</Text>
@@ -492,67 +473,6 @@ export default function CaptureScreen() {
               <Text style={styles.toolLabel}>{t.label}</Text>
             </TouchableOpacity>
           ))}
-
-          {toolsExpanded && secondaryTools.map((t) => (
-            <TouchableOpacity key={t.key} onPress={t.onPress} activeOpacity={0.7}>
-              <View style={[styles.toolCircle, t.active && styles.toolCircleActive]}>
-                <Text style={styles.toolIcon}>{t.icon}</Text>
-              </View>
-              <Text style={styles.toolLabel}>{t.label}</Text>
-            </TouchableOpacity>
-          ))}
-
-          {/* Expand/Collapse "+" button */}
-          <TouchableOpacity onPress={() => setToolsExpanded((p) => !p)} activeOpacity={0.7}>
-            <View style={styles.toolCircle}>
-              <Text style={[styles.toolIcon, { fontSize: 22 }]}>
-                {toolsExpanded ? "−" : "+"}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* Aspect ratio popup */}
-      {showAspectMenu && (
-        <View style={styles.aspectMenu}>
-          {ASPECT_RATIOS.map((ar) => (
-            <TouchableOpacity
-              key={ar.key}
-              onPress={() => { setAspectRatio(ar.key); setShowAspectMenu(false); }}
-              style={[styles.aspectChip, aspectRatio === ar.key && styles.aspectChipActive]}
-            >
-              <Text style={[styles.aspectChipText, aspectRatio === ar.key && styles.aspectChipTextActive]}>
-                {ar.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
-
-      {/* Exposure slider */}
-      {showExposure && (
-        <View style={styles.exposureWrap}>
-          <Text style={styles.exposureLabel}>+</Text>
-          <View
-            style={styles.exposureTrack}
-            ref={exposureTrackRef}
-            onLayout={() => {
-              exposureTrackRef.current?.measureInWindow((_x: number, y: number, _w: number, h: number) => {
-                setExposureTrackY(y);
-                setExposureTrackH(h);
-              });
-            }}
-            onStartShouldSetResponder={() => true}
-            onMoveShouldSetResponder={() => true}
-            onResponderGrant={handleExposureGesture}
-            onResponderMove={handleExposureGesture}
-          >
-            <View style={[styles.exposureThumb, { top: `${(1.0 - (exposure + 1) / 2) * 100}%` }]} />
-            <View style={styles.exposureCenter} />
-          </View>
-          <Text style={styles.exposureLabel}>−</Text>
-          <Text style={styles.exposureValue}>{exposure > 0 ? "+" : ""}{exposure.toFixed(1)}</Text>
         </View>
       )}
 
@@ -774,21 +694,6 @@ const styles = StyleSheet.create({
   // Countdown
   countdownOverlay: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", zIndex: 20 },
   countdownText: { color: "#fff", fontSize: 120, fontWeight: "900", textShadowColor: "rgba(0,0,0,0.5)", textShadowOffset: { width: 0, height: 4 }, textShadowRadius: 20 },
-
-  // Aspect menu
-  aspectMenu: { position: "absolute", right: 68, top: H * 0.28, backgroundColor: "rgba(0,0,0,0.85)", borderRadius: 14, padding: 6, gap: 2, zIndex: 15 },
-  aspectChip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10 },
-  aspectChipActive: { backgroundColor: "rgba(255,51,85,0.25)" },
-  aspectChipText: { color: "rgba(255,255,255,0.6)", fontSize: 14, fontWeight: "700" },
-  aspectChipTextActive: { color: "#fff" },
-
-  // Exposure
-  exposureWrap: { position: "absolute", right: 68, top: H * 0.2, height: H * 0.28, alignItems: "center", gap: 4, zIndex: 15 },
-  exposureTrack: { flex: 1, width: 3, borderRadius: 99, backgroundColor: "rgba(255,255,255,0.2)", position: "relative" },
-  exposureThumb: { position: "absolute", left: -10, width: 22, height: 22, borderRadius: 99, backgroundColor: "#fff", shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 4, elevation: 4, transform: [{ translateY: -11 }] },
-  exposureCenter: { position: "absolute", top: "50%", left: -3, width: 9, height: 2, backgroundColor: "rgba(255,255,255,0.4)" },
-  exposureLabel: { color: "rgba(255,255,255,0.6)", fontSize: 14, fontWeight: "700" },
-  exposureValue: { color: "#fff", fontSize: 11, fontWeight: "700", marginTop: 2 },
 
   // ── Bottom: Story/Reel mode ──
   bottomStory: { position: "absolute", left: 0, right: 0, bottom: 0, paddingBottom: 24 },
