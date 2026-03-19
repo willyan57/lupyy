@@ -14,8 +14,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { StyleProp, ViewStyle } from "react-native";
 import {
   ActivityIndicator,
-  Alert,
-  Dimensions,
+  Alert, Animated, Dimensions,
   FlatList,
   Modal,
   PanResponder,
@@ -29,7 +28,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
 
 import CommentsSheet from "@/components/CommentsSheet";
@@ -218,6 +217,8 @@ const router = useRouter();
   const [draftBio, setDraftBio] = useState<string>("");
   const [draftRelationshipStatus, setDraftRelationshipStatus] = useState<RelationshipStatus | null>(null);
   const [draftGender, setDraftGender] = useState<string>("");
+  const [cooldownWarning, setCooldownWarning] = useState<string | null>(null);
+  const shakeAnim = useRef(new Animated.Value(0)).current;
 
   const [editing, setEditing] = useState(false);
   const [settingsVisible, setSettingsVisible] = useState(false);
@@ -269,6 +270,42 @@ const router = useRouter();
   const [relationshipStatusChangedAt, setRelationshipStatusChangedAt] =
     useState<string | null>(null);
   const [gender, setGender] = useState<string>("");
+
+  const getCooldownTimeLeft = useCallback((): string | null => {
+    if (!relationshipStatusChangedAt) return null;
+    const changedDate = new Date(relationshipStatusChangedAt).getTime();
+    const now = Date.now();
+    const hoursSince = (now - changedDate) / (1000 * 60 * 60);
+    if (hoursSince >= 24) return null;
+    const hoursLeft = Math.ceil(24 - hoursSince);
+    const minutesLeft = Math.ceil((24 - hoursSince) * 60);
+    return hoursLeft >= 1
+      ? `${hoursLeft}h`
+      : `${minutesLeft} minuto${minutesLeft !== 1 ? "s" : ""}`;
+  }, [relationshipStatusChangedAt]);
+
+  const triggerShake = useCallback(() => {
+    shakeAnim.setValue(0);
+    Animated.sequence([
+      Animated.timing(shakeAnim, { toValue: 10, duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: -10, duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: 8, duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: -8, duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: 0, duration: 50, useNativeDriver: true }),
+    ]).start();
+  }, [shakeAnim]);
+
+  const handleRelationshipPillPress = useCallback((value: RelationshipStatus) => {
+    if (value === draftRelationshipStatus) return;
+    const timeLeft = getCooldownTimeLeft();
+    if (timeLeft) {
+      setCooldownWarning(`⏳ Aguarde mais ${timeLeft} para alterar seu status novamente.`);
+      triggerShake();
+      return;
+    }
+    setCooldownWarning(null);
+    setDraftRelationshipStatus(value);
+  }, [draftRelationshipStatus, getCooldownTimeLeft, triggerShake]);
   const [settingsSubScreen, setSettingsSubScreen] = useState<string | null>(null);
 
   const [followersCount, setFollowersCount] = useState(0);
@@ -1688,11 +1725,11 @@ const handleChangeAvatar = useCallback(async () => {
             {/* Status de relacionamento */}
             <View style={[styles.editFieldBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
               <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>Status de relacionamento</Text>
-              <View style={styles.editGenderRow}>
+              <Animated.View style={[styles.editGenderRow, { transform: [{ translateX: shakeAnim }] }]}>
                 {relationshipOptions.map((opt) => (
                   <TouchableOpacity
                     key={opt.value}
-                    onPress={() => setDraftRelationshipStatus(opt.value)}
+                    onPress={() => handleRelationshipPillPress(opt.value)}
                     activeOpacity={0.7}
                     style={[
                       styles.editGenderPill,
@@ -1707,10 +1744,15 @@ const handleChangeAvatar = useCallback(async () => {
                     </Text>
                   </TouchableOpacity>
                 ))}
-              </View>
+              </Animated.View>
+              {cooldownWarning && (
+                <Text style={[styles.editFieldHint, { color: "#f59e0b" }]}>
+                  {cooldownWarning}
+                </Text>
+              )}
               {(draftRelationshipStatus === "committed" || draftRelationshipStatus === "other") && (
                 <Text style={[styles.editFieldHint, { color: theme.colors.textMuted }]}>
-                  🔒 Crushes e mensagens de crush serão bloqueados enquanto esse status estiver ativo.
+                  🔒 Crushes e mensagens de crush serão bloqueados enquanto esse status estiver ativo. Após ativar, só poderá alterar novamente depois de 24 horas.
                 </Text>
               )}
             </View>
