@@ -218,6 +218,11 @@ export default function ConversationsScreen() {
         conversationType: "friend",
       });
 
+      if (!conversation?.id) {
+        Alert.alert("Erro", "Não foi possível criar a conversa.");
+        return;
+      }
+
       // Reactivate if soft-deleted
       await supabase
         .rpc("reactivate_conversation", {
@@ -229,17 +234,17 @@ export default function ConversationsScreen() {
       setShowNewChat(false);
       setFollowerSearch("");
 
+      // Refresh list so conversation appears
+      await loadConversations(currentUserId);
+
       router.push({
         pathname: "/conversations/[id]",
         params: { id: conversation.id, type: "friend" },
       });
     } catch (e: any) {
+      console.error("handleStartConversation error:", e);
       const message = e?.message ?? "Não foi possível iniciar a conversa.";
-      const friendlyMessage = message.includes("CHAT_PAIR_CONSTRAINT_CONFLICT")
-        ? "Existe uma conversa antiga entre esse par e o banco ainda está bloqueando friend e crush separados para as mesmas duas pessoas. Rode o SQL de reparo do chat no banco."
-        : message;
-
-      Alert.alert("Erro", friendlyMessage);
+      Alert.alert("Erro", message);
     } finally {
       setCreatingChat(null);
     }

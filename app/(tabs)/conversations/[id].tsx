@@ -540,6 +540,14 @@ export default function ConversationScreen() {
           last_message_at: new Date().toISOString(),
         })
         .eq("id", conversationId);
+
+      // Reactivate conversation if it was soft-deleted
+      await supabase
+        .rpc("reactivate_conversation", {
+          _conversation_id: conversationId,
+          _user_id: authUserId,
+        })
+        .catch(() => {});
     } catch (e: any) {
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
       if ((e?.message ?? "").includes("CRUSH_CHAT_LOCKED")) {
@@ -654,6 +662,16 @@ export default function ConversationScreen() {
           last_message_at: new Date().toISOString(),
         })
         .eq("id", conversationId);
+
+      // Reactivate conversation if it was soft-deleted
+      if (authUserId) {
+        await supabase
+          .rpc("reactivate_conversation", {
+            _conversation_id: conversationId,
+            _user_id: authUserId,
+          })
+          .catch(() => {});
+      }
     } catch (e: any) {
       if ((e?.message ?? "").includes("CRUSH_CHAT_LOCKED")) {
         Alert.alert(
