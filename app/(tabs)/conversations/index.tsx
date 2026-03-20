@@ -61,8 +61,7 @@ export default function ConversationsScreen() {
 
   // ── Relationship status lock ──
   const [myRelationshipStatus, setMyRelationshipStatus] = useState<string | null>(null);
-  const isCommittedStatus = myRelationshipStatus === "committed" || myRelationshipStatus === "other";
-  const isCrushLocked = isCommittedStatus && crushConversations.length === 0;
+  const isCrushLocked = myRelationshipStatus === "committed" || myRelationshipStatus === "other";
 
   // ── Animated badge scale ──
   const badgeScale = useRef(new Animated.Value(1)).current;
@@ -235,7 +234,12 @@ export default function ConversationsScreen() {
         params: { id: conversation.id, type: "friend" },
       });
     } catch (e: any) {
-      Alert.alert("Erro", e?.message ?? "Não foi possível iniciar a conversa.");
+      const message = e?.message ?? "Não foi possível iniciar a conversa.";
+      const friendlyMessage = message.includes("CHAT_PAIR_CONSTRAINT_CONFLICT")
+        ? "Existe uma conversa antiga entre esse par e o banco ainda está bloqueando friend e crush separados para as mesmas duas pessoas. Rode o SQL de reparo do chat no banco."
+        : message;
+
+      Alert.alert("Erro", friendlyMessage);
     } finally {
       setCreatingChat(null);
     }

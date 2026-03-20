@@ -1238,21 +1238,20 @@ export default function Profile() {
   const viewerIsCommitted = myRelationshipStatus === "committed" || myRelationshipStatus === "other";
   const targetIsCommitted = relationshipStatus === "committed" || relationshipStatus === "other";
 
-  // Checar se são parceiros vinculados
+  // Checar se são parceiros vinculados (usado pelo FollowModal)
   const areLinkedPartners = !!(
     profileRow?.partner_id &&
     profileRow.partner_id === authUserId &&
     draftPartnerId === userId
   );
 
-  const canOpenCrushConversation = isCrushMatch && ((!viewerIsCommitted && !targetIsCommitted) || areLinkedPartners);
-  // Permitir abrir conversa se: amigos mútuos, crush match, OU se eu sigo essa pessoa (friend)
+  const canOpenCrushConversation = isCrushMatch && !viewerIsCommitted && !targetIsCommitted;
   const canOpenConversation = isMutualFriend || canOpenCrushConversation || (currentInterestType === "friend");
 
   const openConversation = useCallback(
     async (conversationType: ConversationType) => {
       if (!authUserId || !userId) return;
-      if (conversationType === "crush" && (viewerIsCommitted || targetIsCommitted) && !areLinkedPartners) {
+      if (conversationType === "crush" && (viewerIsCommitted || targetIsCommitted)) {
         Alert.alert(
           "🔒 Conversa bloqueada",
           "Conversas de crush ficam indisponíveis quando um dos dois está namorando ou casado(a).",
@@ -1261,45 +1260,21 @@ export default function Profile() {
       }
 
       try {
-        console.log("[openConversation] starting:", { authUserId, userId, conversationType });
-
-        // Reativar conversa caso tenha sido soft-deleted
-        const existingConvs = await supabase
-          .from("conversations")
-          .select("id")
-          .or(`and(user1.eq.${authUserId},user2.eq.${userId}),and(user1.eq.${userId},user2.eq.${authUserId})`)
-          .eq("conversation_type", conversationType)
-          .maybeSingle();
-
-        console.log("[openConversation] existing check:", existingConvs?.data, existingConvs?.error);
-
-        if (existingConvs?.data?.id) {
-          await supabase
-            .rpc("reactivate_conversation", {
-              _conversation_id: existingConvs.data.id,
-              _user_id: authUserId,
-            })
-            .catch((err: any) => console.warn("[openConversation] reactivate error (non-fatal):", err));
-        }
-
         const conversation = await getOrCreateConversation({
           currentUserId: authUserId,
           otherUserId: userId,
           conversationType,
         });
 
-        console.log("[openConversation] navigating to conversation:", conversation.id);
-
         router.push({
           pathname: "/conversations/[id]",
           params: { id: conversation.id, type: conversationType },
         });
       } catch (e: any) {
-        console.error("[openConversation] FULL ERROR:", JSON.stringify(e, null, 2));
         Alert.alert("Erro ao abrir conversa", e?.message ?? "Não foi possível abrir a conversa.");
       }
     },
-    [authUserId, userId, router, viewerIsCommitted, targetIsCommitted, areLinkedPartners],
+    [authUserId, userId, router, viewerIsCommitted, targetIsCommitted],
   );
 
   useEffect(() => {
@@ -2224,7 +2199,7 @@ export default function Profile() {
                 <TouchableOpacity
                   style={[styles.actionButton, { borderColor: theme.colors.border }]}
                   activeOpacity={0.8}
-                  onPress={() => openConversation(hasCrushConversation ? "crush" : ("friend" as ConversationType))}
+                  onPress={() => openConversation(hasCrushConversation ? "crush" : "friend" as ConversationType)}
                 >
                   <Text style={[styles.actionButtonText, { color: theme.colors.text }]}>
                     {hasCrushConversation ? "Mensagem" : "Mensagem"}

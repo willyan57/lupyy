@@ -83,11 +83,8 @@ export default function ConversationScreen() {
 
   // ── Crush lock state ──
   const [myRelationshipStatus, setMyRelationshipStatus] = useState<string | null>(null);
-  const [arePartners, setArePartners] = useState(false);
-
   const isCrushLocked =
     conversationType === "crush" &&
-    !arePartners &&
     (isCommittedStatus(myRelationshipStatus) ||
       isCommittedStatus(otherProfile?.relationship_status));
 
@@ -249,7 +246,7 @@ export default function ConversationScreen() {
 
     const { data: myProfile } = await supabase
       .from("profiles")
-      .select("relationship_status, partner_id")
+      .select("relationship_status")
       .eq("id", uid)
       .maybeSingle();
 
@@ -280,19 +277,12 @@ export default function ConversationScreen() {
 
     const { data: profile } = await supabase
       .from("profiles")
-      .select("id, username, full_name, avatar_url, relationship_status, partner_id")
+      .select("id, username, full_name, avatar_url, relationship_status")
       .eq("id", other)
       .maybeSingle();
 
     if (profile) {
       setOtherProfile(profile as ProfileHeader);
-      // Checar se são parceiros vinculados
-      const myPartnerId = (myProfile as any)?.partner_id ?? null;
-      const theirPartnerId = (profile as any)?.partner_id ?? null;
-      setArePartners(
-        !!myPartnerId && !!theirPartnerId &&
-        myPartnerId === other && theirPartnerId === uid
-      );
     }
   }, [conversationId]);
 
@@ -504,12 +494,6 @@ export default function ConversationScreen() {
     setSending(true);
     setInput("");
     reportTyping(false);
-
-    // Reativar conversa caso tenha sido soft-deleted
-    await supabase.rpc("reactivate_conversation", {
-      _conversation_id: conversationId,
-      _user_id: authUserId,
-    }).catch(() => {});
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
 
     const tempId = `temp-${Date.now()}`;
@@ -598,13 +582,6 @@ export default function ConversationScreen() {
       }
 
       const asset = result.assets[0];
-      
-      // Reativar conversa caso tenha sido soft-deleted
-      await supabase.rpc("reactivate_conversation", {
-        _conversation_id: conversationId,
-        _user_id: authUserId,
-      }).catch(() => {});
-
       setUploadingMedia(true);
 
       const tempId = `temp-media-${Date.now()}`;

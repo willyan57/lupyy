@@ -32,57 +32,36 @@ export async function getOrCreateConversation(params: {
   const { currentUserId, otherUserId, conversationType } = params;
   const pair = normalizePair(currentUserId, otherUserId);
 
-  console.log("[getOrCreateConversation] pair:", pair, "type:", conversationType);
-
-  // 1) Buscar conversa existente do MESMO tipo entre os dois users
+  // Busca QUALQUER conversa entre o par (sem filtrar por tipo)
   const { data: existing, error: selectError } = await supabase
     .from("conversations")
     .select("*")
     .eq("user1", pair.user1)
     .eq("user2", pair.user2)
-    .eq("conversation_type", conversationType)
     .maybeSingle();
 
   if (selectError && selectError.code !== "PGRST116") {
-    console.error("[getOrCreateConversation] select error:", selectError);
     throw selectError;
   }
 
   if (existing) {
-    console.log("[getOrCreateConversation] found existing:", existing.id);
+    // Se o tipo for diferente, atualiza
+    if (existing.conversation_type !== conversationType) {
+      const { data: updated, error: updateError } = await supabase
+        .from("conversations")
+        .update({ conversation_type: conversationType })
+        .eq("id", existing.id)
+        .select("*")
+        .single();
+
+      if (updateError) throw updateError;
+      return updated as Conversation;
+    }
+
     return existing as Conversation;
   }
 
-  // 2) Não existe → também buscar SEM filtro de tipo (pode existir conversa
-  //    com tipo diferente que precisa ser atualizada, ex: friend → crush)
-  const { data: anyExisting } = await supabase
-    .from("conversations")
-    .select("*")
-    .eq("user1", pair.user1)
-    .eq("user2", pair.user2)
-    .maybeSingle();
-
-  // Se existe uma conversa com tipo diferente, atualizar o tipo
-  if (anyExisting && anyExisting.conversation_type !== conversationType) {
-    console.log("[getOrCreateConversation] updating type from", anyExisting.conversation_type, "to", conversationType);
-    const { data: updated, error: updateError } = await supabase
-      .from("conversations")
-      .update({ conversation_type: conversationType })
-      .eq("id", anyExisting.id)
-      .select("*")
-      .single();
-
-    if (updateError) {
-      console.error("[getOrCreateConversation] update error:", updateError);
-      // Se falhar a atualização (RLS), retornar a conversa existente mesmo assim
-      console.log("[getOrCreateConversation] falling back to existing conversation");
-      return anyExisting as Conversation;
-    }
-    return updated as Conversation;
-  }
-
-  // 3) Nenhuma conversa existe → criar nova
-  console.log("[getOrCreateConversation] creating new conversation");
+  // Não existe → cria
   const { data: inserted, error: insertError } = await supabase
     .from("conversations")
     .insert({
@@ -93,10 +72,7 @@ export async function getOrCreateConversation(params: {
     .select("*")
     .single();
 
-  if (insertError) {
-    console.error("[getOrCreateConversation] insert error:", insertError);
-    throw insertError;
-  }
+  if (insertError) throw insertError;
   return inserted as Conversation;
 }
 
