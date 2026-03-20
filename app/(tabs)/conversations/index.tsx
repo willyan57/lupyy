@@ -160,8 +160,36 @@ export default function ConversationsScreen() {
       }
 
       const all = data as RpcConversation[];
-      const friends = all.filter((c) => c.conversation_type === "friend");
-      const crushes = all.filter((c) => c.conversation_type === "crush");
+      const conversationIds = all.map((c) => c.id);
+
+      let visible = all;
+
+      if (conversationIds.length > 0) {
+        const { data: deletionRows, error: deletionError } = await supabase
+          .from("conversation_deletions")
+          .select("conversation_id, deleted_at")
+          .eq("user_id", activeUserId)
+          .in("conversation_id", conversationIds);
+
+        if (!deletionError && deletionRows) {
+          const deletedMap = new Map(
+            (deletionRows as { conversation_id: string; deleted_at: string | null }[]).map((row) => [
+              row.conversation_id,
+              row.deleted_at,
+            ])
+          );
+
+          visible = all.filter((conversation) => {
+            const deletedAt = deletedMap.get(conversation.id);
+            if (!deletedAt) return true;
+            if (!conversation.last_message_at) return false;
+            return new Date(conversation.last_message_at).getTime() > new Date(deletedAt).getTime();
+          });
+        }
+      }
+
+      const friends = visible.filter((c) => c.conversation_type === "friend");
+      const crushes = visible.filter((c) => c.conversation_type === "crush");
 
       setFriendConversations(friends);
       setCrushConversations(crushes);
