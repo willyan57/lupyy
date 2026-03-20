@@ -213,20 +213,21 @@ export default function ConversationsScreen() {
 
   const reactivateConversationForUser = useCallback(
     async (conversationId: string, userId: string) => {
-      const { error: rpcError } = await supabase.rpc("reactivate_conversation", {
-        _conversation_id: conversationId,
-        _user_id: userId,
-      });
+      try {
+        const { error: rpcError } = await supabase.rpc("reactivate_conversation", {
+          _conversation_id: conversationId,
+          _user_id: userId,
+        });
+        if (!rpcError) return;
+      } catch {}
 
-      if (!rpcError) return;
-
-      const { error: updateError } = await supabase
-        .from("conversation_deletions")
-        .update({ deleted_at: null })
-        .eq("conversation_id", conversationId)
-        .eq("user_id", userId);
-
-      if (updateError) throw updateError;
+      try {
+        await supabase
+          .from("conversation_deletions")
+          .update({ deleted_at: null })
+          .eq("conversation_id", conversationId)
+          .eq("user_id", userId);
+      } catch {}
     },
     []
   );

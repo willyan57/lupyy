@@ -275,20 +275,21 @@ export default function ConversationScreen() {
   async function reactivateConversationForUser() {
     if (!authUserId || !conversationId) return;
 
-    const { error: rpcError } = await supabase.rpc("reactivate_conversation", {
-      _conversation_id: conversationId,
-      _user_id: authUserId,
-    });
+    try {
+      const { error: rpcError } = await supabase.rpc("reactivate_conversation", {
+        _conversation_id: conversationId,
+        _user_id: authUserId,
+      });
+      if (!rpcError) return;
+    } catch {}
 
-    if (!rpcError) return;
-
-    const { error: updateError } = await supabase
-      .from("conversation_deletions")
-      .update({ deleted_at: null })
-      .eq("conversation_id", conversationId)
-      .eq("user_id", authUserId);
-
-    if (updateError) throw updateError;
+    try {
+      await supabase
+        .from("conversation_deletions")
+        .update({ deleted_at: null })
+        .eq("conversation_id", conversationId)
+        .eq("user_id", authUserId);
+    } catch {}
   }
 
   // ── Delete entire conversation (hide for current user) ──
