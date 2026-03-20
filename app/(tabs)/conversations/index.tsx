@@ -6,7 +6,7 @@ import { useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
+
   Animated,
   BackHandler,
   FlatList,
@@ -58,6 +58,9 @@ export default function ConversationsScreen() {
   const [followers, setFollowers] = useState<FollowerRow[]>([]);
   const [loadingFollowers, setLoadingFollowers] = useState(false);
   const [creatingChat, setCreatingChat] = useState<string | null>(null);
+
+  // ── Delete confirmation modal ──
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   // ── Relationship status lock ──
   const [myRelationshipStatus, setMyRelationshipStatus] = useState<string | null>(null);
@@ -257,7 +260,7 @@ export default function ConversationsScreen() {
       });
 
       if (!conversation?.id) {
-        Alert.alert("Erro", "Não foi possível criar a conversa.");
+        console.warn("Erro: Não foi possível criar a conversa.");
         return;
       }
 
@@ -278,7 +281,7 @@ export default function ConversationsScreen() {
     } catch (e: any) {
       console.error("handleStartConversation error:", e);
       const message = e?.message ?? "Não foi possível iniciar a conversa.";
-      Alert.alert("Erro", message);
+      console.error("Erro:", message);
     } finally {
       setCreatingChat(null);
     }
@@ -353,41 +356,29 @@ export default function ConversationsScreen() {
   );
 
   // ── Delete conversation ──
-  const handleDeleteConversation = useCallback(
-    async (conversationId: string) => {
-      if (!currentUserId) return;
-      Alert.alert(
-        "Excluir conversa",
-        "Tem certeza? A conversa será removida da sua lista.",
-        [
-          { text: "Cancelar", style: "cancel" },
+  const confirmDeleteConversation = useCallback(
+    async () => {
+      if (!currentUserId || !deleteTarget) return;
+      await supabase
+        .from("conversation_deletions")
+        .upsert(
           {
-            text: "Excluir",
-            style: "destructive",
-            onPress: async () => {
-              await supabase
-                .from("conversation_deletions")
-                .upsert(
-                  {
-                    conversation_id: conversationId,
-                    user_id: currentUserId,
-                    deleted_at: new Date().toISOString(),
-                  },
-                  { onConflict: "conversation_id,user_id" }
-                );
-
-              setFriendConversations((prev) =>
-                prev.filter((c) => c.id !== conversationId)
-              );
-              setCrushConversations((prev) =>
-                prev.filter((c) => c.id !== conversationId)
-              );
-            },
+            conversation_id: deleteTarget,
+            user_id: currentUserId,
+            deleted_at: new Date().toISOString(),
           },
-        ]
+          { onConflict: "conversation_id,user_id" }
+        );
+
+      setFriendConversations((prev) =>
+        prev.filter((c) => c.id !== deleteTarget)
       );
+      setCrushConversations((prev) =>
+        prev.filter((c) => c.id !== deleteTarget)
+      );
+      setDeleteTarget(null);
     },
-    [currentUserId]
+    [currentUserId, deleteTarget]
   );
 
   const data =
@@ -467,7 +458,7 @@ export default function ConversationsScreen() {
       <TouchableOpacity
         style={styles.row}
         onPress={() => handleOpenConversation(item.id)}
-        onLongPress={() => handleDeleteConversation(item.id)}
+        onLongPress={() => setDeleteTarget(item.id)}
         delayLongPress={500}
         activeOpacity={0.7}
       >
@@ -529,10 +520,7 @@ export default function ConversationsScreen() {
           <TouchableOpacity
             style={styles.rowMenuButton}
             activeOpacity={0.7}
-            onPress={(event) => {
-              event.stopPropagation();
-              handleDeleteConversation(item.id);
-            }}
+            onPress={() => setDeleteTarget(item.id)}
           >
             <Text style={styles.rowMenuIcon}>⋯</Text>
           </TouchableOpacity>
@@ -820,6 +808,43 @@ export default function ConversationsScreen() {
             )}
           </View>
         </View>
+      </Modal>
+
+      {/* ── Delete Confirmation Modal ── */}
+      <Modal
+        visible={deleteTarget !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDeleteTarget(null)}
+      >
+        <TouchableOpacity
+          style={styles.deleteOverlay}
+          activeOpacity={1}
+          onPress={() => setDeleteTarget(null)}
+        >
+          <View style={styles.deleteSheet}>
+            <Text style={styles.deleteTitle}>Excluir conversa</Text>
+            <Text style={styles.deleteMessage}>
+              Tem certeza? A conversa será removida da sua lista.
+            </Text>
+            <View style={styles.deleteActions}>
+              <TouchableOpacity
+                style={styles.deleteCancelBtn}
+                onPress={() => setDeleteTarget(null)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.deleteCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.deleteConfirmBtn}
+                onPress={confirmDeleteConversation}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.deleteConfirmText}>Excluir</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </TouchableOpacity>
       </Modal>
     </View>
   );
@@ -1228,5 +1253,64 @@ const styles = StyleSheet.create({
     height: 12,
     borderRadius: 6,
     backgroundColor: "#1a1a28",
+  },
+  // ── Delete confirmation modal styles ──
+  deleteOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 32,
+  },
+  deleteSheet: {
+    backgroundColor: "#16162a",
+    borderRadius: 20,
+    padding: 24,
+    width: "100%",
+    maxWidth: 340,
+    borderWidth: 1,
+    borderColor: "#2a2a3a",
+  },
+  deleteTitle: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "700",
+    textAlign: "center",
+    marginBottom: 8,
+  },
+  deleteMessage: {
+    color: "#999",
+    fontSize: 14,
+    textAlign: "center",
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+  deleteActions: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  deleteCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: "#1e1e30",
+    alignItems: "center",
+  },
+  deleteCancelText: {
+    color: "#ccc",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  deleteConfirmBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: "#e53e3e",
+    alignItems: "center",
+  },
+  deleteConfirmText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "700",
   },
 });
