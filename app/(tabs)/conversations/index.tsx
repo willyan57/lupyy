@@ -220,7 +220,7 @@ export default function ConversationsScreen() {
         .eq("user_id", userId)
         .maybeSingle();
 
-      if (lookupError) throw lookupError;
+      if (lookupError && lookupError.code !== "PGRST116") throw lookupError;
       if (!existingDeletion?.deleted_at) return;
 
       const { error: rpcError } = await supabase.rpc("reactivate_conversation", {
