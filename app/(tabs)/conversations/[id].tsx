@@ -67,7 +67,8 @@ export default function ConversationScreen() {
 
   const [authUserId, setAuthUserId] = useState<string | null>(null);
   const [otherUserId, setOtherUserId] = useState<string | null>(null);
-  const [conversationType, setConversationType] = useState<"friend" | "crush" | null>(null);
+  const [conversationType, setConversationType] =
+    useState<"friend" | "crush" | null>(null);
 
   const [otherProfile, setOtherProfile] = useState<ProfileHeader | null>(null);
 
@@ -77,18 +78,22 @@ export default function ConversationScreen() {
   const [sending, setSending] = useState(false);
   const [uploadingMedia, setUploadingMedia] = useState(false);
 
-  const isCommittedStatus = (status?: string | null) => status === "committed" || status === "other";
+  const isCommittedStatus = (status?: string | null) =>
+    status === "committed" || status === "other";
 
   // ── Crush lock state ──
   const [myRelationshipStatus, setMyRelationshipStatus] = useState<string | null>(null);
   const isCrushLocked =
     conversationType === "crush" &&
-    (isCommittedStatus(myRelationshipStatus) || isCommittedStatus(otherProfile?.relationship_status));
+    (isCommittedStatus(myRelationshipStatus) ||
+      isCommittedStatus(otherProfile?.relationship_status));
 
   const [selectedMessage, setSelectedMessage] = useState<DbMessage | null>(null);
   const [showMessageMenu, setShowMessageMenu] = useState(false);
   const [replyingTo, setReplyingTo] = useState<DbMessage | null>(null);
-  const [localReactions, setLocalReactions] = useState<Record<string, string>>({});
+  const [localReactions, setLocalReactions] = useState<Record<string, string>>(
+    {}
+  );
 
   // ── Fullscreen image viewer ──
   const [fullscreenImageUri, setFullscreenImageUri] = useState<string | null>(null);
@@ -133,7 +138,7 @@ export default function ConversationScreen() {
         reportTyping(false);
       }
     },
-    [reportTyping],
+    [reportTyping]
   );
 
   // ── Android keyboard listener ──
@@ -178,7 +183,8 @@ export default function ConversationScreen() {
   }
 
   function base64ToUint8Array(base64: string) {
-    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const chars =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     const lookup: Record<string, number> = {};
     for (let i = 0; i < chars.length; i++) lookup[chars[i]] = i;
 
@@ -195,7 +201,11 @@ export default function ConversationScreen() {
       const encoded3 = lookup[base64[i + 2]];
       const encoded4 = lookup[base64[i + 3]];
 
-      const chunk = (encoded1 << 18) | (encoded2 << 12) | ((encoded3 & 63) << 6) | (encoded4 & 63);
+      const chunk =
+        (encoded1 << 18) |
+        (encoded2 << 12) |
+        ((encoded3 & 63) << 6) |
+        (encoded4 & 63);
 
       if (p < bufferLength) bytes[p++] = (chunk >> 16) & 255;
       if (p < bufferLength) bytes[p++] = (chunk >> 8) & 255;
@@ -254,7 +264,11 @@ export default function ConversationScreen() {
 
     const conversation = conv as ConversationRow;
     const other =
-      conversation.user1 === uid ? conversation.user2 : conversation.user2 === uid ? conversation.user1 : null;
+      conversation.user1 === uid
+        ? conversation.user2
+        : conversation.user2 === uid
+        ? conversation.user1
+        : null;
 
     setConversationType(conversation.conversation_type);
     setOtherUserId(other);
@@ -275,16 +289,6 @@ export default function ConversationScreen() {
   async function reactivateConversationForUser() {
     if (!authUserId || !conversationId) return;
 
-    const { data: existingDeletion, error: lookupError } = await supabase
-      .from("conversation_deletions")
-      .select("deleted_at")
-      .eq("conversation_id", conversationId)
-      .eq("user_id", authUserId)
-      .maybeSingle();
-
-    if (lookupError && lookupError.code !== "PGRST116") throw lookupError;
-    if (!existingDeletion?.deleted_at) return;
-
     const { error: rpcError } = await supabase.rpc("reactivate_conversation", {
       _conversation_id: conversationId,
       _user_id: authUserId,
@@ -292,57 +296,61 @@ export default function ConversationScreen() {
 
     if (!rpcError) return;
 
-    const { error: updateError } = await supabase
+    const { error: deleteError } = await supabase
       .from("conversation_deletions")
-      .update({ deleted_at: null })
+      .delete()
       .eq("conversation_id", conversationId)
       .eq("user_id", authUserId);
 
-    if (updateError) throw updateError;
+    if (deleteError) throw deleteError;
   }
 
   // ── Delete entire conversation (hide for current user) ──
   async function handleDeleteConversation() {
     if (!authUserId || !conversationId) return;
 
-    Alert.alert("Excluir conversa", "Tem certeza que deseja excluir esta conversa? Ela será removida da sua lista.", [
-      { text: "Cancelar", style: "cancel" },
-      {
-        text: "Excluir",
-        style: "destructive",
-        onPress: async () => {
-          const deletedAt = new Date().toISOString();
-
-          await supabase.from("conversation_deletions").upsert(
-            {
-              conversation_id: conversationId,
-              user_id: authUserId,
-              deleted_at: deletedAt,
-              messages_hidden_before: deletedAt,
-            },
-            { onConflict: "conversation_id,user_id" },
-          );
-          router.back();
+    Alert.alert(
+      "Excluir conversa",
+      "Tem certeza que deseja excluir esta conversa? Ela será removida da sua lista.",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Excluir",
+          style: "destructive",
+          onPress: async () => {
+            await supabase
+              .from("conversation_deletions")
+              .upsert(
+                {
+                  conversation_id: conversationId,
+                  user_id: authUserId,
+                  deleted_at: new Date().toISOString(),
+                },
+                { onConflict: "conversation_id,user_id" }
+              );
+            router.back();
+          },
         },
-      },
-    ]);
+      ]
+    );
   }
+
 
   async function getMessageCutoffForUser(userId: string, targetConversationId: string) {
     const { data: deletionRow } = await supabase
       .from("conversation_deletions")
-      .select("messages_hidden_before, deleted_at")
+      .select("deleted_at")
       .eq("conversation_id", targetConversationId)
       .eq("user_id", userId)
       .maybeSingle();
 
-    const row = deletionRow as { messages_hidden_before?: string | null; deleted_at?: string | null } | null;
-
-    return row?.messages_hidden_before ?? row?.deleted_at ?? null;
+    return (deletionRow as { deleted_at?: string | null } | null)?.deleted_at ?? null;
   }
 
   const displayName =
-    otherProfile?.full_name?.trim() || otherProfile?.username?.trim() || (isCrush ? "Conversa Crush" : "Conversa");
+    otherProfile?.full_name?.trim() ||
+    otherProfile?.username?.trim() ||
+    (isCrush ? "Conversa Crush" : "Conversa");
 
   useEffect(() => {
     if (!messages.length) return;
@@ -387,7 +395,8 @@ export default function ConversationScreen() {
         }
 
         const c = conv as ConversationRow;
-        const other = c.user1 === uid ? c.user2 : c.user2 === uid ? c.user1 : null;
+        const other =
+          c.user1 === uid ? c.user2 : c.user2 === uid ? c.user1 : null;
         setOtherUserId(other);
         setConversationType(c.conversation_type);
 
@@ -435,7 +444,7 @@ export default function ConversationScreen() {
   useFocusEffect(
     useCallback(() => {
       refreshRelationshipLock();
-    }, [refreshRelationshipLock]),
+    }, [refreshRelationshipLock])
   );
 
   useEffect(() => {
@@ -459,9 +468,11 @@ export default function ConversationScreen() {
 
           setMessages((prev) => {
             if (prev.some((m) => m.id === msg.id)) return prev;
-            return [...prev, msg].sort((a: DbMessage, b: DbMessage) => a.created_at.localeCompare(b.created_at));
+            return [...prev, msg].sort((a: DbMessage, b: DbMessage) =>
+              a.created_at.localeCompare(b.created_at)
+            );
           });
-        },
+        }
       )
       .on(
         "postgres_changes",
@@ -484,7 +495,7 @@ export default function ConversationScreen() {
               .map((m) => (m.id === updated.id ? updated : m))
               .sort((a: DbMessage, b: DbMessage) => a.created_at.localeCompare(b.created_at));
           });
-        },
+        }
       )
       .subscribe();
 
@@ -524,7 +535,7 @@ export default function ConversationScreen() {
     if (isCrushLocked) {
       Alert.alert(
         "🔒 Conversa bloqueada",
-        "Você não pode enviar mensagens de crush enquanto um dos perfis estiver namorando ou casado(a).",
+        "Você não pode enviar mensagens de crush enquanto um dos perfis estiver namorando ou casado(a)."
       );
       return;
     }
@@ -566,7 +577,9 @@ export default function ConversationScreen() {
       setMessages((prev) => {
         const withoutTemp = prev.filter((m) => m.id !== tempId);
         if (withoutTemp.some((m) => m.id === real.id)) return withoutTemp;
-        return [...withoutTemp, real].sort((a: DbMessage, b: DbMessage) => a.created_at.localeCompare(b.created_at));
+        return [...withoutTemp, real].sort((a: DbMessage, b: DbMessage) =>
+          a.created_at.localeCompare(b.created_at)
+        );
       });
 
       const sentAt = real.created_at || new Date().toISOString();
@@ -580,12 +593,13 @@ export default function ConversationScreen() {
         .eq("id", conversationId);
 
       await reactivateConversationForUser();
+
     } catch (e: any) {
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
       if ((e?.message ?? "").includes("CRUSH_CHAT_LOCKED")) {
         Alert.alert(
           "🔒 Conversa bloqueada",
-          "O banco bloqueou essa mensagem porque a conversa de crush não está mais disponível.",
+          "O banco bloqueou essa mensagem porque a conversa de crush não está mais disponível."
         );
       }
     } finally {
@@ -599,13 +613,14 @@ export default function ConversationScreen() {
     if (isCrushLocked) {
       Alert.alert(
         "🔒 Conversa bloqueada",
-        "Você não pode enviar mídia em conversa de crush enquanto um dos perfis estiver namorando ou casado(a).",
+        "Você não pode enviar mídia em conversa de crush enquanto um dos perfis estiver namorando ou casado(a)."
       );
       return;
     }
 
     try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const { status } =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
 
       if (status !== "granted") {
         return;
@@ -635,16 +650,19 @@ export default function ConversationScreen() {
       setMessages((prev) => [...prev, optimisticMsg]);
 
       const uri = await ensureLocalFileUri(asset.uri);
-      const guessedName = (asset as any).fileName ?? uri.split("/").pop() ?? "image";
+      const guessedName =
+        (asset as any).fileName ?? uri.split("/").pop() ?? "image";
       const fileExt = guessedName.split(".").pop() ?? "jpg";
       const filePath = `${conversationId}/${Date.now()}-${authUserId}.${fileExt}`;
 
       const body = await getUploadBodyFromUri(uri);
 
-      const { error: uploadError } = await supabase.storage.from("conversation_media").upload(filePath, body as any, {
-        contentType: asset.mimeType ?? "image/jpeg",
-        upsert: false,
-      });
+      const { error: uploadError } = await supabase.storage
+        .from("conversation_media")
+        .upload(filePath, body as any, {
+          contentType: asset.mimeType ?? "image/jpeg",
+          upsert: false,
+        });
 
       if (uploadError) {
         setMessages((prev) => prev.filter((m) => m.id !== tempId));
@@ -652,7 +670,9 @@ export default function ConversationScreen() {
         return;
       }
 
-      const { data: publicData } = supabase.storage.from("conversation_media").getPublicUrl(filePath);
+      const { data: publicData } = supabase.storage
+        .from("conversation_media")
+        .getPublicUrl(filePath);
 
       const publicUrl = publicData.publicUrl;
 
@@ -676,7 +696,9 @@ export default function ConversationScreen() {
       setMessages((prev) => {
         const withoutTemp = prev.filter((m) => m.id !== tempId);
         if (withoutTemp.some((m) => m.id === real.id)) return withoutTemp;
-        return [...withoutTemp, real].sort((a: DbMessage, b: DbMessage) => a.created_at.localeCompare(b.created_at));
+        return [...withoutTemp, real].sort((a: DbMessage, b: DbMessage) =>
+          a.created_at.localeCompare(b.created_at)
+        );
       });
 
       const mediaSentAt = real.created_at || new Date().toISOString();
@@ -690,11 +712,12 @@ export default function ConversationScreen() {
         .eq("id", conversationId);
 
       await reactivateConversationForUser();
+
     } catch (e: any) {
       if ((e?.message ?? "").includes("CRUSH_CHAT_LOCKED")) {
         Alert.alert(
           "🔒 Conversa bloqueada",
-          "O banco bloqueou essa mídia porque a conversa de crush não está mais disponível.",
+          "O banco bloqueou essa mídia porque a conversa de crush não está mais disponível."
         );
       }
     } finally {
@@ -718,7 +741,10 @@ export default function ConversationScreen() {
 
   function handleForwardMessage() {
     closeMessageMenu();
-    Alert.alert("Encaminhar", "Fluxo de encaminhar mensagem ainda será implementado.");
+    Alert.alert(
+      "Encaminhar",
+      "Fluxo de encaminhar mensagem ainda será implementado."
+    );
   }
 
   async function handleCopyMessage() {
@@ -756,8 +782,8 @@ export default function ConversationScreen() {
               content: "",
               media_url: null,
             }
-          : m,
-      ),
+          : m
+      )
     );
 
     try {
@@ -771,7 +797,8 @@ export default function ConversationScreen() {
         })
         .eq("id", messageId)
         .eq("sender", authUserId);
-    } catch {}
+    } catch {
+    }
   }
 
   const isDisabled = !input.trim() || sending;
@@ -791,7 +818,12 @@ export default function ConversationScreen() {
 
     if (item.is_deleted_for_all) {
       return (
-        <View style={[styles.messageRow, { justifyContent: isMine ? "flex-end" : "flex-start" }]}>
+        <View
+          style={[
+            styles.messageRow,
+            { justifyContent: isMine ? "flex-end" : "flex-start" },
+          ]}
+        >
           <View style={[styles.bubble, styles.deletedBubble]}>
             <Text style={styles.deletedText}>Mensagem apagada</Text>
           </View>
@@ -807,28 +839,46 @@ export default function ConversationScreen() {
     if (!hasText && !hasMedia) return null;
 
     const repliedMessage =
-      item.reply_to_id != null ? messages.find((m) => String(m.id) === String(item.reply_to_id || "")) : undefined;
+      item.reply_to_id != null
+        ? messages.find(
+            (m) => String(m.id) === String(item.reply_to_id || "")
+          )
+        : undefined;
 
     const reaction = localReactions[String(item.id)];
     const time = formatTime(item.created_at);
 
     return (
       <RNAnimated.View
-        style={[styles.messageRow, { justifyContent: isMine ? "flex-end" : "flex-start" }, { opacity: fadeAnim }]}
+        style={[
+          styles.messageRow,
+          { justifyContent: isMine ? "flex-end" : "flex-start" },
+          { opacity: fadeAnim },
+        ]}
       >
         <View style={styles.messageBubbleWrapper}>
-          <TouchableOpacity activeOpacity={0.9} onLongPress={() => openMessageMenu(item)} delayLongPress={260}>
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onLongPress={() => openMessageMenu(item)}
+            delayLongPress={260}
+          >
             <View
               style={[
                 styles.bubble,
-                isMine ? (isCrush ? styles.bubbleMineCrush : styles.bubbleMineFriend) : styles.bubbleOther,
+                isMine
+                  ? isCrush
+                    ? styles.bubbleMineCrush
+                    : styles.bubbleMineFriend
+                  : styles.bubbleOther,
               ]}
             >
               {repliedMessage && (
                 <View
                   style={[
                     styles.replyPreviewInBubble,
-                    isMine ? styles.replyPreviewMineBorder : styles.replyPreviewOtherBorder,
+                    isMine
+                      ? styles.replyPreviewMineBorder
+                      : styles.replyPreviewOtherBorder,
                   ]}
                 >
                   <Text style={styles.replyPreviewLabel}>
@@ -843,19 +893,37 @@ export default function ConversationScreen() {
               )}
 
               {hasMedia && (
-                <TouchableOpacity activeOpacity={0.85} onPress={() => setFullscreenImageUri(item.media_url!)}>
-                  <Image source={{ uri: item.media_url! }} style={styles.messageImage} resizeMode="cover" />
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => setFullscreenImageUri(item.media_url!)}
+                >
+                  <Image
+                    source={{ uri: item.media_url! }}
+                    style={styles.messageImage}
+                    resizeMode="cover"
+                  />
                 </TouchableOpacity>
               )}
 
-              {hasText && <Text style={isMine ? styles.bubbleTextMine : styles.bubbleTextOther}>{displayText}</Text>}
+              {hasText && (
+                <Text
+                  style={isMine ? styles.bubbleTextMine : styles.bubbleTextOther}
+                >
+                  {displayText}
+                </Text>
+              )}
 
               <Text style={styles.timestampText}>{time}</Text>
             </View>
           </TouchableOpacity>
 
           {reaction && (
-            <View style={[styles.reactionBadge, isMine ? styles.reactionBadgeRight : styles.reactionBadgeLeft]}>
+            <View
+              style={[
+                styles.reactionBadge,
+                isMine ? styles.reactionBadgeRight : styles.reactionBadgeLeft,
+              ]}
+            >
               <Text style={styles.reactionText}>{reaction}</Text>
             </View>
           )}
@@ -868,7 +936,10 @@ export default function ConversationScreen() {
   const androidBottomPad = Platform.OS === "android" ? keyboardHeight : 0;
 
   return (
-    <SafeAreaView style={[styles.safe, isCrush && styles.safeCrush]} edges={["top", "right", "left"]}>
+    <SafeAreaView
+      style={[styles.safe, isCrush && styles.safeCrush]}
+      edges={["top", "right", "left"]}
+    >
       <KeyboardAvoidingView
         style={styles.flex1}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -876,16 +947,29 @@ export default function ConversationScreen() {
       >
         {/* ── Header ── */}
         <View style={[styles.header, isCrush && styles.headerCrush]}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton} activeOpacity={0.8}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.backButton}
+            activeOpacity={0.8}
+          >
             <Text style={styles.backIcon}>‹</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.headerCenterRow} activeOpacity={0.85} onPress={handleOpenProfileFromHeader}>
+          <TouchableOpacity
+            style={styles.headerCenterRow}
+            activeOpacity={0.85}
+            onPress={handleOpenProfileFromHeader}
+          >
             {otherProfile?.avatar_url ? (
-              <Image source={{ uri: otherProfile.avatar_url }} style={styles.headerAvatar} />
+              <Image
+                source={{ uri: otherProfile.avatar_url }}
+                style={styles.headerAvatar}
+              />
             ) : (
               <View style={styles.headerAvatarFallback}>
-                <Text style={styles.headerAvatarLetter}>{displayName.charAt(0).toUpperCase()}</Text>
+                <Text style={styles.headerAvatarLetter}>
+                  {displayName.charAt(0).toUpperCase()}
+                </Text>
               </View>
             )}
 
@@ -901,14 +985,23 @@ export default function ConversationScreen() {
                 <Text style={styles.typingInlineText}>digitando...</Text>
               ) : presenceLabel ? (
                 <View style={styles.presenceRow}>
-                  <View style={[styles.statusDot, isOnline ? styles.statusDotOnline : styles.statusDotOffline]} />
+                  <View
+                    style={[
+                      styles.statusDot,
+                      isOnline ? styles.statusDotOnline : styles.statusDotOffline,
+                    ]}
+                  />
                   <Text style={styles.presenceText}>{presenceLabel}</Text>
                 </View>
               ) : null}
             </View>
           </TouchableOpacity>
 
-          <TouchableOpacity onPress={handleDeleteConversation} style={styles.headerMenuButton} activeOpacity={0.8}>
+          <TouchableOpacity
+            onPress={handleDeleteConversation}
+            style={styles.headerMenuButton}
+            activeOpacity={0.8}
+          >
             <Text style={styles.headerMenuIcon}>⋯</Text>
           </TouchableOpacity>
         </View>
@@ -923,10 +1016,13 @@ export default function ConversationScreen() {
             <Text style={{ fontSize: 56, marginBottom: 16 }}>🔒</Text>
             <Text style={styles.crushLockedTitle}>Conversa bloqueada</Text>
             <Text style={styles.crushLockedSubtext}>
-              Enquanto seu status for comprometido, conversas de crush ficam ocultas. Suas mensagens não foram apagadas
-              — mude para Solteiro para desbloquear.
+              Enquanto seu status for comprometido, conversas de crush ficam ocultas. Suas mensagens não foram apagadas — mude para Solteiro para desbloquear.
             </Text>
-            <TouchableOpacity style={styles.crushLockedBackBtn} onPress={() => router.back()} activeOpacity={0.8}>
+            <TouchableOpacity
+              style={styles.crushLockedBackBtn}
+              onPress={() => router.back()}
+              activeOpacity={0.8}
+            >
               <Text style={styles.crushLockedBackText}>← Voltar</Text>
             </TouchableOpacity>
           </View>
@@ -937,8 +1033,13 @@ export default function ConversationScreen() {
               data={messages}
               keyExtractor={(item) => String(item.id)}
               renderItem={renderItem}
-              contentContainerStyle={[styles.listContent, Platform.OS === "android" && { paddingBottom: 8 }]}
-              onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+              contentContainerStyle={[
+                styles.listContent,
+                Platform.OS === "android" && { paddingBottom: 8 },
+              ]}
+              onContentSizeChange={() =>
+                listRef.current?.scrollToEnd({ animated: true })
+              }
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="interactive"
             />
@@ -947,10 +1048,13 @@ export default function ConversationScreen() {
               <View style={styles.replyBanner}>
                 <View style={styles.replyBannerLeft}>
                   <Text style={styles.replyBannerLabel}>
-                    Respondendo a {replyingTo.sender === authUserId ? "você" : displayName}
+                    Respondendo a{" "}
+                    {replyingTo.sender === authUserId ? "você" : displayName}
                   </Text>
                   <Text style={styles.replyBannerText} numberOfLines={1}>
-                    {replyingTo.content && replyingTo.content.trim() ? replyingTo.content.trim() : "[mídia]"}
+                    {replyingTo.content && replyingTo.content.trim()
+                      ? replyingTo.content.trim()
+                      : "[mídia]"}
                   </Text>
                 </View>
                 <TouchableOpacity
@@ -967,7 +1071,11 @@ export default function ConversationScreen() {
               style={[
                 styles.inputBar,
                 {
-                  paddingBottom: 10 + (Platform.OS === "android" ? Math.min(insets.bottom, 8) : insets.bottom),
+                  paddingBottom:
+                    10 +
+                    (Platform.OS === "android"
+                      ? Math.min(insets.bottom, 8)
+                      : insets.bottom),
                 },
               ]}
             >
@@ -1004,7 +1112,11 @@ export default function ConversationScreen() {
                 onPress={handleSend}
                 activeOpacity={0.8}
               >
-                {sending ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.sendText}>➤</Text>}
+                {sending ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.sendText}>➤</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -1017,11 +1129,20 @@ export default function ConversationScreen() {
           animationType="fade"
           onRequestClose={closeMessageMenu}
         >
-          <Pressable style={[styles.menuOverlay, isWeb && styles.menuOverlayWeb]} onPress={closeMessageMenu}>
-            <View style={[styles.menuContainer, isWeb && styles.menuContainerWeb]}>
+          <Pressable
+            style={[styles.menuOverlay, isWeb && styles.menuOverlayWeb]}
+            onPress={closeMessageMenu}
+          >
+            <View
+              style={[styles.menuContainer, isWeb && styles.menuContainerWeb]}
+            >
               <View style={styles.reactionRow}>
                 {["❤️", "😂", "😮", "😢", "😡", "👍"].map((emoji) => (
-                  <Pressable key={emoji} style={styles.reactionButton} onPress={() => handleReactToMessage(emoji)}>
+                  <Pressable
+                    key={emoji}
+                    style={styles.reactionButton}
+                    onPress={() => handleReactToMessage(emoji)}
+                  >
                     <Text style={styles.reactionEmoji}>{emoji}</Text>
                   </Pressable>
                 ))}
@@ -1029,7 +1150,10 @@ export default function ConversationScreen() {
 
               <View style={styles.menuDivider} />
 
-              <Pressable style={styles.menuItem} onPress={handleReplyToMessage}>
+              <Pressable
+                style={styles.menuItem}
+                onPress={handleReplyToMessage}
+              >
                 <Text style={styles.menuItemText}>↩ Responder</Text>
               </Pressable>
 
@@ -1041,11 +1165,23 @@ export default function ConversationScreen() {
                 <Text style={styles.menuItemText}>📋 Copiar</Text>
               </Pressable>
 
-              {selectedMessage && authUserId && selectedMessage.sender === authUserId && (
-                <Pressable style={styles.menuItem} onPress={handleCancelSendForAll}>
-                  <Text style={[styles.menuItemText, styles.menuItemDestructive]}>🗑 Cancelar envio</Text>
-                </Pressable>
-              )}
+              {selectedMessage &&
+                authUserId &&
+                selectedMessage.sender === authUserId && (
+                  <Pressable
+                    style={styles.menuItem}
+                    onPress={handleCancelSendForAll}
+                  >
+                    <Text
+                      style={[
+                        styles.menuItemText,
+                        styles.menuItemDestructive,
+                      ]}
+                    >
+                      🗑 Cancelar envio
+                    </Text>
+                  </Pressable>
+                )}
             </View>
           </Pressable>
         </Modal>
@@ -1077,7 +1213,11 @@ export default function ConversationScreen() {
               showsHorizontalScrollIndicator={false}
             >
               {fullscreenImageUri && (
-                <Image source={{ uri: fullscreenImageUri }} style={styles.fullscreenImage} resizeMode="contain" />
+                <Image
+                  source={{ uri: fullscreenImageUri }}
+                  style={styles.fullscreenImage}
+                  resizeMode="contain"
+                />
               )}
             </ScrollView>
           </View>

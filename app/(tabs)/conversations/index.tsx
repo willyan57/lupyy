@@ -160,8 +160,36 @@ export default function ConversationsScreen() {
       }
 
       const all = data as RpcConversation[];
-      const friends = all.filter((c) => c.conversation_type === "friend");
-      const crushes = all.filter((c) => c.conversation_type === "crush");
+      const conversationIds = all.map((c) => c.id);
+
+      let visible = all;
+
+      if (conversationIds.length > 0) {
+        const { data: deletionRows, error: deletionError } = await supabase
+          .from("conversation_deletions")
+          .select("conversation_id, deleted_at")
+          .eq("user_id", activeUserId)
+          .in("conversation_id", conversationIds);
+
+        if (!deletionError && deletionRows) {
+          const deletedMap = new Map(
+            (deletionRows as { conversation_id: string; deleted_at: string | null }[]).map((row) => [
+              row.conversation_id,
+              row.deleted_at,
+            ])
+          );
+
+          visible = all.filter((conversation) => {
+            const deletedAt = deletedMap.get(conversation.id);
+            if (!deletedAt) return true;
+            if (!conversation.last_message_at) return false;
+            return new Date(conversation.last_message_at).getTime() > new Date(deletedAt).getTime();
+          });
+        }
+      }
+
+      const friends = visible.filter((c) => c.conversation_type === "friend");
+      const crushes = visible.filter((c) => c.conversation_type === "crush");
 
       setFriendConversations(friends);
       setCrushConversations(crushes);
@@ -211,36 +239,6 @@ export default function ConversationsScreen() {
     }
   }, [currentUserId]);
 
-  const reactivateConversationForUser = useCallback(
-    async (conversationId: string, userId: string) => {
-      const { data: existingDeletion, error: lookupError } = await supabase
-        .from("conversation_deletions")
-        .select("deleted_at")
-        .eq("conversation_id", conversationId)
-        .eq("user_id", userId)
-        .maybeSingle();
-
-      if (lookupError && lookupError.code !== "PGRST116") throw lookupError;
-      if (!existingDeletion?.deleted_at) return;
-
-      const { error: rpcError } = await supabase.rpc("reactivate_conversation", {
-        _conversation_id: conversationId,
-        _user_id: userId,
-      });
-
-      if (!rpcError) return;
-
-      const { error: updateError } = await supabase
-        .from("conversation_deletions")
-        .update({ deleted_at: null })
-        .eq("conversation_id", conversationId)
-        .eq("user_id", userId);
-
-      if (updateError) throw updateError;
-    },
-    []
-  );
-
   const handleStartConversation = async (otherUserId: string) => {
     if (!currentUserId) return;
     setCreatingChat(otherUserId);
@@ -274,7 +272,6 @@ export default function ConversationsScreen() {
         return;
       }
 
-      await reactivateConversationForUser(conversation.id, currentUserId);
 
       setShowNewChat(false);
       setFollowerSearch("");
@@ -369,16 +366,13 @@ export default function ConversationsScreen() {
   const confirmDeleteConversation = useCallback(
     async () => {
       if (!currentUserId || !deleteTarget) return;
-      const deletedAt = new Date().toISOString();
-
       await supabase
         .from("conversation_deletions")
         .upsert(
           {
             conversation_id: deleteTarget,
             user_id: currentUserId,
-            deleted_at: deletedAt,
-            messages_hidden_before: deletedAt,
+            deleted_at: new Date().toISOString(),
           },
           { onConflict: "conversation_id,user_id" }
         );
