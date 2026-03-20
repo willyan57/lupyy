@@ -590,6 +590,8 @@ export default function ConversationScreen() {
         })
         .eq("id", conversationId);
 
+      await reactivateConversationForUser();
+
     } catch (e: any) {
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
       if ((e?.message ?? "").includes("CRUSH_CHAT_LOCKED")) {
@@ -704,6 +706,8 @@ export default function ConversationScreen() {
           last_message_at: new Date().toISOString(),
         })
         .eq("id", conversationId);
+
+      await reactivateConversationForUser();
 
     } catch (e: any) {
       if ((e?.message ?? "").includes("CRUSH_CHAT_LOCKED")) {
