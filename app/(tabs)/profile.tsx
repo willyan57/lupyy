@@ -1361,20 +1361,31 @@ export default function Profile() {
           conversationType,
         });
 
-        try {
+        const { data: existingDeletion, error: lookupError } = await supabase
+          .from("conversation_deletions")
+          .select("deleted_at")
+          .eq("conversation_id", conversation.id)
+          .eq("user_id", authUserId)
+          .maybeSingle();
+
+        if (lookupError) throw lookupError;
+
+        if (existingDeletion?.deleted_at) {
           const { error: rpcError } = await supabase.rpc("reactivate_conversation", {
             _conversation_id: conversation.id,
             _user_id: authUserId,
           });
 
           if (rpcError) {
-            await supabase
+            const { error: updateError } = await supabase
               .from("conversation_deletions")
               .update({ deleted_at: null })
               .eq("conversation_id", conversation.id)
               .eq("user_id", authUserId);
+
+            if (updateError) throw updateError;
           }
-        } catch {}
+        }
 
         router.push({
           pathname: "/conversations/[id]",

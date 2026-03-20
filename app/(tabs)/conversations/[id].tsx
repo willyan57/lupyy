@@ -275,21 +275,30 @@ export default function ConversationScreen() {
   async function reactivateConversationForUser() {
     if (!authUserId || !conversationId) return;
 
-    try {
-      const { error: rpcError } = await supabase.rpc("reactivate_conversation", {
-        _conversation_id: conversationId,
-        _user_id: authUserId,
-      });
-      if (!rpcError) return;
-    } catch {}
+    const { data: existingDeletion, error: lookupError } = await supabase
+      .from("conversation_deletions")
+      .select("deleted_at")
+      .eq("conversation_id", conversationId)
+      .eq("user_id", authUserId)
+      .maybeSingle();
 
-    try {
-      await supabase
-        .from("conversation_deletions")
-        .update({ deleted_at: null })
-        .eq("conversation_id", conversationId)
-        .eq("user_id", authUserId);
-    } catch {}
+    if (lookupError) throw lookupError;
+    if (!existingDeletion?.deleted_at) return;
+
+    const { error: rpcError } = await supabase.rpc("reactivate_conversation", {
+      _conversation_id: conversationId,
+      _user_id: authUserId,
+    });
+
+    if (!rpcError) return;
+
+    const { error: updateError } = await supabase
+      .from("conversation_deletions")
+      .update({ deleted_at: null })
+      .eq("conversation_id", conversationId)
+      .eq("user_id", authUserId);
+
+    if (updateError) throw updateError;
   }
 
   // ── Delete entire conversation (hide for current user) ──
