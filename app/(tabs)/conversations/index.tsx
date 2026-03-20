@@ -1,5 +1,5 @@
 // app/(tabs)/conversations/index.tsx
-import { getOrCreateConversation } from "@/lib/conversations";
+import { getOrCreateConversation, reactivateConversationForUser } from "@/lib/conversations";
 import { supabase } from "@/lib/supabase";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
@@ -211,48 +211,16 @@ export default function ConversationsScreen() {
     }
   }, [currentUserId]);
 
-  const reactivateConversationForUser = useCallback(
-    async (conversationId: string, userId: string) => {
-      // A RPC agora faz UPDATE (deleted_at = NULL) em vez de DELETE,
-      // mantendo messages_hidden_before para ocultar mensagens antigas
-      const { error: rpcError } = await supabase.rpc("reactivate_conversation", {
-        _conversation_id: conversationId,
-        _user_id: userId,
-      });
-
-      if (!rpcError) return;
-
-      // Fallback: limpar deleted_at manualmente
-      await supabase
-        .from("conversation_deletions")
-        .update({ deleted_at: null })
-        .eq("conversation_id", conversationId)
-        .eq("user_id", userId);
-    },
-    []
-  );
-
   const handleStartConversation = async (otherUserId: string) => {
     if (!currentUserId) return;
     setCreatingChat(otherUserId);
     try {
-      const pair =
-        currentUserId < otherUserId
-          ? { user1: currentUserId, user2: otherUserId }
-          : { user1: otherUserId, user2: currentUserId };
+      const existingConversation =
+        [...friendConversations, ...crushConversations].find(
+          (conversation) => conversation.other_user_id === otherUserId,
+        ) ?? null;
 
-      const { data: existingConversation } = await supabase
-        .from("conversations")
-        .select("id, conversation_type")
-        .eq("user1", pair.user1)
-        .eq("user2", pair.user2)
-        .maybeSingle();
-
-      const conversationType =
-        (existingConversation as { conversation_type?: string | null } | null)
-          ?.conversation_type === "crush"
-          ? "crush"
-          : "friend";
+      const conversationType = existingConversation?.conversation_type === "crush" ? "crush" : "friend";
 
       const conversation = await getOrCreateConversation({
         currentUserId,

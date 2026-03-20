@@ -24,6 +24,37 @@ function normalizePair(a: string, b: string) {
   return a < b ? { user1: a, user2: b } : { user1: b, user2: a };
 }
 
+function pickConversationByType(
+  conversations: Conversation[],
+  conversationType: ConversationType,
+) {
+  return conversations.find((conversation) => conversation.conversation_type === conversationType) ?? null;
+}
+
+function pickBestConversation(
+  conversations: Conversation[],
+  conversationType: ConversationType,
+) {
+  return pickConversationByType(conversations, conversationType) ?? conversations[0] ?? null;
+}
+
+export async function reactivateConversationForUser(conversationId: string, userId: string) {
+  const { error: rpcError } = await supabase.rpc("reactivate_conversation", {
+    _conversation_id: conversationId,
+    _user_id: userId,
+  });
+
+  if (!rpcError) return;
+
+  const { error: fallbackError } = await supabase
+    .from("conversation_deletions")
+    .update({ deleted_at: null })
+    .eq("conversation_id", conversationId)
+    .eq("user_id", userId);
+
+  if (fallbackError) throw fallbackError;
+}
+
 export async function getOrCreateConversation(params: {
   currentUserId: string;
   otherUserId: string;
@@ -32,36 +63,18 @@ export async function getOrCreateConversation(params: {
   const { currentUserId, otherUserId, conversationType } = params;
   const pair = normalizePair(currentUserId, otherUserId);
 
-  // Busca QUALQUER conversa entre o par (sem filtrar por tipo)
-  const { data: existing, error: selectError } = await supabase
+  const { data: existingRows, error: selectError } = await supabase
     .from("conversations")
     .select("*")
     .eq("user1", pair.user1)
     .eq("user2", pair.user2)
-    .maybeSingle();
+    .order("created_at", { ascending: false });
 
-  if (selectError && selectError.code !== "PGRST116") {
-    throw selectError;
-  }
+  if (selectError) throw selectError;
 
-  if (existing) {
-    // Se o tipo for diferente, atualiza
-    if (existing.conversation_type !== conversationType) {
-      const { data: updated, error: updateError } = await supabase
-        .from("conversations")
-        .update({ conversation_type: conversationType })
-        .eq("id", existing.id)
-        .select("*")
-        .single();
+  const existing = pickBestConversation((existingRows || []) as Conversation[], conversationType);
+  if (existing) return existing;
 
-      if (updateError) throw updateError;
-      return updated as Conversation;
-    }
-
-    return existing as Conversation;
-  }
-
-  // Não existe → cria
   const { data: inserted, error: insertError } = await supabase
     .from("conversations")
     .insert({
@@ -72,7 +85,28 @@ export async function getOrCreateConversation(params: {
     .select("*")
     .single();
 
-  if (insertError) throw insertError;
+  if (insertError) {
+    const isUniqueConflict =
+      insertError.code === "23505" ||
+      /duplicate key|unique/i.test(insertError.message || "");
+
+    if (!isUniqueConflict) throw insertError;
+
+    const { data: retryRows, error: retryError } = await supabase
+      .from("conversations")
+      .select("*")
+      .eq("user1", pair.user1)
+      .eq("user2", pair.user2)
+      .order("created_at", { ascending: false });
+
+    if (retryError) throw retryError;
+
+    const retryConversation = pickBestConversation((retryRows || []) as Conversation[], conversationType);
+    if (retryConversation) return retryConversation;
+
+    throw insertError;
+  }
+
   return inserted as Conversation;
 }
 

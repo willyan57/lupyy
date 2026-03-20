@@ -38,7 +38,7 @@ import MatchCelebration from "@/components/MatchCelebration";
 import PeopleListSheet from "@/components/PeopleListSheet";
 import ThemeSelector from "@/components/ThemeSelector";
 import { useTheme } from "@/contexts/ThemeContext";
-import { ConversationType, getOrCreateConversation } from "@/lib/conversations";
+import { ConversationType, getOrCreateConversation, reactivateConversationForUser } from "@/lib/conversations";
 import { setFollowInterestType } from "@/lib/social";
 import { useIsMobileWeb } from "@/lib/useIsMobileWeb";
 
@@ -1361,19 +1361,7 @@ export default function Profile() {
           conversationType,
         });
 
-        const { error: rpcError } = await supabase.rpc("reactivate_conversation", {
-          _conversation_id: conversation.id,
-          _user_id: authUserId,
-        });
-
-        if (rpcError) {
-          // Fallback: limpar deleted_at manualmente, mantendo messages_hidden_before
-          await supabase
-            .from("conversation_deletions")
-            .update({ deleted_at: null })
-            .eq("conversation_id", conversation.id)
-            .eq("user_id", authUserId);
-        }
+        await reactivateConversationForUser(conversation.id, authUserId);
 
         router.push({
           pathname: "/conversations/[id]",
