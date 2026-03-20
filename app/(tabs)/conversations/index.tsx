@@ -215,6 +215,25 @@ export default function ConversationsScreen() {
     if (!currentUserId) return;
     setCreatingChat(otherUserId);
     try {
+      const existingVisibleConversation = [...friendConversations, ...crushConversations].find(
+        (conversation) =>
+          conversation.other_user_id === otherUserId &&
+          conversation.conversation_type === activeTab,
+      );
+
+      if (existingVisibleConversation?.id) {
+        setShowNewChat(false);
+        setFollowerSearch("");
+        router.push({
+          pathname: "/conversations/[id]",
+          params: {
+            id: existingVisibleConversation.id,
+            type: existingVisibleConversation.conversation_type === "crush" ? "crush" : "friend",
+          },
+        });
+        return;
+      }
+
       const conversation = await getOrCreateConversation({
         currentUserId,
         otherUserId,
@@ -226,10 +245,15 @@ export default function ConversationsScreen() {
         return;
       }
 
-      await reactivateConversationForUser(conversation.id, currentUserId);
+      const reactivated = await reactivateConversationForUser(conversation.id, currentUserId);
+      if (!reactivated) {
+        console.warn("Não foi possível reativar a conversa para o usuário atual.");
+      }
 
       setShowNewChat(false);
       setFollowerSearch("");
+
+      await loadConversations(currentUserId);
 
       router.push({
         pathname: "/conversations/[id]",
@@ -239,7 +263,6 @@ export default function ConversationsScreen() {
         },
       });
 
-      void loadConversations(currentUserId);
     } catch (e: any) {
       console.error("handleStartConversation error:", e);
       const message = e?.message ?? "Não foi possível iniciar a conversa.";

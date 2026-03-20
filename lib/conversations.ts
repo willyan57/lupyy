@@ -35,16 +35,39 @@ function pickConversationByType(
   return conversations.find((conversation) => conversation.conversation_type === conversationType) ?? null;
 }
 
+async function loadDeletedConversationIds(currentUserId: string, conversations: Conversation[]) {
+  if (conversations.length === 0) return new Set<string>();
+
+  const { data: deletedRows, error } = await supabase
+    .from("conversation_deletions")
+    .select("conversation_id")
+    .eq("user_id", currentUserId)
+    .in(
+      "conversation_id",
+      conversations.map((conversation) => conversation.id),
+    )
+    .not("deleted_at", "is", null);
+
+  if (error) {
+    console.warn("Could not load conversation deletions", error);
+    return new Set<string>();
+  }
+
+  return new Set(
+    ((deletedRows || []) as ConversationDeletionMarker[]).map((row) => row.conversation_id),
+  );
+}
+
 function pickVisibleConversation(
   conversations: Conversation[],
   deletedConversationIds: Set<string>,
   conversationType: ConversationType,
 ) {
-  const visibleConversations = conversations.filter(
-    (conversation) => !deletedConversationIds.has(conversation.id),
-  );
-
-  return pickConversationByType(visibleConversations, conversationType) ?? visibleConversations[0] ?? null;
+  return conversations.find(
+    (conversation) =>
+      conversation.conversation_type === conversationType &&
+      !deletedConversationIds.has(conversation.id),
+  ) ?? null;
 }
 
 function pickConversationForResume(
@@ -52,20 +75,11 @@ function pickConversationForResume(
   deletedConversationIds: Set<string>,
   conversationType: ConversationType,
 ) {
-  const deletedConversations = conversations.filter((conversation) =>
-    deletedConversationIds.has(conversation.id),
-  );
-  const visibleConversations = conversations.filter(
-    (conversation) => !deletedConversationIds.has(conversation.id),
-  );
-
-  return (
-    pickConversationByType(visibleConversations, conversationType) ??
-    pickConversationByType(deletedConversations, conversationType) ??
-    visibleConversations[0] ??
-    deletedConversations[0] ??
-    null
-  );
+  return conversations.find(
+    (conversation) =>
+      conversation.conversation_type === conversationType &&
+      deletedConversationIds.has(conversation.id),
+  ) ?? null;
 }
 
 export async function reactivateConversationForUser(conversationId: string, userId: string) {
@@ -76,11 +90,36 @@ export async function reactivateConversationForUser(conversationId: string, user
 
   if (!rpcError) return true;
 
+  const { data: deletionRow, error: deletionRowError } = await supabase
+    .from("conversation_deletions")
+    .select("conversation_id, deleted_at, messages_hidden_before")
+    .eq("conversation_id", conversationId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (deletionRowError) {
+    console.warn("Could not verify conversation deletion state", {
+      conversationId,
+      userId,
+      rpcError,
+      deletionRowError,
+    });
+    return false;
+  }
+
+  if (!deletionRow || deletionRow.deleted_at === null) return true;
+
   const { error: fallbackError } = await supabase
     .from("conversation_deletions")
-    .update({ deleted_at: null })
-    .eq("conversation_id", conversationId)
-    .eq("user_id", userId);
+    .upsert(
+      {
+        conversation_id: conversationId,
+        user_id: userId,
+        deleted_at: null,
+        messages_hidden_before: deletionRow.messages_hidden_before,
+      },
+      { onConflict: "conversation_id,user_id" },
+    );
 
   if (!fallbackError) return true;
 
@@ -112,28 +151,7 @@ export async function getOrCreateConversation(params: {
   if (selectError) throw selectError;
 
   const existingConversations = (existingRows || []) as Conversation[];
-
-  const deletedConversationIds = new Set<string>();
-
-  if (existingConversations.length > 0) {
-    const { data: deletedRows, error: deletedRowsError } = await supabase
-      .from("conversation_deletions")
-      .select("conversation_id")
-      .eq("user_id", currentUserId)
-      .in(
-        "conversation_id",
-        existingConversations.map((conversation) => conversation.id),
-      )
-      .not("deleted_at", "is", null);
-
-    if (deletedRowsError) {
-      console.warn("Could not load conversation deletions", deletedRowsError);
-    }
-
-    ((deletedRows || []) as ConversationDeletionMarker[]).forEach((row) => {
-      deletedConversationIds.add(row.conversation_id);
-    });
-  }
+  const deletedConversationIds = await loadDeletedConversationIds(currentUserId, existingConversations);
 
   const existingVisibleConversation = pickVisibleConversation(
     existingConversations,
@@ -169,28 +187,7 @@ export async function getOrCreateConversation(params: {
     if (retryError) throw retryError;
 
     const retryConversations = (retryRows || []) as Conversation[];
-
-    const retryDeletedConversationIds = new Set<string>();
-
-    if (retryConversations.length > 0) {
-      const { data: retryDeletedRows, error: retryDeletedRowsError } = await supabase
-        .from("conversation_deletions")
-        .select("conversation_id")
-        .eq("user_id", currentUserId)
-        .in(
-          "conversation_id",
-          retryConversations.map((conversation) => conversation.id),
-        )
-        .not("deleted_at", "is", null);
-
-      if (retryDeletedRowsError) {
-        console.warn("Could not load retry conversation deletions", retryDeletedRowsError);
-      }
-
-      ((retryDeletedRows || []) as ConversationDeletionMarker[]).forEach((row) => {
-        retryDeletedConversationIds.add(row.conversation_id);
-      });
-    }
+    const retryDeletedConversationIds = await loadDeletedConversationIds(currentUserId, retryConversations);
 
     const retryVisibleConversation = pickVisibleConversation(
       retryConversations,

@@ -1355,13 +1355,37 @@ export default function Profile() {
       }
 
       try {
+        const { data: existingList, error: existingListError } = await supabase.rpc("get_user_conversations_full");
+
+        if (!existingListError && Array.isArray(existingList)) {
+          const existingVisibleConversation = (existingList as any[]).find(
+            (conversation) =>
+              conversation?.other_user_id === userId &&
+              conversation?.conversation_type === conversationType,
+          );
+
+          if (existingVisibleConversation?.id) {
+            router.push({
+              pathname: "/conversations/[id]",
+              params: {
+                id: existingVisibleConversation.id,
+                type: existingVisibleConversation.conversation_type === "crush" ? "crush" : conversationType,
+              },
+            });
+            return;
+          }
+        }
+
         const conversation = await getOrCreateConversation({
           currentUserId: authUserId,
           otherUserId: userId,
           conversationType,
         });
 
-        await reactivateConversationForUser(conversation.id, authUserId);
+        const reactivated = await reactivateConversationForUser(conversation.id, authUserId);
+        if (!reactivated) {
+          console.warn("Não foi possível reativar a conversa pelo profile.");
+        }
 
         router.push({
           pathname: "/conversations/[id]",
