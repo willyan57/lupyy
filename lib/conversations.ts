@@ -20,6 +20,10 @@ export type Message = {
   created_at: string;
 };
 
+type ConversationDeletionMarker = {
+  conversation_id: string;
+};
+
 function normalizePair(a: string, b: string) {
   return a < b ? { user1: a, user2: b } : { user1: b, user2: a };
 }
@@ -36,6 +40,27 @@ function pickBestConversation(
   conversationType: ConversationType,
 ) {
   return pickConversationByType(conversations, conversationType) ?? conversations[0] ?? null;
+}
+
+function pickConversationForResume(
+  conversations: Conversation[],
+  deletedConversationIds: Set<string>,
+  conversationType: ConversationType,
+) {
+  const deletedConversations = conversations.filter((conversation) =>
+    deletedConversationIds.has(conversation.id),
+  );
+  const visibleConversations = conversations.filter(
+    (conversation) => !deletedConversationIds.has(conversation.id),
+  );
+
+  return (
+    pickConversationByType(visibleConversations, conversationType) ??
+    visibleConversations[0] ??
+    pickConversationByType(deletedConversations, conversationType) ??
+    deletedConversations[0] ??
+    null
+  );
 }
 
 export async function reactivateConversationForUser(conversationId: string, userId: string) {
@@ -72,7 +97,29 @@ export async function getOrCreateConversation(params: {
 
   if (selectError) throw selectError;
 
-  const existing = pickBestConversation((existingRows || []) as Conversation[], conversationType);
+  const existingConversations = (existingRows || []) as Conversation[];
+
+  const deletedConversationIds = new Set<string>();
+
+  if (existingConversations.length > 0) {
+    const { data: deletedRows, error: deletedRowsError } = await supabase
+      .from("conversation_deletions")
+      .select("conversation_id")
+      .eq("user_id", currentUserId)
+      .in(
+        "conversation_id",
+        existingConversations.map((conversation) => conversation.id),
+      )
+      .not("deleted_at", "is", null);
+
+    if (deletedRowsError) throw deletedRowsError;
+
+    ((deletedRows || []) as ConversationDeletionMarker[]).forEach((row) => {
+      deletedConversationIds.add(row.conversation_id);
+    });
+  }
+
+  const existing = pickConversationForResume(existingConversations, deletedConversationIds, conversationType);
   if (existing) return existing;
 
   const { data: inserted, error: insertError } = await supabase
@@ -101,7 +148,33 @@ export async function getOrCreateConversation(params: {
 
     if (retryError) throw retryError;
 
-    const retryConversation = pickBestConversation((retryRows || []) as Conversation[], conversationType);
+    const retryConversations = (retryRows || []) as Conversation[];
+
+    const retryDeletedConversationIds = new Set<string>();
+
+    if (retryConversations.length > 0) {
+      const { data: retryDeletedRows, error: retryDeletedRowsError } = await supabase
+        .from("conversation_deletions")
+        .select("conversation_id")
+        .eq("user_id", currentUserId)
+        .in(
+          "conversation_id",
+          retryConversations.map((conversation) => conversation.id),
+        )
+        .not("deleted_at", "is", null);
+
+      if (retryDeletedRowsError) throw retryDeletedRowsError;
+
+      ((retryDeletedRows || []) as ConversationDeletionMarker[]).forEach((row) => {
+        retryDeletedConversationIds.add(row.conversation_id);
+      });
+    }
+
+    const retryConversation = pickConversationForResume(
+      retryConversations,
+      retryDeletedConversationIds,
+      conversationType,
+    );
     if (retryConversation) return retryConversation;
 
     throw insertError;

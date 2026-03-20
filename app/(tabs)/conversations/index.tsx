@@ -215,17 +215,10 @@ export default function ConversationsScreen() {
     if (!currentUserId) return;
     setCreatingChat(otherUserId);
     try {
-      const existingConversation =
-        [...friendConversations, ...crushConversations].find(
-          (conversation) => conversation.other_user_id === otherUserId,
-        ) ?? null;
-
-      const conversationType = existingConversation?.conversation_type === "crush" ? "crush" : "friend";
-
       const conversation = await getOrCreateConversation({
         currentUserId,
         otherUserId,
-        conversationType,
+        conversationType: activeTab,
       });
 
       if (!conversation?.id) {
@@ -238,6 +231,8 @@ export default function ConversationsScreen() {
       setShowNewChat(false);
       setFollowerSearch("");
 
+      await loadConversations(currentUserId);
+
       router.push({
         pathname: "/conversations/[id]",
         params: {
@@ -245,8 +240,6 @@ export default function ConversationsScreen() {
           type: conversation.conversation_type === "crush" ? "crush" : "friend",
         },
       });
-
-      void loadConversations(currentUserId);
     } catch (e: any) {
       console.error("handleStartConversation error:", e);
       const message = e?.message ?? "Não foi possível iniciar a conversa.";
@@ -299,6 +292,28 @@ export default function ConversationsScreen() {
         { event: "UPDATE", schema: "public", table: "messages" },
         () => {
           refreshUnreadCountsForLists();
+          if (currentUserId) void loadConversations(currentUserId);
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "conversation_deletions" },
+        () => {
+          if (currentUserId) void loadConversations(currentUserId);
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "conversation_deletions" },
+        () => {
+          if (currentUserId) void loadConversations(currentUserId);
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "conversation_deletions" },
+        () => {
+          if (currentUserId) void loadConversations(currentUserId);
         }
       )
       .subscribe();
