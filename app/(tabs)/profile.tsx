@@ -38,10 +38,7 @@ import MatchCelebration from "@/components/MatchCelebration";
 import PeopleListSheet from "@/components/PeopleListSheet";
 import ThemeSelector from "@/components/ThemeSelector";
 import { useTheme } from "@/contexts/ThemeContext";
-import {
-  ConversationType,
-  getOrCreateConversation,
-} from "@/lib/conversations";
+import { ConversationType, getOrCreateConversation } from "@/lib/conversations";
 import { setFollowInterestType } from "@/lib/social";
 import { useIsMobileWeb } from "@/lib/useIsMobileWeb";
 
@@ -113,19 +110,9 @@ const GRID_MAX_WIDTH = 935;
 const WINDOW_WIDTH = Dimensions.get("window").width;
 const ITEM = (Math.min(WINDOW_WIDTH, GRID_MAX_WIDTH) - GAP * 2) / 3;
 
-function GradientButton({
-  title,
-  onPress,
-  disabled,
-  style,
-}: GradientButtonProps) {
+function GradientButton({ title, onPress, disabled, style }: GradientButtonProps) {
   return (
-    <TouchableOpacity
-      activeOpacity={0.8}
-      onPress={disabled ? undefined : onPress}
-      disabled={disabled}
-      style={style}
-    >
+    <TouchableOpacity activeOpacity={0.8} onPress={disabled ? undefined : onPress} disabled={disabled} style={style}>
       <LinearGradient
         colors={[Colors.brandStart, Colors.brandEnd]}
         start={{ x: 0, y: 0.5 }}
@@ -139,9 +126,7 @@ function GradientButton({
 }
 
 async function pathToUsableUrl(path: string) {
-  const signed = await supabase.storage
-    .from("posts")
-    .createSignedUrl(path, 60 * 60);
+  const signed = await supabase.storage.from("posts").createSignedUrl(path, 60 * 60);
   if (!signed.error && signed.data?.signedUrl) {
     const url = signed.data.signedUrl;
     ExpoImage.prefetch(url).catch(() => {});
@@ -152,7 +137,6 @@ async function pathToUsableUrl(path: string) {
   ExpoImage.prefetch(url).catch(() => {});
   return url;
 }
-
 
 function extractTagsFromBio(bio: string) {
   const tags = (bio || "")
@@ -172,13 +156,11 @@ function extractTagsFromBio(bio: string) {
 }
 
 function gridPath(p: DbPost) {
-  return p.media_type === "video" && p.thumbnail_path
-    ? p.thumbnail_path
-    : p.image_path;
+  return p.media_type === "video" && p.thumbnail_path ? p.thumbnail_path : p.image_path;
 }
 
 export default function Profile() {
-const router = useRouter();
+  const router = useRouter();
   const params = useLocalSearchParams<{ userId?: string }>();
   const { theme } = useTheme();
 
@@ -198,7 +180,7 @@ const router = useRouter();
           }
         }
       },
-    })
+    }),
   ).current;
 
   const routeUserId = typeof params.userId === "string" ? params.userId : null;
@@ -230,9 +212,7 @@ const router = useRouter();
 
   const [posts, setPosts] = useState<UiPost[]>([]);
   const [hasMore, setHasMore] = useState(true);
-  const [activeTab, setActiveTab] = useState<"grid" | "reels" | "tagged">(
-    "grid"
-  );
+  const [activeTab, setActiveTab] = useState<"grid" | "reels" | "tagged">("grid");
 
   const [loadingHeader, setLoadingHeader] = useState(true);
   const [loadingPosts, setLoadingPosts] = useState(false);
@@ -262,18 +242,14 @@ const router = useRouter();
   const [webCommentsLoading, setWebCommentsLoading] = useState(false);
   const [webCommentText, setWebCommentText] = useState("");
 
-
   const [stories, setStories] = useState<StoryRow[]>([]);
   const [, setLoadingStories] = useState(false);
   const [storiesViewerOpen, setStoriesViewerOpen] = useState(false);
   const [storiesViewerIndex, setStoriesViewerIndex] = useState(0);
 
-  const [relationshipStatus, setRelationshipStatus] =
-    useState<RelationshipStatus | null>(null);
-  const [myRelationshipStatus, setMyRelationshipStatus] =
-    useState<RelationshipStatus | null>(null);
-  const [relationshipStatusChangedAt, setRelationshipStatusChangedAt] =
-    useState<string | null>(null);
+  const [relationshipStatus, setRelationshipStatus] = useState<RelationshipStatus | null>(null);
+  const [myRelationshipStatus, setMyRelationshipStatus] = useState<RelationshipStatus | null>(null);
+  const [relationshipStatusChangedAt, setRelationshipStatusChangedAt] = useState<string | null>(null);
   const [gender, setGender] = useState<string>("");
 
   const getCooldownTimeLeft = useCallback((): string | null => {
@@ -284,9 +260,7 @@ const router = useRouter();
     if (hoursSince >= 24) return null;
     const hoursLeft = Math.ceil(24 - hoursSince);
     const minutesLeft = Math.ceil((24 - hoursSince) * 60);
-    return hoursLeft >= 1
-      ? `${hoursLeft}h`
-      : `${minutesLeft} minuto${minutesLeft !== 1 ? "s" : ""}`;
+    return hoursLeft >= 1 ? `${hoursLeft}h` : `${minutesLeft} minuto${minutesLeft !== 1 ? "s" : ""}`;
   }, [relationshipStatusChangedAt]);
 
   const triggerShake = useCallback(() => {
@@ -300,27 +274,28 @@ const router = useRouter();
     ]).start();
   }, [shakeAnim]);
 
-  const handleRelationshipPillPress = useCallback((value: RelationshipStatus) => {
-    if (value === draftRelationshipStatus) return;
-    const timeLeft = getCooldownTimeLeft();
-    if (timeLeft) {
-      setCooldownWarning(`⏳ Aguarde mais ${timeLeft} para alterar seu status novamente.`);
-      triggerShake();
-      return;
-    }
-    setCooldownWarning(null);
-    setDraftRelationshipStatus(value);
-  }, [draftRelationshipStatus, getCooldownTimeLeft, triggerShake]);
+  const handleRelationshipPillPress = useCallback(
+    (value: RelationshipStatus) => {
+      if (value === draftRelationshipStatus) return;
+      const timeLeft = getCooldownTimeLeft();
+      if (timeLeft) {
+        setCooldownWarning(`⏳ Aguarde mais ${timeLeft} para alterar seu status novamente.`);
+        triggerShake();
+        return;
+      }
+      setCooldownWarning(null);
+      setDraftRelationshipStatus(value);
+    },
+    [draftRelationshipStatus, getCooldownTimeLeft, triggerShake],
+  );
   const [settingsSubScreen, setSettingsSubScreen] = useState<string | null>(null);
 
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
   const [interestedCount, setInterestedCount] = useState(0);
 
-  const [currentInterestType, setCurrentInterestType] =
-    useState<InterestType | null>(null);
-  const [theirInterestType, setTheirInterestType] =
-    useState<InterestType | null>(null);
+  const [currentInterestType, setCurrentInterestType] = useState<InterestType | null>(null);
+  const [theirInterestType, setTheirInterestType] = useState<InterestType | null>(null);
 
   const [isFollowModalVisible, setFollowModalVisible] = useState(false);
   const [loadingFollow, setLoadingFollow] = useState(false);
@@ -335,8 +310,7 @@ const router = useRouter();
   const [logoutSheetVisible, setLogoutSheetVisible] = useState(false);
 
   const [peopleSheetVisible, setPeopleSheetVisible] = useState(false);
-  const [peopleSheetMode, setPeopleSheetMode] =
-    useState<"followers" | "following" | "interested">("followers");
+  const [peopleSheetMode, setPeopleSheetMode] = useState<"followers" | "following" | "interested">("followers");
 
   const isOwnProfile = !!authUserId && userId === authUserId;
   const isViewingOther = !!routeUserId && routeUserId !== authUserId;
@@ -376,9 +350,7 @@ const router = useRouter();
           let url: string | null | undefined = row.media_url;
 
           if (!url && row.media_path) {
-            const { data: publicData } = supabase.storage
-              .from("stories")
-              .getPublicUrl(row.media_path as string);
+            const { data: publicData } = supabase.storage.from("stories").getPublicUrl(row.media_path as string);
             url = publicData?.publicUrl ?? "";
           }
 
@@ -423,10 +395,7 @@ const router = useRouter();
       setUserId(targetUserId);
 
       const fallbackUsername =
-        (!routeUserId &&
-          (u.user_metadata?.username ||
-            (u.email ? u.email.split("@")[0] : "Me"))) ||
-        "user";
+        (!routeUserId && (u.user_metadata?.username || (u.email ? u.email.split("@")[0] : "Me"))) || "user";
 
       let relStatus: RelationshipStatus | null = null;
 
@@ -528,9 +497,7 @@ const router = useRouter();
             .eq("id", u.id)
             .maybeSingle();
           if (myProfile) {
-            setMyRelationshipStatus(
-              (myProfile as any).relationship_status ?? null
-            );
+            setMyRelationshipStatus((myProfile as any).relationship_status ?? null);
             setDraftPartnerId((myProfile as any).partner_id ?? null);
           }
         } catch {}
@@ -581,10 +548,7 @@ const router = useRouter();
 
   const fetchCountsBulk = useCallback(async (ids: number[]) => {
     if (!ids.length) return {};
-    const { data, error } = await supabase
-      .from("post_counts")
-      .select("*")
-      .in("post_id", ids);
+    const { data, error } = await supabase.from("post_counts").select("*").in("post_id", ids);
 
     if (error) throw error;
 
@@ -618,7 +582,11 @@ const router = useRouter();
         loadingRef.current = true;
         setLoadingPosts(true);
 
-        const { data: rows, error, count } = await supabase
+        const {
+          data: rows,
+          error,
+          count,
+        } = await supabase
           .from("posts_view")
           .select("*", { count: "exact" })
           .eq("user_id", userId)
@@ -637,7 +605,7 @@ const router = useRouter();
               image_url: gridUrl,
               media_url: mediaUrl,
             } as UiPost;
-          })
+          }),
         );
 
         setPosts((prev) => (reset ? mapped : [...prev, ...mapped]));
@@ -647,9 +615,7 @@ const router = useRouter();
           try {
             const bulk = await fetchCountsBulk(ids);
             setCounts((prev) => {
-              const base = reset
-                ? ({} as Record<number, Counter>)
-                : { ...prev };
+              const base = reset ? ({} as Record<number, Counter>) : { ...prev };
               ids.forEach((id) => {
                 base[id] = {
                   likes: bulk[id]?.likes ?? base[id]?.likes ?? 0,
@@ -679,102 +645,93 @@ const router = useRouter();
         setRefreshing(false);
       }
     },
-    [userId, fetchCountsBulk]
+    [userId, fetchCountsBulk],
   );
 
-const handleChangeAvatar = useCallback(async () => {
-  if (!userId || !isOwnProfile) return;
+  const handleChangeAvatar = useCallback(async () => {
+    if (!userId || !isOwnProfile) return;
 
-  const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  if (status !== "granted") {
-    Alert.alert(
-      "Permissão necessária",
-      "Precisamos de acesso às suas fotos para alterar o avatar."
-    );
-    return;
-  }
-
-  const result = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: ImagePicker.MediaTypeOptions.Images,
-    allowsEditing: true,
-    aspect: [1, 1],
-    quality: 0.8,
-  });
-
-  if (result.canceled) return;
-
-  try {
-    const picked = result.assets[0] as any;
-    const uri = picked.uri as string;
-
-    let ext = "jpg";
-    const mime = (picked.mimeType as string) || "image/jpeg";
-    if (mime.includes("png")) ext = "png";
-    else if (mime.includes("webp")) ext = "webp";
-    else if (mime.includes("jpeg")) ext = "jpg";
-
-    const fileName = `avatar-${userId}-${Date.now()}.${ext}`;
-
-    let uploadBody: any;
-    let contentType = mime;
-
-    if (Platform.OS === "web") {
-      const response = await fetch(uri);
-      const blob: Blob = await response.blob();
-      uploadBody = blob;
-      contentType = blob.type || mime;
-    } else {
-      const base64 = await FileSystem.readAsStringAsync(uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-
-      const binaryString =
-        (global as any).atob ? (global as any).atob(base64) : atob(base64);
-      const len = binaryString.length;
-      const bytes = new Uint8Array(len);
-      for (let i = 0; i < len; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-      uploadBody = bytes.buffer;
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permissão necessária", "Precisamos de acesso às suas fotos para alterar o avatar.");
+      return;
     }
 
-    const { error: uploadError } = await supabase.storage
-      .from("avatars")
-      .upload(fileName, uploadBody, {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+
+    if (result.canceled) return;
+
+    try {
+      const picked = result.assets[0] as any;
+      const uri = picked.uri as string;
+
+      let ext = "jpg";
+      const mime = (picked.mimeType as string) || "image/jpeg";
+      if (mime.includes("png")) ext = "png";
+      else if (mime.includes("webp")) ext = "webp";
+      else if (mime.includes("jpeg")) ext = "jpg";
+
+      const fileName = `avatar-${userId}-${Date.now()}.${ext}`;
+
+      let uploadBody: any;
+      let contentType = mime;
+
+      if (Platform.OS === "web") {
+        const response = await fetch(uri);
+        const blob: Blob = await response.blob();
+        uploadBody = blob;
+        contentType = blob.type || mime;
+      } else {
+        const base64 = await FileSystem.readAsStringAsync(uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+
+        const binaryString = (global as any).atob ? (global as any).atob(base64) : atob(base64);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        uploadBody = bytes.buffer;
+      }
+
+      const { error: uploadError } = await supabase.storage.from("avatars").upload(fileName, uploadBody, {
         upsert: true,
         contentType,
       });
 
-    if (uploadError) throw uploadError;
+      if (uploadError) throw uploadError;
 
-    const { data } = supabase.storage.from("avatars").getPublicUrl(fileName);
-    let publicUrl = data.publicUrl;
+      const { data } = supabase.storage.from("avatars").getPublicUrl(fileName);
+      let publicUrl = data.publicUrl;
 
-    if (publicUrl) {
-      publicUrl = `${publicUrl}?t=${Date.now()}`;
+      if (publicUrl) {
+        publicUrl = `${publicUrl}?t=${Date.now()}`;
+      }
+
+      setAvatarUrl(publicUrl);
+
+      const { error: profileError } = await supabase
+        .from("profiles")
+        .update({ avatar_url: publicUrl })
+        .eq("id", userId);
+
+      if (profileError) throw profileError;
+    } catch (e: any) {
+      console.error("Erro ao atualizar avatar:", e);
+      Alert.alert("Erro ao atualizar foto", e?.message ?? String(e));
     }
-
-    setAvatarUrl(publicUrl);
-
-    const { error: profileError } = await supabase
-      .from("profiles")
-      .update({ avatar_url: publicUrl })
-      .eq("id", userId);
-
-    if (profileError) throw profileError;
-  } catch (e: any) {
-    console.error("Erro ao atualizar avatar:", e);
-    Alert.alert("Erro ao atualizar foto", e?.message ?? String(e));
-  }
-}, [userId, isOwnProfile]);
+  }, [userId, isOwnProfile]);
 
   const handlePickHighlight = useCallback(async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
-      Alert.alert(
-        "Permissão necessária",
-        "Precisamos de acesso às suas fotos para criar destaques."
-      );
+      Alert.alert("Permissão necessária", "Precisamos de acesso às suas fotos para criar destaques.");
       return;
     }
 
@@ -808,20 +765,16 @@ const handleChangeAvatar = useCallback(async () => {
       if (hoursSince < 24) {
         const hoursLeft = Math.ceil(24 - hoursSince);
         const minutesLeft = Math.ceil((24 - hoursSince) * 60);
-        const timeLabel = hoursLeft >= 1
-          ? `${hoursLeft}h`
-          : `${minutesLeft} minuto${minutesLeft !== 1 ? "s" : ""}`;
+        const timeLabel = hoursLeft >= 1 ? `${hoursLeft}h` : `${minutesLeft} minuto${minutesLeft !== 1 ? "s" : ""}`;
         Alert.alert(
           "Aguarde um pouco ⏳",
-          `Você alterou seu status de relacionamento recentemente. Aguarde mais ${timeLabel} para poder alterar novamente.`
+          `Você alterou seu status de relacionamento recentemente. Aguarde mais ${timeLabel} para poder alterar novamente.`,
         );
         return;
       }
     }
 
-    const changedAt = statusChanged
-      ? new Date().toISOString()
-      : relationshipStatusChangedAt;
+    const changedAt = statusChanged ? new Date().toISOString() : relationshipStatusChangedAt;
 
     try {
       setSavingProfile(true);
@@ -836,9 +789,10 @@ const handleChangeAvatar = useCallback(async () => {
         avatar_url: avatarUrl,
         relationship_status: draftRelationshipStatus || null,
         gender: draftGender.trim() || null,
-        partner_id: (draftRelationshipStatus === "committed" || draftRelationshipStatus === "other")
-          ? (draftPartnerId || null)
-          : null,
+        partner_id:
+          draftRelationshipStatus === "committed" || draftRelationshipStatus === "other"
+            ? draftPartnerId || null
+            : null,
       };
 
       if (statusChanged) {
@@ -866,7 +820,7 @@ const handleChangeAvatar = useCallback(async () => {
               id: userId,
               ...updatePayload,
             },
-            { onConflict: "id" }
+            { onConflict: "id" },
           )
           .select("*")
           .single();
@@ -912,9 +866,7 @@ const handleChangeAvatar = useCallback(async () => {
   const signOut = useCallback(async () => {
     try {
       try {
-        supabase
-          .getChannels()
-          .forEach((ch: RealtimeChannel) => supabase.removeChannel(ch));
+        supabase.getChannels().forEach((ch: RealtimeChannel) => supabase.removeChannel(ch));
       } catch {}
 
       const { error } = await supabase.auth.signOut();
@@ -957,9 +909,7 @@ const handleChangeAvatar = useCallback(async () => {
 
       try {
         if (nextLiked) {
-          const { error: insErr } = await supabase
-            .from("likes")
-            .insert({ post_id: postId, user_id: u.user.id });
+          const { error: insErr } = await supabase.from("likes").insert({ post_id: postId, user_id: u.user.id });
           if (insErr) throw insErr;
         } else {
           const { error: delErr } = await supabase
@@ -973,7 +923,7 @@ const handleChangeAvatar = useCallback(async () => {
         setCounts((prev) => ({ ...prev, [postId]: cur }));
       }
     },
-    [counts]
+    [counts],
   );
 
   const openComments = useCallback(
@@ -994,7 +944,7 @@ const handleChangeAvatar = useCallback(async () => {
       setCommentsPostId(postId);
       setCommentsOpen(true);
     },
-    [IS_WEB, viewerOpen, viewerIndex]
+    [IS_WEB, viewerOpen, viewerIndex],
   );
 
   const closeComments = useCallback(() => {
@@ -1009,7 +959,6 @@ const handleChangeAvatar = useCallback(async () => {
       }, 0);
     }
   }, [IS_WEB]);
-
 
   useEffect(() => {
     if (!IS_WEB) return;
@@ -1049,7 +998,6 @@ const handleChangeAvatar = useCallback(async () => {
     } catch {}
   }, []);
 
-
   const deletePost = useCallback(
     async (postId: number, skipConfirm?: boolean) => {
       if (!authUserId) return;
@@ -1060,14 +1008,10 @@ const handleChangeAvatar = useCallback(async () => {
       let ok = true;
       if (!skipConfirm) {
         ok = await new Promise<boolean>((resolve) => {
-          Alert.alert(
-            "Apagar postagem",
-            "Essa ação é permanente. Quer apagar esta postagem?",
-            [
-              { text: "Cancelar", style: "cancel", onPress: () => resolve(false) },
-              { text: "Apagar", style: "destructive", onPress: () => resolve(true) },
-            ]
-          );
+          Alert.alert("Apagar postagem", "Essa ação é permanente. Quer apagar esta postagem?", [
+            { text: "Cancelar", style: "cancel", onPress: () => resolve(false) },
+            { text: "Apagar", style: "destructive", onPress: () => resolve(true) },
+          ]);
         });
       }
 
@@ -1084,11 +1028,7 @@ const handleChangeAvatar = useCallback(async () => {
       } catch {}
 
       {
-        const { error } = await supabase
-          .from("posts")
-          .delete()
-          .eq("id", postId)
-          .eq("user_id", authUserId);
+        const { error } = await supabase.from("posts").delete().eq("id", postId).eq("user_id", authUserId);
 
         if (error) {
           Alert.alert("Erro", error.message || "Não foi possível apagar a postagem.");
@@ -1115,10 +1055,8 @@ const handleChangeAvatar = useCallback(async () => {
       });
       setViewerOpen(false);
     },
-    [authUserId, posts]
+    [authUserId, posts],
   );
-
-
 
   const openPostFromGrid = useCallback((index: number) => {
     setViewerIndex(index);
@@ -1188,10 +1126,7 @@ const handleChangeAvatar = useCallback(async () => {
         }
       } catch {}
     } catch (e: any) {
-      Alert.alert(
-        "Erro ao deixar de seguir",
-        e?.message ?? "Não foi possível deixar de seguir."
-      );
+      Alert.alert("Erro ao deixar de seguir", e?.message ?? "Não foi possível deixar de seguir.");
     } finally {
       setLoadingFollow(false);
     }
@@ -1234,18 +1169,14 @@ const handleChangeAvatar = useCallback(async () => {
         // Non-match silent crush — show subtle confirmation
         if (interestType === "silent_crush") {
           setSilentModalTitle("Shhh…");
-          setSilentModalMessage(
-            "Crush silencioso enviado. Se for recíproco, a faísca aparece 😉"
-          );
+          setSilentModalMessage("Crush silencioso enviado. Se for recíproco, a faísca aparece 😉");
           setSilentModalVisible(true);
         }
 
         // Non-match crush — show confirmation
         if (interestType === "crush") {
           setSilentModalTitle("💘 Crush enviado!");
-          setSilentModalMessage(
-            "Agora é esperar… Se a pessoa curtir de volta, vocês vão se conectar!"
-          );
+          setSilentModalMessage("Agora é esperar… Se a pessoa curtir de volta, vocês vão se conectar!");
           setSilentModalVisible(true);
         }
       } catch (e: any) {
@@ -1253,7 +1184,10 @@ const handleChangeAvatar = useCallback(async () => {
         if (msg === "CRUSH_BLOCKED_SELF_COMMITTED") {
           Alert.alert("Coração ocupado 💍", "Você está em um relacionamento. Mude seu status para usar crushes.");
         } else if (msg === "CRUSH_BLOCKED_TARGET_COMMITTED") {
-          Alert.alert("Essa pessoa está comprometida 💔", "Não é possível enviar crush para alguém em um relacionamento.");
+          Alert.alert(
+            "Essa pessoa está comprometida 💔",
+            "Não é possível enviar crush para alguém em um relacionamento.",
+          );
         } else {
           Alert.alert("Erro ao seguir", msg || "Não foi possível salvar sua escolha.");
         }
@@ -1261,7 +1195,7 @@ const handleChangeAvatar = useCallback(async () => {
         setLoadingFollow(false);
       }
     },
-    [authUserId, userId, fullName, username]
+    [authUserId, userId, fullName, username],
   );
 
   const openPeopleSheet = useCallback(
@@ -1269,17 +1203,14 @@ const handleChangeAvatar = useCallback(async () => {
       if (!userId) return;
 
       if (mode === "interested" && !isOwnProfile) {
-        Alert.alert(
-          "Área reservada",
-          "Só o dono do perfil pode ver quem está interessado 😉"
-        );
+        Alert.alert("Área reservada", "Só o dono do perfil pode ver quem está interessado 😉");
         return;
       }
 
       setPeopleSheetMode(mode);
       setPeopleSheetVisible(true);
     },
-    [userId, isOwnProfile]
+    [userId, isOwnProfile],
   );
 
   const handlePressUser = useCallback(
@@ -1295,21 +1226,17 @@ const handleChangeAvatar = useCallback(async () => {
         router.push(`/profile?userId=${targetId}`);
       }
     },
-    [authUserId, router]
+    [authUserId, router],
   );
 
-  const isMutualFriend =
-    currentInterestType === "friend" && theirInterestType === "friend";
+  const isMutualFriend = currentInterestType === "friend" && theirInterestType === "friend";
 
   const isCrushMatch =
-    (currentInterestType === "crush" ||
-      currentInterestType === "silent_crush") &&
+    (currentInterestType === "crush" || currentInterestType === "silent_crush") &&
     (theirInterestType === "crush" || theirInterestType === "silent_crush");
 
-  const viewerIsCommitted =
-    myRelationshipStatus === "committed" || myRelationshipStatus === "other";
-  const targetIsCommitted =
-    relationshipStatus === "committed" || relationshipStatus === "other";
+  const viewerIsCommitted = myRelationshipStatus === "committed" || myRelationshipStatus === "other";
+  const targetIsCommitted = relationshipStatus === "committed" || relationshipStatus === "other";
 
   // Checar se são parceiros vinculados
   const areLinkedPartners = !!(
@@ -1318,26 +1245,24 @@ const handleChangeAvatar = useCallback(async () => {
     draftPartnerId === userId
   );
 
-  const canOpenCrushConversation =
-    isCrushMatch && (!viewerIsCommitted && !targetIsCommitted || areLinkedPartners);
-  const canOpenConversation = isMutualFriend || canOpenCrushConversation;
+  const canOpenCrushConversation = isCrushMatch && ((!viewerIsCommitted && !targetIsCommitted) || areLinkedPartners);
+  // Permitir abrir conversa se: amigos mútuos, crush match, OU se eu sigo essa pessoa (friend)
+  const canOpenConversation = isMutualFriend || canOpenCrushConversation || (currentInterestType === "friend");
 
   const openConversation = useCallback(
     async (conversationType: ConversationType) => {
       if (!authUserId || !userId) return;
-      if (
-        conversationType === "crush" &&
-        (viewerIsCommitted || targetIsCommitted) &&
-        !areLinkedPartners
-      ) {
+      if (conversationType === "crush" && (viewerIsCommitted || targetIsCommitted) && !areLinkedPartners) {
         Alert.alert(
           "🔒 Conversa bloqueada",
-          "Conversas de crush ficam indisponíveis quando um dos dois está namorando ou casado(a)."
+          "Conversas de crush ficam indisponíveis quando um dos dois está namorando ou casado(a).",
         );
         return;
       }
 
       try {
+        console.log("[openConversation] starting:", { authUserId, userId, conversationType });
+
         // Reativar conversa caso tenha sido soft-deleted
         const existingConvs = await supabase
           .from("conversations")
@@ -1346,11 +1271,15 @@ const handleChangeAvatar = useCallback(async () => {
           .eq("conversation_type", conversationType)
           .maybeSingle();
 
+        console.log("[openConversation] existing check:", existingConvs?.data, existingConvs?.error);
+
         if (existingConvs?.data?.id) {
-          await supabase.rpc("reactivate_conversation", {
-            _conversation_id: existingConvs.data.id,
-            _user_id: authUserId,
-          }).catch(() => {});
+          await supabase
+            .rpc("reactivate_conversation", {
+              _conversation_id: existingConvs.data.id,
+              _user_id: authUserId,
+            })
+            .catch((err: any) => console.warn("[openConversation] reactivate error (non-fatal):", err));
         }
 
         const conversation = await getOrCreateConversation({
@@ -1359,18 +1288,18 @@ const handleChangeAvatar = useCallback(async () => {
           conversationType,
         });
 
+        console.log("[openConversation] navigating to conversation:", conversation.id);
+
         router.push({
           pathname: "/conversations/[id]",
           params: { id: conversation.id, type: conversationType },
         });
       } catch (e: any) {
-        Alert.alert(
-          "Erro ao abrir conversa",
-          e?.message ?? "Não foi possível abrir a conversa."
-        );
+        console.error("[openConversation] FULL ERROR:", JSON.stringify(e, null, 2));
+        Alert.alert("Erro ao abrir conversa", e?.message ?? "Não foi possível abrir a conversa.");
       }
     },
-    [authUserId, userId, router, viewerIsCommitted, targetIsCommitted, areLinkedPartners]
+    [authUserId, userId, router, viewerIsCommitted, targetIsCommitted, areLinkedPartners],
   );
 
   useEffect(() => {
@@ -1380,7 +1309,7 @@ const handleChangeAvatar = useCallback(async () => {
   useFocusEffect(
     useCallback(() => {
       bootstrap();
-    }, [bootstrap])
+    }, [bootstrap]),
   );
 
   useEffect(() => {
@@ -1393,17 +1322,8 @@ const handleChangeAvatar = useCallback(async () => {
 
   const renderItem = useCallback(
     ({ item, index }: { item: UiPost; index: number }) => (
-      <TouchableOpacity
-        style={styles.cell}
-        activeOpacity={0.8}
-        onPress={() => openPostFromGrid(index)}
-      >
-        <ExpoImage
-          source={{ uri: item.image_url }}
-          style={styles.item}
-          contentFit="cover"
-          cachePolicy="disk"
-        />
+      <TouchableOpacity style={styles.cell} activeOpacity={0.8} onPress={() => openPostFromGrid(index)}>
+        <ExpoImage source={{ uri: item.image_url }} style={styles.item} contentFit="cover" cachePolicy="disk" />
         {item.media_type === "video" && (
           <View style={styles.playBadge}>
             <Text style={styles.playText}>▶︎</Text>
@@ -1411,7 +1331,7 @@ const handleChangeAvatar = useCallback(async () => {
         )}
       </TouchableOpacity>
     ),
-    [openPostFromGrid]
+    [openPostFromGrid],
   );
 
   const handleRefresh = useCallback(() => {
@@ -1431,22 +1351,14 @@ const handleChangeAvatar = useCallback(async () => {
   const gridPosts = posts;
   const reelsPosts = posts.filter((p) => p.media_type === "video");
   const taggedPosts: UiPost[] = [];
-  const currentPosts =
-    activeTab === "grid"
-      ? gridPosts
-      : activeTab === "reels"
-      ? reelsPosts
-      : taggedPosts;
+  const currentPosts = activeTab === "grid" ? gridPosts : activeTab === "reels" ? reelsPosts : taggedPosts;
 
   const viewerItems: ViewerItem[] = currentPosts.map((p) => {
     const mediaUrlCandidate = p.media_url || p.image_url;
     const imageUrlCandidate = p.image_url || p.media_url;
 
     const urlToCheck = (mediaUrlCandidate || imageUrlCandidate || "").toLowerCase();
-    const looksLikeVideo =
-      p.media_type === "video" ||
-      urlToCheck.includes(".mp4") ||
-      urlToCheck.includes("video%2F");
+    const looksLikeVideo = p.media_type === "video" || urlToCheck.includes(".mp4") || urlToCheck.includes("video%2F");
 
     const mediaType: ViewerItem["media_type"] = looksLikeVideo ? "video" : "image";
 
@@ -1494,36 +1406,120 @@ const handleChangeAvatar = useCallback(async () => {
 
   // ── SETTINGS SCREEN ──
   if (settingsVisible) {
-  // ── SETTINGS SUB-SCREEN (dedicated fullscreen) ──
+    // ── SETTINGS SUB-SCREEN (dedicated fullscreen) ──
     if (settingsSubScreen) {
       const subScreenInfo: Record<string, { emoji: string; title: string; desc: string }> = {
-        privacy: { emoji: "🔒", title: "Privacidade da conta", desc: "Controle quem pode ver seu perfil, posts e stories. Configure a visibilidade da sua conta e gerencie permissões de acesso." },
-        notifications: { emoji: "🔔", title: "Notificações", desc: "Gerencie suas preferências de notificações. Escolha quais alertas receber sobre curtidas, comentários, seguidores e mensagens." },
-        security: { emoji: "🛡️", title: "Segurança", desc: "Proteja sua conta com verificação em duas etapas, gerencie dispositivos conectados e revise atividades recentes." },
-        messages_settings: { emoji: "💬", title: "Mensagens e respostas", desc: "Configure quem pode enviar mensagens e respostas a stories. Gerencie filtros de mensagens e solicitações." },
-        tags: { emoji: "🏷️", title: "Marcações e menções", desc: "Controle quem pode marcar ou mencionar você em posts, stories e comentários." },
-        comments: { emoji: "💭", title: "Comentários", desc: "Gerencie quem pode comentar nos seus posts. Configure filtros de palavras e moderação automática." },
-        blocked: { emoji: "🚫", title: "Bloqueados", desc: "Veja e gerencie a lista de contas que você bloqueou. Contas bloqueadas não podem interagir com você." },
-        restricted: { emoji: "⚠️", title: "Contas restritas", desc: "Contas restritas podem ver seus posts, mas não interagem diretamente. Útil para limitar contato sem bloquear." },
-        close_friends: { emoji: "⭐", title: "Amigos próximos", desc: "Crie sua lista de amigos próximos para compartilhar stories e conteúdos exclusivos com quem mais importa." },
-        tribes: { emoji: "👥", title: "Tribos", desc: "Crie ou participe de tribos — grupos de interesse que conectam pessoas com afinidades em comum." },
-        discovery: { emoji: "🎯", title: "Preferências de descoberta", desc: "Configure como o Lupyy sugere perfis para você. Ajuste seus interesses e preferências de descoberta." },
-        saved: { emoji: "🔖", title: "Itens salvos", desc: "Acesse todos os posts, vídeos e conteúdos que você salvou para ver depois." },
-        archived: { emoji: "📦", title: "Itens arquivados", desc: "Posts e stories que você arquivou ficam aqui. Você pode restaurá-los a qualquer momento." },
-        activity: { emoji: "📊", title: "Sua atividade", desc: "Veja o resumo da sua atividade no Lupyy: tempo de uso, interações, curtidas e muito mais." },
-        appearance: { emoji: "🎨", title: "Aparência / tema", desc: "Personalize a aparência do Lupyy. Escolha entre temas escuros, coloridos e personalizados." },
-        time_mgmt: { emoji: "⏱️", title: "Gerenciamento de tempo", desc: "Configure lembretes de tempo de uso e pausas para manter um uso saudável do app." },
-        help: { emoji: "❓", title: "Ajuda / suporte", desc: "Precisa de ajuda? Acesse perguntas frequentes, entre em contato com o suporte ou reporte problemas." },
-        privacy_policy: { emoji: "📋", title: "Política de privacidade", desc: "Leia nossa política de privacidade para entender como protegemos seus dados e informações pessoais." },
-        terms: { emoji: "📜", title: "Termos de uso", desc: "Conheça os termos e condições de uso do Lupyy. Saiba seus direitos e responsabilidades na plataforma." },
+        privacy: {
+          emoji: "🔒",
+          title: "Privacidade da conta",
+          desc: "Controle quem pode ver seu perfil, posts e stories. Configure a visibilidade da sua conta e gerencie permissões de acesso.",
+        },
+        notifications: {
+          emoji: "🔔",
+          title: "Notificações",
+          desc: "Gerencie suas preferências de notificações. Escolha quais alertas receber sobre curtidas, comentários, seguidores e mensagens.",
+        },
+        security: {
+          emoji: "🛡️",
+          title: "Segurança",
+          desc: "Proteja sua conta com verificação em duas etapas, gerencie dispositivos conectados e revise atividades recentes.",
+        },
+        messages_settings: {
+          emoji: "💬",
+          title: "Mensagens e respostas",
+          desc: "Configure quem pode enviar mensagens e respostas a stories. Gerencie filtros de mensagens e solicitações.",
+        },
+        tags: {
+          emoji: "🏷️",
+          title: "Marcações e menções",
+          desc: "Controle quem pode marcar ou mencionar você em posts, stories e comentários.",
+        },
+        comments: {
+          emoji: "💭",
+          title: "Comentários",
+          desc: "Gerencie quem pode comentar nos seus posts. Configure filtros de palavras e moderação automática.",
+        },
+        blocked: {
+          emoji: "🚫",
+          title: "Bloqueados",
+          desc: "Veja e gerencie a lista de contas que você bloqueou. Contas bloqueadas não podem interagir com você.",
+        },
+        restricted: {
+          emoji: "⚠️",
+          title: "Contas restritas",
+          desc: "Contas restritas podem ver seus posts, mas não interagem diretamente. Útil para limitar contato sem bloquear.",
+        },
+        close_friends: {
+          emoji: "⭐",
+          title: "Amigos próximos",
+          desc: "Crie sua lista de amigos próximos para compartilhar stories e conteúdos exclusivos com quem mais importa.",
+        },
+        tribes: {
+          emoji: "👥",
+          title: "Tribos",
+          desc: "Crie ou participe de tribos — grupos de interesse que conectam pessoas com afinidades em comum.",
+        },
+        discovery: {
+          emoji: "🎯",
+          title: "Preferências de descoberta",
+          desc: "Configure como o Lupyy sugere perfis para você. Ajuste seus interesses e preferências de descoberta.",
+        },
+        saved: {
+          emoji: "🔖",
+          title: "Itens salvos",
+          desc: "Acesse todos os posts, vídeos e conteúdos que você salvou para ver depois.",
+        },
+        archived: {
+          emoji: "📦",
+          title: "Itens arquivados",
+          desc: "Posts e stories que você arquivou ficam aqui. Você pode restaurá-los a qualquer momento.",
+        },
+        activity: {
+          emoji: "📊",
+          title: "Sua atividade",
+          desc: "Veja o resumo da sua atividade no Lupyy: tempo de uso, interações, curtidas e muito mais.",
+        },
+        appearance: {
+          emoji: "🎨",
+          title: "Aparência / tema",
+          desc: "Personalize a aparência do Lupyy. Escolha entre temas escuros, coloridos e personalizados.",
+        },
+        time_mgmt: {
+          emoji: "⏱️",
+          title: "Gerenciamento de tempo",
+          desc: "Configure lembretes de tempo de uso e pausas para manter um uso saudável do app.",
+        },
+        help: {
+          emoji: "❓",
+          title: "Ajuda / suporte",
+          desc: "Precisa de ajuda? Acesse perguntas frequentes, entre em contato com o suporte ou reporte problemas.",
+        },
+        privacy_policy: {
+          emoji: "📋",
+          title: "Política de privacidade",
+          desc: "Leia nossa política de privacidade para entender como protegemos seus dados e informações pessoais.",
+        },
+        terms: {
+          emoji: "📜",
+          title: "Termos de uso",
+          desc: "Conheça os termos e condições de uso do Lupyy. Saiba seus direitos e responsabilidades na plataforma.",
+        },
       };
 
-      const info = subScreenInfo[settingsSubScreen] || { emoji: "⚙️", title: "Em breve", desc: "Esta funcionalidade estará disponível em breve." };
+      const info = subScreenInfo[settingsSubScreen] || {
+        emoji: "⚙️",
+        title: "Em breve",
+        desc: "Esta funcionalidade estará disponível em breve.",
+      };
 
       return (
         <SafeAreaView style={[styles.screen, { backgroundColor: theme.colors.background }]}>
           <View style={styles.settingsHeader}>
-            <TouchableOpacity onPress={() => setSettingsSubScreen(null)} activeOpacity={0.7} style={styles.settingsBackBtn}>
+            <TouchableOpacity
+              onPress={() => setSettingsSubScreen(null)}
+              activeOpacity={0.7}
+              style={styles.settingsBackBtn}
+            >
               <Text style={[styles.settingsBackIcon, { color: theme.colors.text }]}>←</Text>
             </TouchableOpacity>
             <Text style={[styles.settingsTitle, { color: theme.colors.text }]}>{info.title}</Text>
@@ -1542,7 +1538,14 @@ const handleChangeAvatar = useCallback(async () => {
       {
         title: "Sua conta",
         items: [
-          { icon: "👤", label: "Editar perfil", onPress: () => { setSettingsVisible(false); setEditing(true); } },
+          {
+            icon: "👤",
+            label: "Editar perfil",
+            onPress: () => {
+              setSettingsVisible(false);
+              setEditing(true);
+            },
+          },
           { icon: "🔒", label: "Privacidade da conta", onPress: () => setSettingsSubScreen("privacy") },
           { icon: "🔔", label: "Notificações", onPress: () => setSettingsSubScreen("notifications") },
           { icon: "🛡️", label: "Segurança", onPress: () => setSettingsSubScreen("security") },
@@ -1561,13 +1564,17 @@ const handleChangeAvatar = useCallback(async () => {
       {
         title: "Social / Lupyy",
         items: [
-          { icon: "💘", label: "Crushes", onPress: () => {
-            if (isCommitted && isOwnProfile) {
-              Alert.alert("🔒 Crushes bloqueados", "Seu status de relacionamento bloqueia o acesso aos crushes.");
-              return;
-            }
-            openPeopleSheet("interested");
-          } },
+          {
+            icon: "💘",
+            label: "Crushes",
+            onPress: () => {
+              if (isCommitted && isOwnProfile) {
+                Alert.alert("🔒 Crushes bloqueados", "Seu status de relacionamento bloqueia o acesso aos crushes.");
+                return;
+              }
+              openPeopleSheet("interested");
+            },
+          },
           { icon: "⭐", label: "Amigos próximos", onPress: () => setSettingsSubScreen("close_friends") },
           { icon: "👥", label: "Tribos", onPress: () => setSettingsSubScreen("tribes") },
           { icon: "🎯", label: "Preferências de descoberta", onPress: () => setSettingsSubScreen("discovery") },
@@ -1597,7 +1604,11 @@ const handleChangeAvatar = useCallback(async () => {
       <SafeAreaView style={[styles.screen, { backgroundColor: theme.colors.background }]}>
         {/* Header */}
         <View style={styles.settingsHeader}>
-          <TouchableOpacity onPress={() => setSettingsVisible(false)} activeOpacity={0.7} style={styles.settingsBackBtn}>
+          <TouchableOpacity
+            onPress={() => setSettingsVisible(false)}
+            activeOpacity={0.7}
+            style={styles.settingsBackBtn}
+          >
             <Text style={[styles.settingsBackIcon, { color: theme.colors.text }]}>←</Text>
           </TouchableOpacity>
           <Text style={[styles.settingsTitle, { color: theme.colors.text }]}>Configurações e atividade</Text>
@@ -1615,7 +1626,9 @@ const handleChangeAvatar = useCallback(async () => {
         <ScrollView contentContainerStyle={styles.settingsScroll} showsVerticalScrollIndicator={false}>
           {settingsSections.map((section, sIdx) => (
             <View key={sIdx} style={styles.settingsSection}>
-              <Text style={[styles.settingsSectionTitle, { color: theme.colors.primary || "#a855f7" }]}>{section.title}</Text>
+              <Text style={[styles.settingsSectionTitle, { color: theme.colors.primary || "#a855f7" }]}>
+                {section.title}
+              </Text>
               {section.items.map((item, iIdx) => (
                 <TouchableOpacity
                   key={iIdx}
@@ -1693,22 +1706,36 @@ const handleChangeAvatar = useCallback(async () => {
           <View style={styles.editAvatarSection}>
             <TouchableOpacity onPress={handleChangeAvatar} activeOpacity={0.8} style={styles.editAvatarBtn}>
               {avatarUrl ? (
-                <ExpoImage source={{ uri: avatarUrl }} style={styles.editAvatarImg} contentFit="cover" cachePolicy="disk" />
+                <ExpoImage
+                  source={{ uri: avatarUrl }}
+                  style={styles.editAvatarImg}
+                  contentFit="cover"
+                  cachePolicy="disk"
+                />
               ) : (
-                <LinearGradient colors={[Colors.brandStart, Colors.brandEnd]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.editAvatarImg}>
+                <LinearGradient
+                  colors={[Colors.brandStart, Colors.brandEnd]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.editAvatarImg}
+                >
                   <Text style={styles.avatarInitials}>{username?.[0]?.toUpperCase() || "L"}</Text>
                 </LinearGradient>
               )}
             </TouchableOpacity>
             <TouchableOpacity onPress={handleChangeAvatar} activeOpacity={0.7}>
-              <Text style={[styles.editAvatarLabel, { color: theme.colors.primary || "#a855f7" }]}>Editar foto ou avatar</Text>
+              <Text style={[styles.editAvatarLabel, { color: theme.colors.primary || "#a855f7" }]}>
+                Editar foto ou avatar
+              </Text>
             </TouchableOpacity>
           </View>
 
           {/* Fields */}
           <View style={styles.editFieldsWrap}>
             {/* Nome */}
-            <View style={[styles.editFieldBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+            <View
+              style={[styles.editFieldBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+            >
               <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>Nome</Text>
               <TextInput
                 value={draftFullName}
@@ -1720,7 +1747,9 @@ const handleChangeAvatar = useCallback(async () => {
             </View>
 
             {/* Username */}
-            <View style={[styles.editFieldBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+            <View
+              style={[styles.editFieldBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+            >
               <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>Nome de usuário</Text>
               <TextInput
                 value={draftUsername}
@@ -1733,7 +1762,12 @@ const handleChangeAvatar = useCallback(async () => {
             </View>
 
             {/* Bio */}
-            <View style={[styles.editFieldBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, minHeight: 100 }]}>
+            <View
+              style={[
+                styles.editFieldBox,
+                { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, minHeight: 100 },
+              ]}
+            >
               <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>Bio</Text>
               <TextInput
                 value={draftBio}
@@ -1746,7 +1780,9 @@ const handleChangeAvatar = useCallback(async () => {
             </View>
 
             {/* Gênero */}
-            <View style={[styles.editFieldBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+            <View
+              style={[styles.editFieldBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+            >
               <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>Gênero</Text>
               <View style={styles.editGenderRow}>
                 {genderOptions.map((g) => (
@@ -1757,19 +1793,28 @@ const handleChangeAvatar = useCallback(async () => {
                     style={[
                       styles.editGenderPill,
                       {
-                        borderColor: draftGender === g ? (theme.colors.primary || "#a855f7") : theme.colors.border,
+                        borderColor: draftGender === g ? theme.colors.primary || "#a855f7" : theme.colors.border,
                         backgroundColor: draftGender === g ? "rgba(168,85,247,0.15)" : "transparent",
                       },
                     ]}
                   >
-                    <Text style={[styles.editGenderText, { color: draftGender === g ? (theme.colors.primary || "#a855f7") : theme.colors.text }]}>{g}</Text>
+                    <Text
+                      style={[
+                        styles.editGenderText,
+                        { color: draftGender === g ? theme.colors.primary || "#a855f7" : theme.colors.text },
+                      ]}
+                    >
+                      {g}
+                    </Text>
                   </TouchableOpacity>
                 ))}
               </View>
             </View>
 
             {/* Status de relacionamento */}
-            <View style={[styles.editFieldBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+            <View
+              style={[styles.editFieldBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+            >
               <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>Status de relacionamento</Text>
               <Animated.View style={[styles.editGenderRow, { transform: [{ translateX: shakeAnim }] }]}>
                 {relationshipOptions.map((opt) => (
@@ -1780,25 +1825,36 @@ const handleChangeAvatar = useCallback(async () => {
                     style={[
                       styles.editGenderPill,
                       {
-                        borderColor: draftRelationshipStatus === opt.value ? (theme.colors.primary || "#a855f7") : theme.colors.border,
-                        backgroundColor: draftRelationshipStatus === opt.value ? "rgba(168,85,247,0.15)" : "transparent",
+                        borderColor:
+                          draftRelationshipStatus === opt.value
+                            ? theme.colors.primary || "#a855f7"
+                            : theme.colors.border,
+                        backgroundColor:
+                          draftRelationshipStatus === opt.value ? "rgba(168,85,247,0.15)" : "transparent",
                       },
                     ]}
                   >
-                    <Text style={[styles.editGenderText, { color: draftRelationshipStatus === opt.value ? (theme.colors.primary || "#a855f7") : theme.colors.text }]}>
+                    <Text
+                      style={[
+                        styles.editGenderText,
+                        {
+                          color:
+                            draftRelationshipStatus === opt.value
+                              ? theme.colors.primary || "#a855f7"
+                              : theme.colors.text,
+                        },
+                      ]}
+                    >
                       {opt.icon} {opt.label}
                     </Text>
                   </TouchableOpacity>
                 ))}
               </Animated.View>
-              {cooldownWarning && (
-                <Text style={[styles.editFieldHint, { color: "#f59e0b" }]}>
-                  {cooldownWarning}
-                </Text>
-              )}
+              {cooldownWarning && <Text style={[styles.editFieldHint, { color: "#f59e0b" }]}>{cooldownWarning}</Text>}
               {(draftRelationshipStatus === "committed" || draftRelationshipStatus === "other") && (
                 <Text style={[styles.editFieldHint, { color: theme.colors.textMuted }]}>
-                  🔒 Crushes e mensagens de crush serão bloqueados enquanto esse status estiver ativo. Após ativar, só poderá alterar novamente depois de 24 horas.
+                  🔒 Crushes e mensagens de crush serão bloqueados enquanto esse status estiver ativo. Após ativar, só
+                  poderá alterar novamente depois de 24 horas.
                   {"\n"}💑 Vincule seu parceiro(a) abaixo para manter a conversa de crush entre vocês liberada.
                 </Text>
               )}
@@ -1806,16 +1862,28 @@ const handleChangeAvatar = useCallback(async () => {
 
             {/* Parceiro vinculado — só aparece quando comprometido */}
             {(draftRelationshipStatus === "committed" || draftRelationshipStatus === "other") && (
-              <View style={[styles.editFieldBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-                <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>
-                  💑 Com quem você está?
-                </Text>
+              <View
+                style={[
+                  styles.editFieldBox,
+                  { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+                ]}
+              >
+                <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>💑 Com quem você está?</Text>
                 <Text style={[styles.editFieldHint, { color: theme.colors.textMuted, marginBottom: 8 }]}>
                   Vincule seu parceiro(a) para liberar o chat de crush entre vocês.
                 </Text>
 
                 {partnerProfile ? (
-                  <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: "rgba(168,85,247,0.1)", borderRadius: 14, padding: 10, marginBottom: 8 }}>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      backgroundColor: "rgba(168,85,247,0.1)",
+                      borderRadius: 14,
+                      padding: 10,
+                      marginBottom: 8,
+                    }}
+                  >
                     <ExpoImage
                       source={{ uri: partnerProfile.avatar_url || undefined }}
                       style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: "#333", marginRight: 10 }}
@@ -1826,9 +1894,7 @@ const handleChangeAvatar = useCallback(async () => {
                         {partnerProfile.full_name || partnerProfile.username || "Parceiro(a)"}
                       </Text>
                       {partnerProfile.username && (
-                        <Text style={{ color: theme.colors.textMuted, fontSize: 12 }}>
-                          @{partnerProfile.username}
-                        </Text>
+                        <Text style={{ color: theme.colors.textMuted, fontSize: 12 }}>@{partnerProfile.username}</Text>
                       )}
                     </View>
                     <TouchableOpacity
@@ -1896,7 +1962,9 @@ const handleChangeAvatar = useCallback(async () => {
             )}
 
             {/* Estilo visual */}
-            <View style={[styles.editFieldBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+            <View
+              style={[styles.editFieldBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+            >
               <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>Estilo visual</Text>
               <View style={styles.editThemeBox}>
                 <ThemeSelector />
@@ -1915,16 +1983,15 @@ const handleChangeAvatar = useCallback(async () => {
       currentInterestType === "friend"
         ? "Amigos"
         : currentInterestType === "crush"
-        ? "Crush"
-        : currentInterestType === "silent_crush"
-        ? "Crush silencioso"
-        : "Conectar";
+          ? "Crush"
+          : currentInterestType === "silent_crush"
+            ? "Crush silencioso"
+            : "Conectar";
 
     const hasCrushConversation = isCrushMatch;
     const hasFriendConversation = isMutualFriend;
 
     const hasStories = stories.length > 0;
-
 
     return (
       <View style={styles.mainColumn}>
@@ -1940,64 +2007,47 @@ const handleChangeAvatar = useCallback(async () => {
                 }
               }}
             >
-              <Text style={[styles.topIcon, { color: theme.colors.text }]}>
-                ←
-              </Text>
+              <Text style={[styles.topIcon, { color: theme.colors.text }]}>←</Text>
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
               activeOpacity={isOwnProfile ? 0.8 : 1}
               onPress={isOwnProfile ? handleAddStory : undefined}
             >
-              <Text style={[styles.topIcon, { color: theme.colors.text }]}>
-                ＋
-              </Text>
+              <Text style={[styles.topIcon, { color: theme.colors.text }]}>＋</Text>
             </TouchableOpacity>
           )}
           <View style={styles.topCenter}>
-            <Text
-              style={[styles.topUsername, { color: theme.colors.text }]}
-              numberOfLines={1}
-            >
+            <Text style={[styles.topUsername, { color: theme.colors.text }]} numberOfLines={1}>
               {username}
             </Text>
-            <Text style={[styles.topChevron, { color: theme.colors.text }]}>
-              ▾
-            </Text>
+            <Text style={[styles.topChevron, { color: theme.colors.text }]}>▾</Text>
           </View>
           <View style={styles.topActions}>
             {isOwnProfile && (
               <TouchableOpacity
                 onPress={() => setSettingsVisible(true)}
                 activeOpacity={0.8}
-                style={[
-                  styles.logoutButton,
-                  { borderColor: theme.colors.border },
-                ]}
+                style={[styles.logoutButton, { borderColor: theme.colors.border }]}
               >
-                <Text
-                  style={[styles.logoutIcon, { color: theme.colors.text }]}
-                >
-                  ⎋
-                </Text>
+                <Text style={[styles.logoutIcon, { color: theme.colors.text }]}>⎋</Text>
               </TouchableOpacity>
             )}
           </View>
         </View>
 
- <View style={[styles.header, isMobileLayout && styles.headerMobile]}>
-  <TouchableOpacity
-    style={[styles.avatarWrapper, isMobileLayout && styles.avatarWrapperMobile]}
-    onPress={() => {
-      if (hasStories) {
-        openStory(0);
-      } else if (isOwnProfile) {
-        handleChangeAvatar();
-      }
-    }}
-    onLongPress={isOwnProfile ? handleChangeAvatar : undefined}
-    activeOpacity={0.8}
-
+        <View style={[styles.header, isMobileLayout && styles.headerMobile]}>
+          <TouchableOpacity
+            style={[styles.avatarWrapper, isMobileLayout && styles.avatarWrapperMobile]}
+            onPress={() => {
+              if (hasStories) {
+                openStory(0);
+              } else if (isOwnProfile) {
+                handleChangeAvatar();
+              }
+            }}
+            onLongPress={isOwnProfile ? handleChangeAvatar : undefined}
+            activeOpacity={0.8}
           >
             {hasStories ? (
               <LinearGradient
@@ -2015,19 +2065,12 @@ const handleChangeAvatar = useCallback(async () => {
                   />
                 ) : (
                   <View style={styles.avatarInRing}>
-                    <Text style={styles.avatarInitials}>
-                      {username?.[0]?.toUpperCase() || "L"}
-                    </Text>
+                    <Text style={styles.avatarInitials}>{username?.[0]?.toUpperCase() || "L"}</Text>
                   </View>
                 )}
               </LinearGradient>
             ) : avatarUrl ? (
-              <ExpoImage
-                source={{ uri: avatarUrl }}
-                style={styles.avatar}
-                contentFit="cover"
-                cachePolicy="disk"
-              />
+              <ExpoImage source={{ uri: avatarUrl }} style={styles.avatar} contentFit="cover" cachePolicy="disk" />
             ) : (
               <LinearGradient
                 colors={[Colors.brandStart, Colors.brandEnd]}
@@ -2035,9 +2078,7 @@ const handleChangeAvatar = useCallback(async () => {
                 end={{ x: 1, y: 1 }}
                 style={styles.avatar}
               >
-                <Text style={styles.avatarInitials}>
-                  {username?.[0]?.toUpperCase() || "L"}
-                </Text>
+                <Text style={styles.avatarInitials}>{username?.[0]?.toUpperCase() || "L"}</Text>
               </LinearGradient>
             )}
           </TouchableOpacity>
@@ -2055,14 +2096,7 @@ const handleChangeAvatar = useCallback(async () => {
                     },
                   ]}
                 >
-                  <Text
-                    style={[
-                      styles.tagText,
-                      { color: theme.colors.textMuted },
-                    ]}
-                  >
-                    #{t}
-                  </Text>
+                  <Text style={[styles.tagText, { color: theme.colors.textMuted }]}>#{t}</Text>
                 </View>
               ))}
             </View>
@@ -2081,65 +2115,34 @@ const handleChangeAvatar = useCallback(async () => {
                     },
                   ]}
                 >
-                  <Text
-                    style={[
-                      styles.tagText,
-                      { color: theme.colors.textMuted },
-                    ]}
-                  >
-                    #{t}
-                  </Text>
+                  <Text style={[styles.tagText, { color: theme.colors.textMuted }]}>#{t}</Text>
                 </View>
               ))}
             </View>
           )}
 
-
           <View style={styles.statsRow}>
             <View style={styles.statItem}>
-              <Text style={[styles.statNumber, { color: theme.colors.text }]}>
-                {postsCount}
-              </Text>
-              <Text
-                style={[styles.statLabel, { color: theme.colors.textMuted }]}
-              >
-                Posts
-              </Text>
+              <Text style={[styles.statNumber, { color: theme.colors.text }]}>{postsCount}</Text>
+              <Text style={[styles.statLabel, { color: theme.colors.textMuted }]}>Posts</Text>
             </View>
-            <TouchableOpacity
-              style={styles.statItem}
-              activeOpacity={0.8}
-              onPress={() => openPeopleSheet("followers")}
-            >
-              <Text style={[styles.statNumber, { color: theme.colors.text }]}>
-                {followersCount}
-              </Text>
-              <Text
-                style={[styles.statLabel, { color: theme.colors.textMuted }]}
-              >
-                Seguidores
-              </Text>
+            <TouchableOpacity style={styles.statItem} activeOpacity={0.8} onPress={() => openPeopleSheet("followers")}>
+              <Text style={[styles.statNumber, { color: theme.colors.text }]}>{followersCount}</Text>
+              <Text style={[styles.statLabel, { color: theme.colors.textMuted }]}>Seguidores</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.statItem}
-              activeOpacity={0.8}
-              onPress={() => openPeopleSheet("following")}
-            >
-              <Text style={[styles.statNumber, { color: theme.colors.text }]}>
-                {followingCount}
-              </Text>
-              <Text
-                style={[styles.statLabel, { color: theme.colors.textMuted }]}
-              >
-                Seguindo
-              </Text>
+            <TouchableOpacity style={styles.statItem} activeOpacity={0.8} onPress={() => openPeopleSheet("following")}>
+              <Text style={[styles.statNumber, { color: theme.colors.text }]}>{followingCount}</Text>
+              <Text style={[styles.statLabel, { color: theme.colors.textMuted }]}>Seguindo</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.statItem}
               activeOpacity={0.8}
               onPress={() => {
                 if (isCommitted && isOwnProfile) {
-                  Alert.alert("🔒 Crushes bloqueados", "Seu status de relacionamento bloqueia o acesso aos crushes. Mude para Solteiro(a) para desbloquear.");
+                  Alert.alert(
+                    "🔒 Crushes bloqueados",
+                    "Seu status de relacionamento bloqueia o acesso aos crushes. Mude para Solteiro(a) para desbloquear.",
+                  );
                   return;
                 }
                 openPeopleSheet("interested");
@@ -2148,11 +2151,7 @@ const handleChangeAvatar = useCallback(async () => {
               <Text style={[styles.statNumber, { color: theme.colors.text }]}>
                 {isCommitted && isOwnProfile ? "🔒" : interestedCount}
               </Text>
-              <Text
-                style={[styles.statLabel, { color: theme.colors.textMuted }]}
-              >
-                Crush
-              </Text>
+              <Text style={[styles.statLabel, { color: theme.colors.textMuted }]}>Crush</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -2160,7 +2159,12 @@ const handleChangeAvatar = useCallback(async () => {
         {/* ── COMMITTED BADGE ── */}
         {isCommitted && (
           <View style={[styles.committedBadgeRow]}>
-            <View style={[styles.committedBadge, { backgroundColor: "rgba(168,85,247,0.12)", borderColor: "rgba(168,85,247,0.3)" }]}>
+            <View
+              style={[
+                styles.committedBadge,
+                { backgroundColor: "rgba(168,85,247,0.12)", borderColor: "rgba(168,85,247,0.3)" },
+              ]}
+            >
               <Text style={styles.committedBadgeText}>
                 {relationshipStatus === "other" ? "💍 Casado(a)" : "💜 Comprometido(a)"}
               </Text>
@@ -2169,24 +2173,11 @@ const handleChangeAvatar = useCallback(async () => {
         )}
 
         <View style={[styles.bioSection, isMobileLayout && styles.bioSectionMobile]}>
-          {fullName ? (
-            <Text style={[styles.fullName, { color: theme.colors.text }]}>
-              {fullName}
-            </Text>
-          ) : null}
+          {fullName ? <Text style={[styles.fullName, { color: theme.colors.text }]}>{fullName}</Text> : null}
           {bio ? (
-            <Text style={[styles.bioText, { color: theme.colors.text }]}>
-              {bio}
-            </Text>
+            <Text style={[styles.bioText, { color: theme.colors.text }]}>{bio}</Text>
           ) : authEmail && isOwnProfile ? (
-            <Text
-              style={[
-                styles.bioPlaceholder,
-                { color: theme.colors.textMuted },
-              ]}
-            >
-              {authEmail}
-            </Text>
+            <Text style={[styles.bioPlaceholder, { color: theme.colors.textMuted }]}>{authEmail}</Text>
           ) : null}
         </View>
 
@@ -2194,157 +2185,69 @@ const handleChangeAvatar = useCallback(async () => {
           {isOwnProfile ? (
             <>
               <TouchableOpacity
-                style={[
-                  styles.actionButton,
-                  { borderColor: theme.colors.border },
-                  !isOwnProfile && { opacity: 0.5 },
-                ]}
+                style={[styles.actionButton, { borderColor: theme.colors.border }, !isOwnProfile && { opacity: 0.5 }]}
                 activeOpacity={0.8}
                 onPress={() => {
                   if (isOwnProfile) setEditing(true);
                 }}
                 disabled={!isOwnProfile}
               >
-                <Text
-                  style={[
-                    styles.actionButtonText,
-                    { color: theme.colors.text },
-                  ]}
-                >
-                  Ajustar vibe
-                </Text>
+                <Text style={[styles.actionButtonText, { color: theme.colors.text }]}>Ajustar vibe</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={[styles.actionButton, { borderColor: theme.colors.border }]} activeOpacity={0.8}>
+                <Text style={[styles.actionButtonText, { color: theme.colors.text }]}>Mostrar meu ID</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[
-                  styles.actionButton,
-                  { borderColor: theme.colors.border },
-                ]}
-                activeOpacity={0.8}
-              >
-                <Text
-                  style={[
-                    styles.actionButtonText,
-                    { color: theme.colors.text },
-                  ]}
-                >
-                  Mostrar meu ID
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.smallActionButton,
-                  { borderColor: theme.colors.border },
-                ]}
+                style={[styles.smallActionButton, { borderColor: theme.colors.border }]}
                 activeOpacity={0.8}
                 onPress={isOwnProfile ? handleAddStory : undefined}
               >
-                <Text
-                  style={[
-                    styles.smallActionButtonText,
-                    { color: theme.colors.text },
-                  ]}
-                >
-                  ＋
-                </Text>
+                <Text style={[styles.smallActionButtonText, { color: theme.colors.text }]}>＋</Text>
               </TouchableOpacity>
             </>
           ) : (
             <>
               <TouchableOpacity
-                style={[
-                  styles.actionButton,
-                  { borderColor: theme.colors.border },
-                ]}
+                style={[styles.actionButton, { borderColor: theme.colors.border }]}
                 activeOpacity={0.8}
                 onPress={handleToggleFollowButton}
                 disabled={loadingFollow}
               >
-                <Text
-                  style={[
-                    styles.actionButtonText,
-                    { color: theme.colors.text },
-                  ]}
-                >
+                <Text style={[styles.actionButtonText, { color: theme.colors.text }]}>
                   {loadingFollow ? "Carregando..." : followLabel}
                 </Text>
               </TouchableOpacity>
 
               {canOpenConversation && (
                 <TouchableOpacity
-                  style={[
-                    styles.actionButton,
-                    { borderColor: theme.colors.border },
-                  ]}
+                  style={[styles.actionButton, { borderColor: theme.colors.border }]}
                   activeOpacity={0.8}
-                  onPress={() =>
-                    openConversation(
-                      hasCrushConversation ? "crush" : ("friend" as ConversationType)
-                    )
-                  }
+                  onPress={() => openConversation(hasCrushConversation ? "crush" : ("friend" as ConversationType))}
                 >
-                  <Text
-                    style={[
-                      styles.actionButtonText,
-                      { color: theme.colors.text },
-                    ]}
-                  >
+                  <Text style={[styles.actionButtonText, { color: theme.colors.text }]}>
                     {hasCrushConversation ? "Mensagem" : "Mensagem"}
                   </Text>
                 </TouchableOpacity>
               )}
 
-              <TouchableOpacity
-                style={[
-                  styles.actionButton,
-                  { borderColor: theme.colors.border },
-                ]}
-                activeOpacity={0.8}
-              >
-                <Text
-                  style={[
-                    styles.actionButtonText,
-                    { color: theme.colors.text },
-                  ]}
-                >
-                  Mostrar meu ID
-                </Text>
+              <TouchableOpacity style={[styles.actionButton, { borderColor: theme.colors.border }]} activeOpacity={0.8}>
+                <Text style={[styles.actionButtonText, { color: theme.colors.text }]}>Mostrar meu ID</Text>
               </TouchableOpacity>
             </>
           )}
         </View>
-        <View
-          style={[
-            styles.panelCard,
-            { backgroundColor: theme.colors.surface },
-          ]}
-        >
-          <Text style={[styles.panelTitle, { color: theme.colors.text }]}>
-            "Radar"
-          </Text>
-          <Text
-            style={[
-              styles.panelSubtitle,
-              { color: theme.colors.textMuted },
-            ]}
-          >
+        <View style={[styles.panelCard, { backgroundColor: theme.colors.surface }]}>
+          <Text style={[styles.panelTitle, { color: theme.colors.text }]}>"Radar"</Text>
+          <Text style={[styles.panelSubtitle, { color: theme.colors.textMuted }]}>
             Insights e desempenho em breve aqui.
           </Text>
         </View>
 
         <View style={styles.highlightsRow}>
-          <TouchableOpacity
-            style={styles.highlightItem}
-            onPress={handlePickHighlight}
-            activeOpacity={0.8}
-          >
-            <View
-              style={[
-                styles.highlightCircle,
-                { borderColor: theme.colors.border },
-              ]}
-            >
+          <TouchableOpacity style={styles.highlightItem} onPress={handlePickHighlight} activeOpacity={0.8}>
+            <View style={[styles.highlightCircle, { borderColor: theme.colors.border }]}>
               {highlightCover ? (
                 <ExpoImage
                   source={{ uri: highlightCover }}
@@ -2353,32 +2256,16 @@ const handleChangeAvatar = useCallback(async () => {
                   cachePolicy="disk"
                 />
               ) : (
-                <Text
-                  style={[styles.highlightPlus, { color: theme.colors.text }]}
-                >
-                  ＋
-                </Text>
+                <Text style={[styles.highlightPlus, { color: theme.colors.text }]}>＋</Text>
               )}
             </View>
-            <Text
-              style={[styles.highlightLabel, { color: theme.colors.text }]}
-            >
-              Novo
-            </Text>
+            <Text style={[styles.highlightLabel, { color: theme.colors.text }]}>Novo</Text>
           </TouchableOpacity>
         </View>
 
-        <View
-          style={[
-            styles.tabsRow,
-            { borderTopColor: theme.colors.border },
-          ]}
-        >
+        <View style={[styles.tabsRow, { borderTopColor: theme.colors.border }]}>
           <TouchableOpacity
-            style={[
-              styles.tabItem,
-              activeTab === "grid" && styles.tabItemActive,
-            ]}
+            style={[styles.tabItem, activeTab === "grid" && styles.tabItemActive]}
             onPress={() => setActiveTab("grid")}
           >
             <Text
@@ -2395,10 +2282,7 @@ const handleChangeAvatar = useCallback(async () => {
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[
-              styles.tabItem,
-              activeTab === "reels" && styles.tabItemActive,
-            ]}
+            style={[styles.tabItem, activeTab === "reels" && styles.tabItemActive]}
             onPress={() => setActiveTab("reels")}
           >
             <Text
@@ -2415,10 +2299,7 @@ const handleChangeAvatar = useCallback(async () => {
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[
-              styles.tabItem,
-              activeTab === "tagged" && styles.tabItemActive,
-            ]}
+            style={[styles.tabItem, activeTab === "tagged" && styles.tabItemActive]}
             onPress={() => setActiveTab("tagged")}
           >
             <Text
@@ -2447,18 +2328,9 @@ const handleChangeAvatar = useCallback(async () => {
       style={[styles.screen, { backgroundColor: theme.colors.background }]}
     >
       {isLoadingInitial ? (
-        <View
-          style={[
-            styles.center,
-            { backgroundColor: theme.colors.background },
-          ]}
-        >
+        <View style={[styles.center, { backgroundColor: theme.colors.background }]}>
           <ActivityIndicator />
-          <Text
-            style={[styles.loadingText, { color: theme.colors.textMuted }]}
-          >
-            Carregando perfil…
-          </Text>
+          <Text style={[styles.loadingText, { color: theme.colors.textMuted }]}>Carregando perfil…</Text>
         </View>
       ) : (
         <>
@@ -2540,9 +2412,7 @@ const handleChangeAvatar = useCallback(async () => {
             onClose={() => setStoriesViewerOpen(false)}
           />
 
-          {!IS_WEB && (
-            <CommentsSheet visible={commentsOpen} postId={commentsPostId} onClose={closeComments} />
-          )}
+          {!IS_WEB && <CommentsSheet visible={commentsOpen} postId={commentsPostId} onClose={closeComments} />}
 
           {IS_WEB && commentsOpen && commentsPostId != null && (
             <View style={styles.webOverlay}>
@@ -2550,7 +2420,10 @@ const handleChangeAvatar = useCallback(async () => {
               <View style={[styles.webCard, { borderColor: theme.colors.border }]}>
                 <View style={styles.webCardHeader}>
                   <Text style={[styles.webCardTitle, { color: theme.colors.text }]}>Comentários</Text>
-                  <TouchableOpacity onPress={closeComments} style={[styles.webCloseBtn, { borderColor: theme.colors.border }]}>
+                  <TouchableOpacity
+                    onPress={closeComments}
+                    style={[styles.webCloseBtn, { borderColor: theme.colors.border }]}
+                  >
                     <Text style={[styles.webCloseText, { color: theme.colors.text }]}>×</Text>
                   </TouchableOpacity>
                 </View>
@@ -2624,10 +2497,7 @@ const handleChangeAvatar = useCallback(async () => {
             animationType="fade"
             onRequestClose={() => setSilentModalVisible(false)}
           >
-            <Pressable
-              style={styles.modalOverlay}
-              onPress={() => setSilentModalVisible(false)}
-            >
+            <Pressable style={styles.modalOverlay} onPress={() => setSilentModalVisible(false)}>
               <Pressable style={styles.modalCard} onPress={() => {}}>
                 <Text style={styles.modalTitle}>{silentModalTitle}</Text>
                 <Text style={styles.modalMessage}>{silentModalMessage}</Text>
@@ -2635,10 +2505,7 @@ const handleChangeAvatar = useCallback(async () => {
                 <TouchableOpacity
                   activeOpacity={0.85}
                   onPress={() => setSilentModalVisible(false)}
-                  style={[
-                    styles.modalPrimaryBtn,
-                    { backgroundColor: theme.colors.primary },
-                  ]}
+                  style={[styles.modalPrimaryBtn, { backgroundColor: theme.colors.primary }]}
                 >
                   <Text style={styles.modalPrimaryText}>Ok</Text>
                 </TouchableOpacity>

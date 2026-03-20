@@ -1,4 +1,5 @@
 // app/(tabs)/conversations/index.tsx
+import { getOrCreateConversation } from "@/lib/conversations";
 import { supabase } from "@/lib/supabase";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
@@ -10,6 +11,7 @@ import {
   BackHandler,
   FlatList,
   Image,
+  Modal,
   StyleSheet,
   Text,
   TextInput,
@@ -29,6 +31,13 @@ type RpcConversation = {
   other_user_avatar: string | null;
 };
 
+type FollowerRow = {
+  id: string;
+  username: string | null;
+  full_name: string | null;
+  avatar_url: string | null;
+};
+
 export default function ConversationsScreen() {
   const router = useRouter();
 
@@ -43,10 +52,16 @@ export default function ConversationsScreen() {
 
   const [search, setSearch] = useState("");
 
+  // ── New conversation modal ──
+  const [showNewChat, setShowNewChat] = useState(false);
+  const [followerSearch, setFollowerSearch] = useState("");
+  const [followers, setFollowers] = useState<FollowerRow[]>([]);
+  const [loadingFollowers, setLoadingFollowers] = useState(false);
+  const [creatingChat, setCreatingChat] = useState<string | null>(null);
+
   // ── Relationship status lock ──
   const [myRelationshipStatus, setMyRelationshipStatus] = useState<string | null>(null);
   const isCommittedStatus = myRelationshipStatus === "committed" || myRelationshipStatus === "other";
-  // Se committed mas o RPC retorna crush conversations (parceiro vinculado), não bloquear a aba
   const isCrushLocked = isCommittedStatus && crushConversations.length === 0;
 
   // ── Animated badge scale ──
@@ -105,7 +120,7 @@ export default function ConversationsScreen() {
       [conversationId]: 0,
     }));
 
-    const { error } = await supabase
+    await supabase
       .from("messages")
       .update({ is_read: true })
       .eq("conversation_id", conversationId);
@@ -154,6 +169,77 @@ export default function ConversationsScreen() {
       setLoading(false);
     }
   }, [currentUserId]);
+
+  // ── Load followers/following for new chat ──
+  const loadFollowers = useCallback(async () => {
+    if (!currentUserId) return;
+    setLoadingFollowers(true);
+    try {
+      // Get mutual connections: people I follow + people who follow me
+      const [{ data: following }, { data: myFollowers }] = await Promise.all([
+        supabase
+          .from("follows")
+          .select("following_id")
+          .eq("follower_id", currentUserId),
+        supabase
+          .from("follows")
+          .select("follower_id")
+          .eq("following_id", currentUserId),
+      ]);
+
+      const userIds = new Set<string>();
+      following?.forEach((f: any) => userIds.add(f.following_id));
+      myFollowers?.forEach((f: any) => userIds.add(f.follower_id));
+      userIds.delete(currentUserId);
+
+      if (userIds.size === 0) {
+        setFollowers([]);
+        return;
+      }
+
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("id, username, full_name, avatar_url")
+        .in("id", Array.from(userIds))
+        .order("full_name", { ascending: true });
+
+      setFollowers((profiles as FollowerRow[]) ?? []);
+    } finally {
+      setLoadingFollowers(false);
+    }
+  }, [currentUserId]);
+
+  const handleStartConversation = async (otherUserId: string) => {
+    if (!currentUserId) return;
+    setCreatingChat(otherUserId);
+    try {
+      const conversation = await getOrCreateConversation({
+        currentUserId,
+        otherUserId,
+        conversationType: "friend",
+      });
+
+      // Reactivate if soft-deleted
+      await supabase
+        .rpc("reactivate_conversation", {
+          _conversation_id: conversation.id,
+          _user_id: currentUserId,
+        })
+        .catch(() => {});
+
+      setShowNewChat(false);
+      setFollowerSearch("");
+
+      router.push({
+        pathname: "/conversations/[id]",
+        params: { id: conversation.id, type: "friend" },
+      });
+    } catch (e: any) {
+      Alert.alert("Erro", e?.message ?? "Não foi possível iniciar a conversa.");
+    } finally {
+      setCreatingChat(null);
+    }
+  };
 
   useEffect(() => {
     (async () => {
@@ -247,7 +333,6 @@ export default function ConversationsScreen() {
                   { onConflict: "conversation_id,user_id" }
                 );
 
-              // Remove from local state immediately
               setFriendConversations((prev) =>
                 prev.filter((c) => c.id !== conversationId)
               );
@@ -315,6 +400,16 @@ export default function ConversationsScreen() {
       return "";
     }
   }
+
+  // ── Filtered followers for new chat modal ──
+  const normalizedFollowerSearch = followerSearch.trim().toLowerCase();
+  const filteredFollowers = normalizedFollowerSearch
+    ? followers.filter((f) => {
+        const name = (f.full_name || "").toLowerCase();
+        const uname = (f.username || "").toLowerCase();
+        return name.includes(normalizedFollowerSearch) || uname.includes(normalizedFollowerSearch);
+      })
+    : followers;
 
   const renderItem = ({ item }: { item: RpcConversation }) => {
     const name =
@@ -393,6 +488,45 @@ export default function ConversationsScreen() {
     );
   };
 
+  const renderFollowerItem = ({ item }: { item: FollowerRow }) => {
+    const name = item.full_name?.trim() || item.username?.trim() || "Usuário";
+    const isCreating = creatingChat === item.id;
+
+    return (
+      <TouchableOpacity
+        style={styles.followerRow}
+        onPress={() => handleStartConversation(item.id)}
+        activeOpacity={0.7}
+        disabled={!!creatingChat}
+      >
+        <View style={styles.avatarContainer}>
+          {item.avatar_url ? (
+            <Image source={{ uri: item.avatar_url }} style={styles.avatarImage} />
+          ) : (
+            <View style={styles.avatarCircle}>
+              <Text style={styles.avatarLetter}>
+                {name.substring(0, 1).toUpperCase()}
+              </Text>
+            </View>
+          )}
+        </View>
+        <View style={styles.followerInfo}>
+          <Text style={styles.followerName} numberOfLines={1}>{name}</Text>
+          {item.username && (
+            <Text style={styles.followerUsername} numberOfLines={1}>@{item.username}</Text>
+          )}
+        </View>
+        {isCreating ? (
+          <ActivityIndicator size="small" color="#FF4D6D" />
+        ) : (
+          <View style={styles.chatIconBtn}>
+            <Text style={{ fontSize: 18 }}>💬</Text>
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+  };
+
   if (!currentUserId) {
     return (
       <View style={styles.container}>
@@ -403,6 +537,21 @@ export default function ConversationsScreen() {
 
   return (
     <View style={styles.container}>
+      {/* ── Header ── */}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Mensagens</Text>
+        <TouchableOpacity
+          style={styles.newChatBtn}
+          onPress={() => {
+            setShowNewChat(true);
+            loadFollowers();
+          }}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.newChatBtnText}>＋</Text>
+        </TouchableOpacity>
+      </View>
+
       {/* ── Tabs ── */}
       <View style={styles.tabs}>
         <TouchableOpacity
@@ -479,13 +628,16 @@ export default function ConversationsScreen() {
 
       {/* ── Search ── */}
       <View style={styles.searchContainer}>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Buscar conversas..."
-          placeholderTextColor="#555"
-          value={search}
-          onChangeText={setSearch}
-        />
+        <View style={styles.searchInputWrapper}>
+          <Text style={styles.searchIcon}>🔍</Text>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Buscar conversas..."
+            placeholderTextColor="#555"
+            value={search}
+            onChangeText={setSearch}
+          />
+        </View>
       </View>
 
       {/* ── Crush locked overlay ── */}
@@ -515,6 +667,16 @@ export default function ConversationsScreen() {
           <Text style={styles.emptySubtext}>
             Suas conversas aparecerão aqui
           </Text>
+          <TouchableOpacity
+            style={styles.emptyNewChatBtn}
+            onPress={() => {
+              setShowNewChat(true);
+              loadFollowers();
+            }}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.emptyNewChatBtnText}>Iniciar conversa</Text>
+          </TouchableOpacity>
         </View>
       ) : (
         <FlatList
@@ -524,6 +686,88 @@ export default function ConversationsScreen() {
           contentContainerStyle={styles.listContent}
         />
       )}
+
+      {/* ── New Chat Modal ── */}
+      <Modal
+        visible={showNewChat}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowNewChat(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalSheet}>
+            {/* Handle */}
+            <View style={styles.modalHandle} />
+
+            {/* Header */}
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Nova conversa</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowNewChat(false);
+                  setFollowerSearch("");
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.modalClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Search */}
+            <View style={styles.modalSearchContainer}>
+              <View style={styles.searchInputWrapper}>
+                <Text style={styles.searchIcon}>🔍</Text>
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="Buscar por nome ou username..."
+                  placeholderTextColor="#555"
+                  value={followerSearch}
+                  onChangeText={setFollowerSearch}
+                  autoFocus
+                />
+              </View>
+            </View>
+
+            <Text style={styles.modalSubtitle}>Suas conexões</Text>
+
+            {/* List */}
+            {loadingFollowers ? (
+              <View style={styles.modalLoadingArea}>
+                {/* Skeleton */}
+                {[1, 2, 3, 4].map((i) => (
+                  <View key={i} style={styles.skeletonRow}>
+                    <View style={styles.skeletonAvatar} />
+                    <View style={{ flex: 1 }}>
+                      <View style={[styles.skeletonLine, { width: "60%" }]} />
+                      <View style={[styles.skeletonLine, { width: "40%", marginTop: 6 }]} />
+                    </View>
+                  </View>
+                ))}
+              </View>
+            ) : filteredFollowers.length === 0 ? (
+              <View style={styles.modalEmptyArea}>
+                <Text style={{ fontSize: 40, marginBottom: 8 }}>👥</Text>
+                <Text style={styles.emptyText}>
+                  {followerSearch ? "Nenhuma pessoa encontrada" : "Nenhuma conexão ainda"}
+                </Text>
+                <Text style={styles.emptySubtext}>
+                  {followerSearch
+                    ? "Tente outro nome ou username"
+                    : "Siga pessoas para começar a conversar"}
+                </Text>
+              </View>
+            ) : (
+              <FlatList
+                data={filteredFollowers}
+                keyExtractor={(item) => item.id}
+                renderItem={renderFollowerItem}
+                contentContainerStyle={{ paddingBottom: 40 }}
+                showsVerticalScrollIndicator={false}
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -533,10 +777,43 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#06060e",
   },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 4,
+  },
+  headerTitle: {
+    color: "#fff",
+    fontSize: 24,
+    fontWeight: "800",
+    letterSpacing: -0.5,
+  },
+  newChatBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#FF4D6D",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#FF4D6D",
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  newChatBtnText: {
+    color: "#fff",
+    fontSize: 22,
+    fontWeight: "700",
+    marginTop: -1,
+  },
   tabs: {
     flexDirection: "row",
     paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingTop: 12,
     paddingBottom: 10,
     gap: 10,
   },
@@ -622,6 +899,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 4,
   },
+  emptyNewChatBtn: {
+    marginTop: 20,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 999,
+    backgroundColor: "#FF4D6D",
+    shadowColor: "#FF4D6D",
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  emptyNewChatBtnText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "700",
+  },
   listContent: {
     paddingHorizontal: 12,
     paddingVertical: 4,
@@ -630,13 +923,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 8,
   },
-  searchInput: {
+  searchInputWrapper: {
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: "#0c0c16",
     borderRadius: 999,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
     borderWidth: 1,
     borderColor: "#1e1e30",
+    paddingHorizontal: 14,
+  },
+  searchIcon: {
+    fontSize: 14,
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: 10,
     color: "#fff",
     fontSize: 14,
   },
@@ -653,21 +955,21 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   avatarImage: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 54,
+    height: 54,
+    borderRadius: 27,
     backgroundColor: "#1a1a28",
-    borderWidth: 1.5,
+    borderWidth: 2,
     borderColor: "#2a2a3a",
   },
   avatarCircle: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 54,
+    height: 54,
+    borderRadius: 27,
     backgroundColor: "#1e1e30",
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1.5,
+    borderWidth: 2,
     borderColor: "#2a2a3a",
   },
   avatarLetter: {
@@ -679,12 +981,14 @@ const styles = StyleSheet.create({
     position: "absolute",
     bottom: -2,
     right: -2,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     backgroundColor: "#06060e",
     alignItems: "center",
     justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: "#1e1e30",
   },
   rowText: {
     flex: 1,
@@ -737,5 +1041,119 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 11,
     fontWeight: "700",
+  },
+  // ── Modal styles ──
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    justifyContent: "flex-end",
+  },
+  modalSheet: {
+    backgroundColor: "#0c0c16",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: "85%",
+    minHeight: "60%",
+    paddingBottom: 30,
+    borderTopWidth: 1,
+    borderColor: "#1e1e30",
+  },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#333",
+    alignSelf: "center",
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+  },
+  modalTitle: {
+    color: "#fff",
+    fontSize: 20,
+    fontWeight: "800",
+    letterSpacing: -0.3,
+  },
+  modalClose: {
+    color: "#888",
+    fontSize: 22,
+    padding: 4,
+  },
+  modalSearchContainer: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  modalSubtitle: {
+    color: "#666",
+    fontSize: 12,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 1,
+    paddingHorizontal: 20,
+    paddingBottom: 8,
+  },
+  modalLoadingArea: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+  },
+  modalEmptyArea: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingTop: 40,
+  },
+  followerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+  },
+  followerInfo: {
+    flex: 1,
+  },
+  followerName: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  followerUsername: {
+    color: "#666",
+    fontSize: 13,
+    marginTop: 1,
+  },
+  chatIconBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#1a1a28",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#2a2a3a",
+  },
+  // ── Skeleton ──
+  skeletonRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    gap: 12,
+  },
+  skeletonAvatar: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: "#1a1a28",
+  },
+  skeletonLine: {
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: "#1a1a28",
   },
 });
