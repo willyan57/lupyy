@@ -582,11 +582,13 @@ export default function ConversationScreen() {
         );
       });
 
+      const sentAt = real.created_at || new Date().toISOString();
+
       await supabase
         .from("conversations")
         .update({
           last_message: text,
-          last_message_at: new Date().toISOString(),
+          last_message_at: sentAt,
         })
         .eq("id", conversationId);
 
@@ -699,11 +701,13 @@ export default function ConversationScreen() {
         );
       });
 
+      const mediaSentAt = real.created_at || new Date().toISOString();
+
       await supabase
         .from("conversations")
         .update({
           last_message: "[mídia]",
-          last_message_at: new Date().toISOString(),
+          last_message_at: mediaSentAt,
         })
         .eq("id", conversationId);
 
