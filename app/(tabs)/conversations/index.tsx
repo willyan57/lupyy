@@ -38,11 +38,6 @@ type FollowerRow = {
   avatar_url: string | null;
 };
 
-type ExistingConversationTypeRow = {
-  id: string;
-  conversation_type: "friend" | "crush" | null;
-};
-
 export default function ConversationsScreen() {
   const router = useRouter();
 
@@ -220,38 +215,18 @@ export default function ConversationsScreen() {
     if (!currentUserId) return;
     setCreatingChat(otherUserId);
     try {
-      const pair =
-        currentUserId < otherUserId
-          ? { user1: currentUserId, user2: otherUserId }
-          : { user1: otherUserId, user2: currentUserId };
-
-      const { data: existingRows } = await supabase
-        .from("conversations")
-        .select("id, conversation_type")
-        .eq("user1", pair.user1)
-        .eq("user2", pair.user2)
-        .order("created_at", { ascending: false });
-
-      const existingConversations = (existingRows || []) as ExistingConversationTypeRow[];
-      const preferredConversationType =
-        existingConversations.find((conversation) => conversation.conversation_type === activeTab)
-          ?.conversation_type ??
-        existingConversations.find((conversation) => conversation.conversation_type === "crush")
-          ?.conversation_type ??
-        existingConversations.find((conversation) => conversation.conversation_type === "friend")
-          ?.conversation_type ??
-        activeTab;
-
       const conversation = await getOrCreateConversation({
         currentUserId,
         otherUserId,
-        conversationType: preferredConversationType,
+        conversationType: activeTab,
       });
 
       if (!conversation?.id) {
         console.warn("Erro: Não foi possível criar a conversa.");
         return;
       }
+
+      await reactivateConversationForUser(conversation.id, currentUserId);
 
       setShowNewChat(false);
       setFollowerSearch("");
@@ -264,9 +239,7 @@ export default function ConversationsScreen() {
         },
       });
 
-      void reactivateConversationForUser(conversation.id, currentUserId).finally(() => {
-        void loadConversations(currentUserId);
-      });
+      void loadConversations(currentUserId);
     } catch (e: any) {
       console.error("handleStartConversation error:", e);
       const message = e?.message ?? "Não foi possível iniciar a conversa.";

@@ -35,11 +35,16 @@ function pickConversationByType(
   return conversations.find((conversation) => conversation.conversation_type === conversationType) ?? null;
 }
 
-function pickBestConversation(
+function pickVisibleConversation(
   conversations: Conversation[],
+  deletedConversationIds: Set<string>,
   conversationType: ConversationType,
 ) {
-  return pickConversationByType(conversations, conversationType) ?? conversations[0] ?? null;
+  const visibleConversations = conversations.filter(
+    (conversation) => !deletedConversationIds.has(conversation.id),
+  );
+
+  return pickConversationByType(visibleConversations, conversationType) ?? visibleConversations[0] ?? null;
 }
 
 function pickConversationForResume(
@@ -130,8 +135,12 @@ export async function getOrCreateConversation(params: {
     });
   }
 
-  const existing = pickConversationForResume(existingConversations, deletedConversationIds, conversationType);
-  if (existing) return existing;
+  const existingVisibleConversation = pickVisibleConversation(
+    existingConversations,
+    deletedConversationIds,
+    conversationType,
+  );
+  if (existingVisibleConversation) return existingVisibleConversation;
 
   const { data: inserted, error: insertError } = await supabase
     .from("conversations")
@@ -182,6 +191,13 @@ export async function getOrCreateConversation(params: {
         retryDeletedConversationIds.add(row.conversation_id);
       });
     }
+
+    const retryVisibleConversation = pickVisibleConversation(
+      retryConversations,
+      retryDeletedConversationIds,
+      conversationType,
+    );
+    if (retryVisibleConversation) return retryVisibleConversation;
 
     const retryConversation = pickConversationForResume(
       retryConversations,
