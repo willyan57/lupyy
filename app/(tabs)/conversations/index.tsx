@@ -322,6 +322,8 @@ export default function ConversationsScreen() {
         { event: "INSERT", schema: "public", table: "messages" },
         () => {
           refreshUnreadCountsForLists();
+          // Recarregar lista para exibir conversas reativadas
+          if (currentUserId) void loadConversations(currentUserId);
         }
       )
       .on(
@@ -336,7 +338,7 @@ export default function ConversationsScreen() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [friendConversations.length, crushConversations.length]);
+  }, [friendConversations.length, crushConversations.length, currentUserId, loadConversations]);
 
   useFocusEffect(
     useCallback(() => {

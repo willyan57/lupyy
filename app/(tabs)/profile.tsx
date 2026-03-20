@@ -1367,13 +1367,12 @@ export default function Profile() {
         });
 
         if (rpcError) {
-          const { error: deleteError } = await supabase
+          // Fallback: limpar deleted_at manualmente, mantendo messages_hidden_before
+          await supabase
             .from("conversation_deletions")
-            .delete()
+            .update({ deleted_at: null })
             .eq("conversation_id", conversation.id)
             .eq("user_id", authUserId);
-
-          if (deleteError) throw deleteError;
         }
 
         router.push({
