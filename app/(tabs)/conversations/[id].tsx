@@ -289,7 +289,6 @@ export default function ConversationScreen() {
   async function reactivateConversationForUser() {
     if (!authUserId || !conversationId) return;
 
-    // A RPC agora faz UPDATE (deleted_at = NULL) mantendo messages_hidden_before
     const { error: rpcError } = await supabase.rpc("reactivate_conversation", {
       _conversation_id: conversationId,
       _user_id: authUserId,
@@ -297,12 +296,13 @@ export default function ConversationScreen() {
 
     if (!rpcError) return;
 
-    // Fallback: limpar deleted_at manualmente
-    await supabase
+    const { error: deleteError } = await supabase
       .from("conversation_deletions")
-      .update({ deleted_at: null })
+      .delete()
       .eq("conversation_id", conversationId)
       .eq("user_id", authUserId);
+
+    if (deleteError) throw deleteError;
   }
 
   // ── Delete entire conversation (hide for current user) ──
@@ -318,15 +318,13 @@ export default function ConversationScreen() {
           text: "Excluir",
           style: "destructive",
           onPress: async () => {
-            const now = new Date().toISOString();
             await supabase
               .from("conversation_deletions")
               .upsert(
                 {
                   conversation_id: conversationId,
                   user_id: authUserId,
-                  deleted_at: now,
-                  messages_hidden_before: now,
+                  deleted_at: new Date().toISOString(),
                 },
                 { onConflict: "conversation_id,user_id" }
               );
@@ -335,6 +333,18 @@ export default function ConversationScreen() {
         },
       ]
     );
+  }
+
+
+  async function getMessageCutoffForUser(userId: string, targetConversationId: string) {
+    const { data: deletionRow } = await supabase
+      .from("conversation_deletions")
+      .select("deleted_at")
+      .eq("conversation_id", targetConversationId)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    return (deletionRow as { deleted_at?: string | null } | null)?.deleted_at ?? null;
   }
 
   const displayName =
@@ -402,30 +412,22 @@ export default function ConversationScreen() {
           }
         }
 
-        // Buscar cutoff de mensagens ocultas (exclusão estilo Instagram)
-        let hiddenBefore: string | null = null;
-        try {
-          const { data: cutoff } = await supabase.rpc("get_messages_hidden_before", {
-            _conversation_id: conversationId,
-            _user_id: uid,
-          });
-          if (cutoff) hiddenBefore = cutoff;
-        } catch {}
+        const cutoff = await getMessageCutoffForUser(uid, conversationId);
 
-        let query = supabase
+        let messagesQuery = supabase
           .from("messages")
           .select("*")
-          .eq("conversation_id", conversationId);
+          .eq("conversation_id", conversationId)
+          .order("created_at", { ascending: true });
 
-        // Filtrar mensagens anteriores à exclusão
-        if (hiddenBefore) {
-          query = query.gt("created_at", hiddenBefore);
+        if (cutoff) {
+          messagesQuery = messagesQuery.gt("created_at", cutoff);
         }
 
-        const { data: msgs, error: msgErr } = await query.order("created_at", { ascending: true });
+        const { data: msgs, error: msgErr } = await messagesQuery;
 
-        if (!msgErr && msgs && isMounted) {
-          setMessages(msgs as DbMessage[]);
+        if (!msgErr && isMounted) {
+          setMessages((msgs || []) as DbMessage[]);
         }
       } finally {
         if (isMounted) setLoading(false);
@@ -446,7 +448,7 @@ export default function ConversationScreen() {
   );
 
   useEffect(() => {
-    if (!conversationId) return;
+    if (!conversationId || !authUserId) return;
 
     const channel = supabase
       .channel(`conversation-messages-${conversationId}`)
@@ -458,8 +460,12 @@ export default function ConversationScreen() {
           table: "messages",
           filter: `conversation_id=eq.${conversationId}`,
         },
-        (payload: any) => {
+        async (payload: any) => {
           const msg = payload.new as DbMessage;
+          const cutoff = await getMessageCutoffForUser(authUserId, conversationId);
+
+          if (cutoff && msg.created_at <= cutoff) return;
+
           setMessages((prev) => {
             if (prev.some((m) => m.id === msg.id)) return prev;
             return [...prev, msg].sort((a: DbMessage, b: DbMessage) =>
@@ -476,13 +482,19 @@ export default function ConversationScreen() {
           table: "messages",
           filter: `conversation_id=eq.${conversationId}`,
         },
-        (payload: any) => {
+        async (payload: any) => {
           const updated = payload.new as DbMessage;
-          setMessages((prev) =>
-            prev
+          const cutoff = await getMessageCutoffForUser(authUserId, conversationId);
+
+          if (cutoff && updated.created_at <= cutoff) return;
+
+          setMessages((prev) => {
+            const exists = prev.some((m) => m.id === updated.id);
+            if (!exists) return prev;
+            return prev
               .map((m) => (m.id === updated.id ? updated : m))
-              .sort((a: DbMessage, b: DbMessage) => a.created_at.localeCompare(b.created_at))
-          );
+              .sort((a: DbMessage, b: DbMessage) => a.created_at.localeCompare(b.created_at));
+          });
         }
       )
       .subscribe();
@@ -490,7 +502,7 @@ export default function ConversationScreen() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [conversationId]);
+  }, [conversationId, authUserId]);
 
   useEffect(() => {
     if (!authUserId) return;
