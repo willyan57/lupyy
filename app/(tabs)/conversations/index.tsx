@@ -208,14 +208,52 @@ export default function ConversationsScreen() {
     }
   }, [currentUserId]);
 
+  const reactivateConversationForUser = useCallback(
+    async (conversationId: string, userId: string) => {
+      const { error: rpcError } = await supabase.rpc("reactivate_conversation", {
+        _conversation_id: conversationId,
+        _user_id: userId,
+      });
+
+      if (!rpcError) return;
+
+      const { error: deleteError } = await supabase
+        .from("conversation_deletions")
+        .delete()
+        .eq("conversation_id", conversationId)
+        .eq("user_id", userId);
+
+      if (deleteError) throw deleteError;
+    },
+    []
+  );
+
   const handleStartConversation = async (otherUserId: string) => {
     if (!currentUserId) return;
     setCreatingChat(otherUserId);
     try {
+      const pair =
+        currentUserId < otherUserId
+          ? { user1: currentUserId, user2: otherUserId }
+          : { user1: otherUserId, user2: currentUserId };
+
+      const { data: existingConversation } = await supabase
+        .from("conversations")
+        .select("id, conversation_type")
+        .eq("user1", pair.user1)
+        .eq("user2", pair.user2)
+        .maybeSingle();
+
+      const conversationType =
+        (existingConversation as { conversation_type?: string | null } | null)
+          ?.conversation_type === "crush"
+          ? "crush"
+          : "friend";
+
       const conversation = await getOrCreateConversation({
         currentUserId,
         otherUserId,
-        conversationType: "friend",
+        conversationType,
       });
 
       if (!conversation?.id) {
@@ -223,24 +261,20 @@ export default function ConversationsScreen() {
         return;
       }
 
-      // Reactivate if soft-deleted
-      await supabase
-        .rpc("reactivate_conversation", {
-          _conversation_id: conversation.id,
-          _user_id: currentUserId,
-        })
-        .catch(() => {});
+      await reactivateConversationForUser(conversation.id, currentUserId);
 
       setShowNewChat(false);
       setFollowerSearch("");
 
-      // Refresh list so conversation appears
-      await loadConversations(currentUserId);
-
       router.push({
         pathname: "/conversations/[id]",
-        params: { id: conversation.id, type: "friend" },
+        params: {
+          id: conversation.id,
+          type: conversation.conversation_type === "crush" ? "crush" : "friend",
+        },
       });
+
+      void loadConversations(currentUserId);
     } catch (e: any) {
       console.error("handleStartConversation error:", e);
       const message = e?.message ?? "Não foi possível iniciar a conversa.";
@@ -437,7 +471,6 @@ export default function ConversationsScreen() {
         delayLongPress={500}
         activeOpacity={0.7}
       >
-        {/* Avatar */}
         <View style={styles.avatarContainer}>
           {item.other_user_avatar ? (
             <Image
@@ -458,7 +491,6 @@ export default function ConversationsScreen() {
           )}
         </View>
 
-        {/* Text */}
         <View style={styles.rowText}>
           <View style={styles.rowTopLine}>
             <Text
@@ -483,16 +515,28 @@ export default function ConversationsScreen() {
           </Text>
         </View>
 
-        {/* Badge */}
-        {unreadCount > 0 && (
-          <Animated.View
-            style={[styles.unreadBadge, { transform: [{ scale: badgeScale }] }]}
+        <View style={styles.rowActions}>
+          {unreadCount > 0 && (
+            <Animated.View
+              style={[styles.unreadBadge, { transform: [{ scale: badgeScale }] }]}
+            >
+              <Text style={styles.unreadBadgeText}>
+                {unreadCount > 99 ? "99+" : unreadCount}
+              </Text>
+            </Animated.View>
+          )}
+
+          <TouchableOpacity
+            style={styles.rowMenuButton}
+            activeOpacity={0.7}
+            onPress={(event) => {
+              event.stopPropagation();
+              handleDeleteConversation(item.id);
+            }}
           >
-            <Text style={styles.unreadBadgeText}>
-              {unreadCount > 99 ? "99+" : unreadCount}
-            </Text>
-          </Animated.View>
-        )}
+            <Text style={styles.rowMenuIcon}>⋯</Text>
+          </TouchableOpacity>
+        </View>
       </TouchableOpacity>
     );
   };
@@ -1031,6 +1075,11 @@ const styles = StyleSheet.create({
     color: "#aaa",
     fontWeight: "500",
   },
+  rowActions: {
+    alignItems: "center",
+    gap: 8,
+    marginLeft: 10,
+  },
   unreadBadge: {
     minWidth: 22,
     height: 22,
@@ -1039,7 +1088,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#FF4D6D",
     alignItems: "center",
     justifyContent: "center",
-    marginLeft: 10,
     shadowColor: "#FF4D6D",
     shadowOpacity: 0.4,
     shadowRadius: 6,
@@ -1050,6 +1098,22 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 11,
     fontWeight: "700",
+  },
+  rowMenuButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#11111c",
+    borderWidth: 1,
+    borderColor: "#1e1e30",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  rowMenuIcon: {
+    color: "#aaa",
+    fontSize: 18,
+    fontWeight: "700",
+    marginTop: -2,
   },
   // ── Modal styles ──
   modalOverlay: {

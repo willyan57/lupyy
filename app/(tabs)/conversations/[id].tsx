@@ -286,6 +286,25 @@ export default function ConversationScreen() {
     }
   }, [conversationId]);
 
+  async function reactivateConversationForUser() {
+    if (!authUserId || !conversationId) return;
+
+    const { error: rpcError } = await supabase.rpc("reactivate_conversation", {
+      _conversation_id: conversationId,
+      _user_id: authUserId,
+    });
+
+    if (!rpcError) return;
+
+    const { error: deleteError } = await supabase
+      .from("conversation_deletions")
+      .delete()
+      .eq("conversation_id", conversationId)
+      .eq("user_id", authUserId);
+
+    if (deleteError) throw deleteError;
+  }
+
   // ── Delete entire conversation (hide for current user) ──
   async function handleDeleteConversation() {
     if (!authUserId || !conversationId) return;
@@ -541,13 +560,7 @@ export default function ConversationScreen() {
         })
         .eq("id", conversationId);
 
-      // Reactivate conversation if it was soft-deleted
-      await supabase
-        .rpc("reactivate_conversation", {
-          _conversation_id: conversationId,
-          _user_id: authUserId,
-        })
-        .catch(() => {});
+      await reactivateConversationForUser();
     } catch (e: any) {
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
       if ((e?.message ?? "").includes("CRUSH_CHAT_LOCKED")) {
@@ -663,15 +676,7 @@ export default function ConversationScreen() {
         })
         .eq("id", conversationId);
 
-      // Reactivate conversation if it was soft-deleted
-      if (authUserId) {
-        await supabase
-          .rpc("reactivate_conversation", {
-            _conversation_id: conversationId,
-            _user_id: authUserId,
-          })
-          .catch(() => {});
-      }
+      await reactivateConversationForUser();
     } catch (e: any) {
       if ((e?.message ?? "").includes("CRUSH_CHAT_LOCKED")) {
         Alert.alert(

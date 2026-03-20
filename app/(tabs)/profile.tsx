@@ -1266,9 +1266,27 @@ export default function Profile() {
           conversationType,
         });
 
+        const { error: rpcError } = await supabase.rpc("reactivate_conversation", {
+          _conversation_id: conversation.id,
+          _user_id: authUserId,
+        });
+
+        if (rpcError) {
+          const { error: deleteError } = await supabase
+            .from("conversation_deletions")
+            .delete()
+            .eq("conversation_id", conversation.id)
+            .eq("user_id", authUserId);
+
+          if (deleteError) throw deleteError;
+        }
+
         router.push({
           pathname: "/conversations/[id]",
-          params: { id: conversation.id, type: conversationType },
+          params: {
+            id: conversation.id,
+            type: conversation.conversation_type === "crush" ? "crush" : conversationType,
+          },
         });
       } catch (e: any) {
         Alert.alert("Erro ao abrir conversa", e?.message ?? "Não foi possível abrir a conversa.");
