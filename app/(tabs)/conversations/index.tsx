@@ -244,6 +244,7 @@ export default function ConversationsScreen() {
         return;
       }
 
+
       setShowNewChat(false);
       setFollowerSearch("");
 
@@ -254,6 +255,8 @@ export default function ConversationsScreen() {
           type: conversation.conversation_type === "crush" ? "crush" : "friend",
         },
       });
+
+      void loadConversations(currentUserId);
     } catch (e: any) {
       console.error("handleStartConversation error:", e);
       const message = e?.message ?? "Não foi possível iniciar a conversa.";

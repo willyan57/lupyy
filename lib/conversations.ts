@@ -32,36 +32,53 @@ export async function getOrCreateConversation(params: {
   const { currentUserId, otherUserId, conversationType } = params;
   const pair = normalizePair(currentUserId, otherUserId);
 
-  // Busca QUALQUER conversa entre o par (sem filtrar por tipo)
-  const { data: existing, error: selectError } = await supabase
+  const { data: existingRows, error: selectError } = await supabase
     .from("conversations")
     .select("*")
     .eq("user1", pair.user1)
     .eq("user2", pair.user2)
-    .maybeSingle();
+    .order("created_at", { ascending: false });
 
-  if (selectError && selectError.code !== "PGRST116") {
+  if (selectError) {
     throw selectError;
   }
 
-  if (existing) {
-    // Se o tipo for diferente, atualiza
-    if (existing.conversation_type !== conversationType) {
-      const { data: updated, error: updateError } = await supabase
-        .from("conversations")
-        .update({ conversation_type: conversationType })
-        .eq("id", existing.id)
-        .select("*")
-        .single();
+  const existing = (existingRows || []) as Conversation[];
 
-      if (updateError) throw updateError;
-      return updated as Conversation;
+  if (existing.length > 0) {
+    const conversationIds = existing.map((row) => row.id);
+
+    const { data: deletionRows, error: deletionError } = await supabase
+      .from("conversation_deletions")
+      .select("conversation_id")
+      .eq("user_id", currentUserId)
+      .in("conversation_id", conversationIds);
+
+    if (deletionError) throw deletionError;
+
+    const deletedIds = new Set(
+      (deletionRows || []).map((row: any) => row.conversation_id)
+    );
+
+    const visibleConversation = existing.find((row) => !deletedIds.has(row.id));
+
+    if (visibleConversation) {
+      if (visibleConversation.conversation_type !== conversationType) {
+        const { data: updated, error: updateError } = await supabase
+          .from("conversations")
+          .update({ conversation_type: conversationType })
+          .eq("id", visibleConversation.id)
+          .select("*")
+          .single();
+
+        if (updateError) throw updateError;
+        return updated as Conversation;
+      }
+
+      return visibleConversation as Conversation;
     }
-
-    return existing as Conversation;
   }
 
-  // Não existe → cria
   const { data: inserted, error: insertError } = await supabase
     .from("conversations")
     .insert({
