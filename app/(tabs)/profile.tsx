@@ -207,6 +207,12 @@ export default function Profile() {
   const [partnerProfile, setPartnerProfile] = useState<ProfileRow | null>(null);
   const shakeAnim = useRef(new Animated.Value(0)).current;
 
+  // Username validation state
+  const [usernameStatus, setUsernameStatus] = useState<"idle" | "checking" | "available" | "taken" | "invalid">("idle");
+  const [usernameMessage, setUsernameMessage] = useState<string>("");
+  const usernameCheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const usernameShakeAnim = useRef(new Animated.Value(0)).current;
+
   const [editing, setEditing] = useState(false);
   const [settingsVisible, setSettingsVisible] = useState(false);
 
@@ -273,6 +279,81 @@ export default function Profile() {
       Animated.timing(shakeAnim, { toValue: 0, duration: 50, useNativeDriver: true }),
     ]).start();
   }, [shakeAnim]);
+
+  const triggerUsernameShake = useCallback(() => {
+    usernameShakeAnim.setValue(0);
+    Animated.sequence([
+      Animated.timing(usernameShakeAnim, { toValue: 8, duration: 40, useNativeDriver: true }),
+      Animated.timing(usernameShakeAnim, { toValue: -8, duration: 40, useNativeDriver: true }),
+      Animated.timing(usernameShakeAnim, { toValue: 6, duration: 40, useNativeDriver: true }),
+      Animated.timing(usernameShakeAnim, { toValue: -6, duration: 40, useNativeDriver: true }),
+      Animated.timing(usernameShakeAnim, { toValue: 0, duration: 40, useNativeDriver: true }),
+    ]).start();
+  }, [usernameShakeAnim]);
+
+  const handleUsernameChange = useCallback((text: string) => {
+    const cleaned = text.toLowerCase().replace(/\s/g, "").replace(/[^a-z0-9._]/g, "");
+    setDraftUsername(cleaned);
+
+    if (usernameCheckTimer.current) clearTimeout(usernameCheckTimer.current);
+
+    if (!cleaned || cleaned.length < 3) {
+      setUsernameStatus(cleaned.length > 0 ? "invalid" : "idle");
+      setUsernameMessage(cleaned.length > 0 ? "Mínimo 3 caracteres" : "");
+      return;
+    }
+
+    // Same as current username — no check needed
+    if (cleaned === username?.toLowerCase()) {
+      setUsernameStatus("available");
+      setUsernameMessage("Seu username atual ✔");
+      return;
+    }
+
+    setUsernameStatus("checking");
+    setUsernameMessage("Verificando...");
+
+    usernameCheckTimer.current = setTimeout(async () => {
+      try {
+        const { data, error } = await supabase.rpc("check_username_available", {
+          _username: cleaned,
+          _user_id: userId || "",
+        });
+        if (error) throw error;
+        if (data === true) {
+          setUsernameStatus("available");
+          setUsernameMessage("Nome disponível ✔");
+        } else {
+          setUsernameStatus("taken");
+          setUsernameMessage("Nome de usuário já está em uso");
+          triggerUsernameShake();
+        }
+      } catch {
+        // Fallback: direct query
+        try {
+          const { data: rows } = await supabase
+            .from("profiles")
+            .select("id")
+            .ilike("username", cleaned)
+            .neq("id", userId || "")
+            .limit(1);
+          if (rows && rows.length > 0) {
+            setUsernameStatus("taken");
+            setUsernameMessage("Nome de usuário já está em uso");
+            triggerUsernameShake();
+          } else {
+            setUsernameStatus("available");
+            setUsernameMessage("Nome disponível ✔");
+          }
+        } catch {
+          setUsernameStatus("idle");
+          setUsernameMessage("");
+        }
+      }
+    }, 450);
+  }, [userId, username, triggerUsernameShake]);
+
+  const isUsernameSaveBlocked = usernameStatus === "taken" || usernameStatus === "invalid" || usernameStatus === "checking";
 
   const handleRelationshipPillPress = useCallback(
     (value: RelationshipStatus) => {
@@ -754,6 +835,10 @@ export default function Profile() {
       Alert.alert("Username obrigatório", "Defina um username.");
       return;
     }
+    if (isUsernameSaveBlocked) {
+      triggerUsernameShake();
+      return;
+    }
 
     const statusChanged = draftRelationshipStatus !== relationshipStatus;
 
@@ -778,7 +863,7 @@ export default function Profile() {
 
     try {
       setSavingProfile(true);
-      const usernameClean = draftUsername.trim();
+      const usernameClean = draftUsername.trim().toLowerCase();
       const fullNameClean = draftFullName.trim();
       const bioClean = draftBio.trim();
 
@@ -846,7 +931,15 @@ export default function Profile() {
       setEditing(false);
       Alert.alert("Perfil atualizado", "Seu perfil foi salvo com sucesso.");
     } catch (e: any) {
-      Alert.alert("Erro ao atualizar perfil", e?.message ?? String(e));
+      const msg = e?.message ?? String(e);
+      if (msg.includes("profiles_username_lower_unique") || msg.includes("duplicate key") || msg.includes("unique")) {
+        setUsernameStatus("taken");
+        setUsernameMessage("Nome de usuário já está em uso");
+        triggerUsernameShake();
+        Alert.alert("Username indisponível", "Esse nome de usuário já está sendo usado por outra pessoa.");
+      } else {
+        Alert.alert("Erro ao atualizar perfil", msg);
+      }
     } finally {
       setSavingProfile(false);
     }
@@ -861,6 +954,8 @@ export default function Profile() {
     avatarUrl,
     relationshipStatus,
     relationshipStatusChangedAt,
+    isUsernameSaveBlocked,
+    triggerUsernameShake,
   ]);
 
   const signOut = useCallback(async () => {
@@ -1536,6 +1631,8 @@ export default function Profile() {
             label: "Editar perfil",
             onPress: () => {
               setSettingsVisible(false);
+              setUsernameStatus("idle");
+              setUsernameMessage("");
               setEditing(true);
             },
           },
@@ -1682,9 +1779,9 @@ export default function Profile() {
           <Text style={[styles.settingsTitle, { color: theme.colors.text }]}>Editar perfil</Text>
           <TouchableOpacity
             onPress={handleSaveProfile}
-            disabled={savingProfile}
+            disabled={savingProfile || isUsernameSaveBlocked}
             activeOpacity={0.7}
-            style={styles.editSaveHeaderBtn}
+            style={[styles.editSaveHeaderBtn, (savingProfile || isUsernameSaveBlocked) && { opacity: 0.4 }]}
           >
             {savingProfile ? (
               <ActivityIndicator size="small" color={theme.colors.primary || "#a855f7"} />
@@ -1740,19 +1837,57 @@ export default function Profile() {
             </View>
 
             {/* Username */}
-            <View
-              style={[styles.editFieldBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+            <Animated.View
+              style={[
+                styles.editFieldBox,
+                {
+                  backgroundColor: theme.colors.surface,
+                  borderColor:
+                    usernameStatus === "taken" || usernameStatus === "invalid"
+                      ? "#ef4444"
+                      : usernameStatus === "available"
+                        ? "#22c55e"
+                        : theme.colors.border,
+                  borderWidth: usernameStatus === "taken" || usernameStatus === "invalid" || usernameStatus === "available" ? 1.5 : 1,
+                  transform: [{ translateX: usernameShakeAnim }],
+                },
+              ]}
             >
               <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>Nome de usuário</Text>
-              <TextInput
-                value={draftUsername}
-                onChangeText={setDraftUsername}
-                placeholder="username"
-                placeholderTextColor={theme.colors.textMuted}
-                autoCapitalize="none"
-                style={[styles.editFieldInput, { color: theme.colors.text }]}
-              />
-            </View>
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                <Text style={{ color: theme.colors.textMuted, fontSize: 15, fontWeight: "500", marginRight: 2 }}>@</Text>
+                <TextInput
+                  value={draftUsername}
+                  onChangeText={handleUsernameChange}
+                  placeholder="username"
+                  placeholderTextColor={theme.colors.textMuted}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={[styles.editFieldInput, { color: theme.colors.text, flex: 1 }]}
+                />
+                {usernameStatus === "checking" && (
+                  <ActivityIndicator size="small" color={theme.colors.textMuted} style={{ marginLeft: 8 }} />
+                )}
+              </View>
+            </Animated.View>
+            {usernameMessage ? (
+              <Text
+                style={{
+                  fontSize: 12,
+                  fontWeight: "500",
+                  marginTop: -6,
+                  marginLeft: 4,
+                  color:
+                    usernameStatus === "taken" || usernameStatus === "invalid"
+                      ? "#ef4444"
+                      : usernameStatus === "available"
+                        ? "#22c55e"
+                        : theme.colors.textMuted,
+                }}
+              >
+                {usernameMessage}
+              </Text>
+            ) : null}
 
             {/* Bio */}
             <View
