@@ -213,6 +213,8 @@ export default function ConversationsScreen() {
 
   const reactivateConversationForUser = useCallback(
     async (conversationId: string, userId: string) => {
+      // A RPC agora faz UPDATE (deleted_at = NULL) em vez de DELETE,
+      // mantendo messages_hidden_before para ocultar mensagens antigas
       const { error: rpcError } = await supabase.rpc("reactivate_conversation", {
         _conversation_id: conversationId,
         _user_id: userId,
@@ -220,13 +222,12 @@ export default function ConversationsScreen() {
 
       if (!rpcError) return;
 
-      const { error: deleteError } = await supabase
+      // Fallback: limpar deleted_at manualmente
+      await supabase
         .from("conversation_deletions")
-        .delete()
+        .update({ deleted_at: null })
         .eq("conversation_id", conversationId)
         .eq("user_id", userId);
-
-      if (deleteError) throw deleteError;
     },
     []
   );
@@ -359,13 +360,15 @@ export default function ConversationsScreen() {
   const confirmDeleteConversation = useCallback(
     async () => {
       if (!currentUserId || !deleteTarget) return;
+      const now = new Date().toISOString();
       await supabase
         .from("conversation_deletions")
         .upsert(
           {
             conversation_id: deleteTarget,
             user_id: currentUserId,
-            deleted_at: new Date().toISOString(),
+            deleted_at: now,
+            messages_hidden_before: now,
           },
           { onConflict: "conversation_id,user_id" }
         );

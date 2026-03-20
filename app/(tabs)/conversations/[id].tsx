@@ -289,6 +289,7 @@ export default function ConversationScreen() {
   async function reactivateConversationForUser() {
     if (!authUserId || !conversationId) return;
 
+    // A RPC agora faz UPDATE (deleted_at = NULL) mantendo messages_hidden_before
     const { error: rpcError } = await supabase.rpc("reactivate_conversation", {
       _conversation_id: conversationId,
       _user_id: authUserId,
@@ -296,13 +297,12 @@ export default function ConversationScreen() {
 
     if (!rpcError) return;
 
-    const { error: deleteError } = await supabase
+    // Fallback: limpar deleted_at manualmente
+    await supabase
       .from("conversation_deletions")
-      .delete()
+      .update({ deleted_at: null })
       .eq("conversation_id", conversationId)
       .eq("user_id", authUserId);
-
-    if (deleteError) throw deleteError;
   }
 
   // ── Delete entire conversation (hide for current user) ──
@@ -318,13 +318,15 @@ export default function ConversationScreen() {
           text: "Excluir",
           style: "destructive",
           onPress: async () => {
+            const now = new Date().toISOString();
             await supabase
               .from("conversation_deletions")
               .upsert(
                 {
                   conversation_id: conversationId,
                   user_id: authUserId,
-                  deleted_at: new Date().toISOString(),
+                  deleted_at: now,
+                  messages_hidden_before: now,
                 },
                 { onConflict: "conversation_id,user_id" }
               );
@@ -400,11 +402,27 @@ export default function ConversationScreen() {
           }
         }
 
-        const { data: msgs, error: msgErr } = await supabase
+        // Buscar cutoff de mensagens ocultas (exclusão estilo Instagram)
+        let hiddenBefore: string | null = null;
+        try {
+          const { data: cutoff } = await supabase.rpc("get_messages_hidden_before", {
+            _conversation_id: conversationId,
+            _user_id: uid,
+          });
+          if (cutoff) hiddenBefore = cutoff;
+        } catch {}
+
+        let query = supabase
           .from("messages")
           .select("*")
-          .eq("conversation_id", conversationId)
-          .order("created_at", { ascending: true });
+          .eq("conversation_id", conversationId);
+
+        // Filtrar mensagens anteriores à exclusão
+        if (hiddenBefore) {
+          query = query.gt("created_at", hiddenBefore);
+        }
+
+        const { data: msgs, error: msgErr } = await query.order("created_at", { ascending: true });
 
         if (!msgErr && msgs && isMounted) {
           setMessages(msgs as DbMessage[]);
