@@ -26,6 +26,10 @@ type Props = {
   relationshipStatus?: RelationshipStatus | null;
   existingInterestType?: InterestType | null;
   loading?: boolean;
+  /** Whether both users are linked partners (bypass crush block) */
+  areLinkedPartners?: boolean;
+  /** Whether there was a past crush between these users */
+  hadCrushHistory?: boolean;
 };
 
 const JOKES_SELF_COMMITTED = [
@@ -58,6 +62,8 @@ function FollowModalComponent({
   relationshipStatus,
   existingInterestType,
   loading,
+  areLinkedPartners,
+  hadCrushHistory,
 }: Props) {
   const isCommitted = (status?: RelationshipStatus | null) =>
     status === "committed" || status === "other";
@@ -68,7 +74,8 @@ function FollowModalComponent({
 
   const iAmCommitted = isCommitted(myStatus);
   const targetIsCommitted = isCommitted(targetStatus);
-  const isCrushBlocked = iAmCommitted || targetIsCommitted;
+  // Parceiros vinculados ignoram o bloqueio de crush
+  const isCrushBlocked = (iAmCommitted || targetIsCommitted) && !areLinkedPartners;
 
   const blockedMessage = useMemo(() => {
     if (!isCrushBlocked) return "";
@@ -105,6 +112,12 @@ function FollowModalComponent({
             </Text>
 
             <View style={styles.optionsWrapper}>
+              {/* Crush history hint */}
+              {hadCrushHistory && !isCrushBlocked && !existingInterestType?.includes("crush") && (
+                <View style={styles.crushHistoryHint}>
+                  <Text style={styles.crushHistoryText}>💫 Vocês já tiveram conexão antes</Text>
+                </View>
+              )}
               {/* ── Friend (always available) ── */}
               <TouchableOpacity
                 style={[
@@ -375,6 +388,19 @@ const styles = StyleSheet.create({
   loadingText: {
     color: "#FFFFFF",
     fontSize: 13,
+  },
+  crushHistoryHint: {
+    backgroundColor: "rgba(255, 215, 0, 0.12)",
+    borderRadius: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginBottom: 8,
+  },
+  crushHistoryText: {
+    color: "#FFD700",
+    fontSize: 12,
+    fontWeight: "500",
+    textAlign: "center",
   },
 });
 

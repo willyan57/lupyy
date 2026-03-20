@@ -1,8 +1,11 @@
 import CommentsSheet from "@/components/CommentsSheet";
+import FollowModal from "@/components/FollowModal";
 import FullscreenViewer, { ViewerItem } from "@/components/FullscreenViewer";
+import LikesSheet from "@/components/LikesSheet";
 import { PostCard } from "@/components/PostCard";
 import SkeletonPost from "@/components/SkeletonPost";
 import { useTheme } from "@/contexts/ThemeContext";
+import { getFollowState, setFollowInterestType, type InterestType } from "@/lib/social";
 import { supabase } from "@/lib/supabase";
 import { useIsMobileWeb } from "@/lib/useIsMobileWeb";
 import { useIsFocused } from "@react-navigation/native";
@@ -58,12 +61,11 @@ type Counter = {
   likes: number;
   comments: number;
   reposts: number;
-  liked?: boolean;
+  liked: boolean;
 };
 
 async function toSigned(path: string | null) {
   if (!path) return null;
-
   const signed = await supabase.storage
     .from("posts")
     .createSignedUrl(path, 60 * 60);
@@ -74,7 +76,6 @@ async function toSigned(path: string | null) {
   } else {
     url = supabase.storage.from("posts").getPublicUrl(path).data.publicUrl;
   }
-
   ExpoImage.prefetch(url).catch(() => {});
   return url;
 }
@@ -95,9 +96,7 @@ export default function Feed() {
   const [error, setError] = useState<string | null>(null);
 
   const [viewerOpen, setViewerOpen] = useState(false);
-  const [viewerPostId, setViewerPostId] = useState<string | number | null>(
-    null
-  );
+  const [viewerPostId, setViewerPostId] = useState<string | number | null>(null);
   const [viewerIndex, setViewerIndex] = useState(0);
 
   const [counts, setCounts] = useState<Record<string | number, Counter>>({});
@@ -105,15 +104,24 @@ export default function Feed() {
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [commentsPostId, setCommentsPostId] = useState<number | null>(null);
 
+  // Likes sheet
+  const [likesSheetOpen, setLikesSheetOpen] = useState(false);
+  const [likesSheetPostId, setLikesSheetPostId] = useState<number | string | null>(null);
+
+  // Follow modal (from likes sheet "Conectar")
+  const [followModalVisible, setFollowModalVisible] = useState(false);
+  const [followModalTargetId, setFollowModalTargetId] = useState<string | null>(null);
+  const [followModalLoading, setFollowModalLoading] = useState(false);
+  const [followModalExisting, setFollowModalExisting] = useState<InterestType | null>(null);
+
   const resumeViewerAfterCommentsRef = useRef(false);
   const resumeViewerIndexRef = useRef(0);
 
   const [currentIndex, setCurrentIndex] = useState(0);
 
-  // STORIES VIEWER
+  // STORIES
   const [authUserId, setAuthUserId] = useState<string | null>(null);
-
-    const [storyViewerVisible, setStoryViewerVisible] = useState(false);
+  const [storyViewerVisible, setStoryViewerVisible] = useState(false);
   const [storyViewerItems, setStoryViewerItems] = useState<StoryItem[]>([]);
   const [storyViewerStartIndex, setStoryViewerStartIndex] = useState(0);
   const [storyUsers, setStoryUsers] = useState<StoryUser[]>([
@@ -122,7 +130,6 @@ export default function Feed() {
   const [storiesByUser, setStoriesByUser] = useState<Record<string, StoryItem[]>>({});
 
   const swipeThreshold = 60;
-
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_evt, gestureState) => {
@@ -132,13 +139,9 @@ export default function Feed() {
       onPanResponderRelease: (_evt, gestureState) => {
         const { dx } = gestureState;
         if (dx > swipeThreshold) {
-          if (!isDesktopWeb) {
-            router.push("/capture");
-          }
+          if (!isDesktopWeb) router.push("/capture");
         } else if (dx < -swipeThreshold) {
-          if (!isDesktopWeb) {
-            router.replace("/(tabs)/tribes");
-          }
+          if (!isDesktopWeb) router.replace("/(tabs)/tribes");
         }
       },
     })
@@ -149,16 +152,12 @@ export default function Feed() {
     [authUserId]
   );
 
-  const onViewableItemsChanged = useRef(
-    ({ viewableItems }: any) => {
-      if (viewableItems?.length > 0) {
-        const idx = viewableItems[0].index ?? 0;
-        if (typeof idx === "number") {
-          setCurrentIndex(idx);
-        }
-      }
+  const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
+    if (viewableItems?.length > 0) {
+      const idx = viewableItems[0].index ?? 0;
+      if (typeof idx === "number") setCurrentIndex(idx);
     }
-  );
+  });
 
   const inflight = useRef<{ canceled?: boolean }>({ canceled: false });
   const pageRef = useRef(0);
@@ -168,11 +167,8 @@ export default function Feed() {
     const promises = rows.map(async (p) => {
       const [media_url, thumb_url] = await Promise.all([
         toSigned(p.image_path),
-        p.media_type === "video"
-          ? toSigned(p.thumbnail_path)
-          : Promise.resolve(null),
+        p.media_type === "video" ? toSigned(p.thumbnail_path) : Promise.resolve(null),
       ]);
-
       return {
         ...p,
         id: p.id,
@@ -190,10 +186,7 @@ export default function Feed() {
     const { data, error: qErr } = await supabase
       .from("post_counts")
       .select("*")
-      .in(
-        "post_id",
-        ids.map((id) => id)
-      );
+      .in("post_id", ids.map((id) => id));
 
     if (qErr) throw qErr;
 
@@ -204,9 +197,26 @@ export default function Feed() {
         likes: r.likes_count ?? 0,
         comments: r.comments_count ?? 0,
         reposts: r.reposts_count ?? 0,
+        liked: false, // será preenchido por fetchMyLikes
       };
     });
     return res;
+  }, []);
+
+  /**
+   * ★ CORREÇÃO PRINCIPAL: buscar quais posts o usuário logado já curtiu
+   */
+  const fetchMyLikes = useCallback(async (ids: (number | string)[], userId: string) => {
+    if (!ids.length || !userId) return new Set<string | number>();
+    const { data } = await supabase
+      .from("likes")
+      .select("post_id")
+      .eq("user_id", userId)
+      .in("post_id", ids);
+
+    const set = new Set<string | number>();
+    (data ?? []).forEach((r: any) => set.add(r.post_id));
+    return set;
   }, []);
 
   const endGuard = useRef(false);
@@ -214,16 +224,13 @@ export default function Feed() {
     if (endGuard.current || !hasMore || loading) return;
     endGuard.current = true;
     loadPage().finally(() => {
-      setTimeout(() => {
-        endGuard.current = false;
-      }, 300);
+      setTimeout(() => { endGuard.current = false; }, 300);
     });
   }, [hasMore, loading]);
 
   const loadPage = useCallback(
     async (opts?: { reset?: boolean }) => {
       const reset = !!opts?.reset;
-
       if (loadingRef.current) return;
       loadingRef.current = true;
       setLoading(true);
@@ -239,29 +246,11 @@ export default function Feed() {
         const from = curPage * PAGE;
         const to = from + PAGE - 1;
 
-        const {
-          data: rows,
-          error: qErr,
-          count,
-        } = await supabase
+        const { data: rows, error: qErr, count } = await supabase
           .from(POSTS_TABLE)
           .select(
-            `
-            id,
-            user_id,
-            media_type,
-            image_path,
-            thumbnail_path,
-            caption,
-            width,
-            height,
-            duration,
-            created_at,
-            profiles (
-              username,
-              avatar_url
-            )
-          `,
+            `id, user_id, media_type, image_path, thumbnail_path, caption, width, height, duration, created_at,
+            profiles ( username, avatar_url )`,
             { count: "exact" }
           )
           .order("created_at", { ascending: false })
@@ -278,16 +267,22 @@ export default function Feed() {
         const bulk = await fetchCountsBulk(ids);
         if (inflight.current.canceled) return;
 
+        // ★ Buscar likes do usuário logado
+        const { data: userData } = await supabase.auth.getUser();
+        const uid = userData?.user?.id;
+        let myLikedSet = new Set<string | number>();
+        if (uid) {
+          myLikedSet = await fetchMyLikes(ids, uid);
+        }
+
         setCounts((prev) => {
-          const base = reset ? ({} as Record<string | number, Counter>) : {
-              ...prev,
-            };
+          const base = reset ? ({} as Record<string | number, Counter>) : { ...prev };
           for (const id of ids) {
             base[id] = {
               likes: bulk[id]?.likes ?? base[id]?.likes ?? 0,
               comments: bulk[id]?.comments ?? base[id]?.comments ?? 0,
               reposts: bulk[id]?.reposts ?? base[id]?.reposts ?? 0,
-              liked: base[id]?.liked ?? false,
+              liked: myLikedSet.has(id) || (base[id]?.liked ?? false),
             };
           }
           return base;
@@ -314,9 +309,10 @@ export default function Feed() {
         }
       }
     },
-    [mapRows, fetchCountsBulk]
+    [mapRows, fetchCountsBulk, fetchMyLikes]
   );
-  
+
+  // ── Stories ──
   const loadStoriesFeed = useCallback(
     async (uid?: string) => {
       try {
@@ -325,52 +321,26 @@ export default function Feed() {
           .select("*")
           .order("created_at", { ascending: false });
 
-        if (storiesError) {
-          console.log("loadStoriesFeed error details", storiesError);
-          return;
-        }
-
+        if (storiesError) return;
         if (!rows || rows.length === 0) {
           setStoriesByUser({});
-          setStoryUsers([
-            {
-              id: "me",
-              label: "Seu story",
-              initials: "W",
-              hasUnseen: true,
-              isCurrentUser: true,
-            },
-          ]);
+          setStoryUsers([{ id: "me", label: "Seu story", initials: "W", hasUnseen: true, isCurrentUser: true }]);
           return;
         }
 
-        const { data: metaRows, error: metaError } = await supabase
-          .from("view_stories_bar")
-          .select("*");
-
-        if (metaError) {
-          console.log("loadStoriesFeed meta error details", metaError);
-        }
-
+        const { data: metaRows } = await supabase.from("view_stories_bar").select("*");
         const metaByUserId: Record<string, any> = {};
-        (metaRows ?? []).forEach((mr: any) => {
-          const key = String(mr.user_id);
-          metaByUserId[key] = mr;
-        });
+        (metaRows ?? []).forEach((mr: any) => { metaByUserId[String(mr.user_id)] = mr; });
 
         const grouped: Record<string, StoryItem[]> = {};
         const usersMap: Record<string, StoryUser> = {};
 
         (rows as any[]).forEach((row) => {
           let url: string | null | undefined = row.media_url;
-
           if (!url && row.media_path) {
-            const { data: publicData } = supabase.storage
-              .from("stories")
-              .getPublicUrl(row.media_path as string);
+            const { data: publicData } = supabase.storage.from("stories").getPublicUrl(row.media_path as string);
             url = publicData?.publicUrl ?? "";
           }
-
           if (!url) return;
 
           const item: StoryItem = {
@@ -378,7 +348,6 @@ export default function Feed() {
             media_type: row.media_type,
             media_url: url,
             duration: null,
-            // Metadados para o cabeçalho do StoryViewer
             userName: row.username ?? "user",
             userAvatarUrl: row.avatar_url ?? null,
             createdAt: row.created_at ?? null,
@@ -392,26 +361,17 @@ export default function Feed() {
             const isMe = authUserId && userId === authUserId;
             const username: string = row.username ?? "user";
             const label = isMe ? "Seu story" : username;
-            const initials =
-              username && username.length > 0
-                ? username[0].toUpperCase()
-                : "S";
-
+            const initials = username?.[0]?.toUpperCase() ?? "S";
             const avatarUrl: string | null = row.avatar_url ?? null;
             const meta = metaByUserId[userId];
-
             const hasUnseen = meta?.has_unseen ?? true;
             const seen = meta?.seen ?? !hasUnseen;
             const isCurrentUser = meta?.is_current_user ?? !!isMe;
 
             usersMap[userId] = {
-              id: userId,
-              label,
-              initials,
+              id: userId, label, initials,
               avatarUrl: avatarUrl ?? undefined,
-              hasUnseen,
-              seen,
-              isCurrentUser,
+              hasUnseen, seen, isCurrentUser,
             };
           }
         });
@@ -419,71 +379,62 @@ export default function Feed() {
         const allUsers = Object.values(usersMap);
         const meUser = allUsers.find((u) => u.isCurrentUser);
         const otherUsers = allUsers.filter((u) => !u.isCurrentUser);
-        const orderedUsers = meUser ? [meUser, ...otherUsers] : otherUsers;
-
         setStoriesByUser(grouped);
-        setStoryUsers(orderedUsers);
-      } catch (e) {
-        console.log("loadStoriesFeed error", e);
-      }
+        setStoryUsers(meUser ? [meUser, ...otherUsers] : otherUsers);
+      } catch {}
     },
     [authUserId]
   );
 
-
   useEffect(() => {
-    supabase.auth
-      .getUser()
-      .then(({ data, error }: { data: any; error: any }) => {
-        if (!error && data?.user) {
-          setAuthUserId(data.user.id);
-        }
-      })
-      .catch(() => {});
+    supabase.auth.getUser().then(({ data, error }: any) => {
+      if (!error && data?.user) setAuthUserId(data.user.id);
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {
-    if (authUserId) {
-      loadStoriesFeed();
-    }
+    if (authUserId) loadStoriesFeed();
   }, [authUserId, loadStoriesFeed]);
 
   useEffect(() => {
     inflight.current.canceled = false;
     loadPage({ reset: true });
-    return () => {
-      inflight.current.canceled = true;
-    };
+    return () => { inflight.current.canceled = true; };
   }, [loadPage]);
 
+  // Realtime likes/comments — also refetch likedByMe
   useEffect(() => {
     const ids = posts.map((p) => p.id);
 
-    const refreshCounts = () =>
-      fetchCountsBulk(ids).then((bulk) =>
-        setCounts((prev) => ({
-          ...prev,
-          ...Object.fromEntries(
-            ids.map((id) => [id, { ...prev[id], ...bulk[id] }])
-          ),
-        }))
-      );
+    const refreshCounts = async () => {
+      const bulk = await fetchCountsBulk(ids);
+      let myLikedSet = new Set<string | number>();
+      if (authUserId) {
+        myLikedSet = await fetchMyLikes(ids, authUserId);
+      }
+      setCounts((prev) => ({
+        ...prev,
+        ...Object.fromEntries(
+          ids.map((id) => [
+            id,
+            {
+              likes: bulk[id]?.likes ?? prev[id]?.likes ?? 0,
+              comments: bulk[id]?.comments ?? prev[id]?.comments ?? 0,
+              reposts: bulk[id]?.reposts ?? prev[id]?.reposts ?? 0,
+              liked: myLikedSet.has(id),
+            },
+          ])
+        ),
+      }));
+    };
 
     const chLikes = supabase
       .channel("realtime:likes")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "likes" },
-        refreshCounts
-      );
+      .on("postgres_changes", { event: "*", schema: "public", table: "likes" }, refreshCounts);
 
     const chComments = supabase
       .channel("realtime:comments")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "comments" },
-        refreshCounts
-      );
+      .on("postgres_changes", { event: "*", schema: "public", table: "comments" }, refreshCounts);
 
     chLikes.subscribe();
     chComments.subscribe();
@@ -492,26 +443,18 @@ export default function Feed() {
       supabase.removeChannel(chLikes);
       supabase.removeChannel(chComments);
     };
-  }, [posts, fetchCountsBulk]);
+  }, [posts, fetchCountsBulk, fetchMyLikes, authUserId]);
 
   const toggleLike = useCallback(
     async (postId: number | string) => {
-      const cur = counts[postId] ?? {
-        likes: 0,
-        comments: 0,
-        reposts: 0,
-        liked: false,
-      };
+      const cur = counts[postId] ?? { likes: 0, comments: 0, reposts: 0, liked: false };
       const nextLiked = !cur.liked;
       const delta = nextLiked ? 1 : -1;
 
+      // Optimistic
       setCounts((prev) => ({
         ...prev,
-        [postId]: {
-          ...cur,
-          liked: nextLiked,
-          likes: Math.max(0, cur.likes + delta),
-        },
+        [postId]: { ...cur, liked: nextLiked, likes: Math.max(0, cur.likes + delta) },
       }));
 
       const { data: u } = await supabase.auth.getUser();
@@ -532,6 +475,7 @@ export default function Feed() {
           if (delErr) throw delErr;
         }
       } catch {
+        // Revert
         setCounts((prev) => ({ ...prev, [postId]: cur }));
       }
     },
@@ -544,13 +488,9 @@ export default function Feed() {
         resumeViewerAfterCommentsRef.current = true;
         resumeViewerIndexRef.current = viewerIndex;
         setViewerOpen(false);
-        setTimeout(() => {
-          setCommentsPostId(postId);
-          setCommentsOpen(true);
-        }, 30);
+        setTimeout(() => { setCommentsPostId(postId); setCommentsOpen(true); }, 30);
         return;
       }
-
       setCommentsPostId(postId);
       setCommentsOpen(true);
     },
@@ -569,7 +509,43 @@ export default function Feed() {
     }, 30);
   }, []);
 
-const viewerItems: ViewerItem[] = posts.map((p) => ({
+  // ── Likes sheet ──
+  const openLikesSheet = useCallback((postId: number | string) => {
+    setLikesSheetPostId(postId);
+    setLikesSheetOpen(true);
+  }, []);
+
+  const closeLikesSheet = useCallback(() => {
+    setLikesSheetOpen(false);
+    setTimeout(() => setLikesSheetPostId(null), 200);
+  }, []);
+
+  // ── Follow modal from likes sheet ──
+  const handleConnectFromLikes = useCallback(async (targetUserId: string) => {
+    // Close likes sheet, open follow modal
+    closeLikesSheet();
+    setFollowModalTargetId(targetUserId);
+
+    // Fetch existing follow state
+    if (authUserId) {
+      const state = await getFollowState(authUserId, targetUserId);
+      setFollowModalExisting(state.interestType);
+    }
+
+    setFollowModalVisible(true);
+  }, [authUserId, closeLikesSheet]);
+
+  const handleFollowSelect = useCallback(async (interestType: InterestType) => {
+    if (!authUserId || !followModalTargetId) return;
+    setFollowModalLoading(true);
+    try {
+      await setFollowInterestType(authUserId, followModalTargetId, interestType);
+      setFollowModalVisible(false);
+    } catch {}
+    setFollowModalLoading(false);
+  }, [authUserId, followModalTargetId]);
+
+  const viewerItems: ViewerItem[] = posts.map((p) => ({
     id: p.id,
     media_type: p.media_type,
     media_url: p.media_url,
@@ -581,23 +557,15 @@ const viewerItems: ViewerItem[] = posts.map((p) => ({
   const videoAutoplayEnabled = isFocused && !viewerOpen && !storyViewerVisible;
 
   const sharePost = async (postId: number | string) => {
-    try {
-      await Share.share({
-        message: `Check out my post on Lupyy (id: ${postId})`,
-      });
-    } catch {}
+    try { await Share.share({ message: `Check out my post on Lupyy (id: ${postId})` }); } catch {}
   };
 
-  const listContentStyle =
-    isDesktopWeb ? styles.listContentWeb : styles.listContentMobile;
+  const listContentStyle = isDesktopWeb ? styles.listContentWeb : styles.listContentMobile;
 
   const handlePressStory = useCallback(
     (user: StoryUser) => {
-      const key = String(user.id);
-      const items = storiesByUser[key];
-      if (!items || !items.length) {
-        return;
-      }
+      const items = storiesByUser[String(user.id)];
+      if (!items?.length) return;
       setStoryViewerItems(items);
       setStoryViewerStartIndex(0);
       setStoryViewerVisible(true);
@@ -612,15 +580,8 @@ const viewerItems: ViewerItem[] = posts.map((p) => ({
       edges={["top", "left", "right"]}
     >
       {!!error && (
-        <View
-          style={[
-            styles.errorBar,
-            { backgroundColor: theme.colors.danger ?? "#b00020" },
-          ]}
-        >
-          <Text style={styles.errorText} numberOfLines={2}>
-            {error}
-          </Text>
+        <View style={[styles.errorBar, { backgroundColor: theme.colors.danger ?? "#b00020" }]}>
+          <Text style={styles.errorText} numberOfLines={2}>{error}</Text>
         </View>
       )}
 
@@ -634,11 +595,8 @@ const viewerItems: ViewerItem[] = posts.map((p) => ({
               <TouchableOpacity
                 activeOpacity={0.8}
                 onPress={() => {
-                  if (!isDesktopWeb) {
-                    router.push("/capture");
-                  } else {
-                    router.push("/new");
-                  }
+                  if (!isDesktopWeb) router.push("/capture");
+                  else router.push("/new");
                 }}
               >
                 <Ionicons name="add-circle-outline" size={26} color={theme.colors.primary} />
@@ -669,15 +627,13 @@ const viewerItems: ViewerItem[] = posts.map((p) => ({
               setViewerOpen(true);
             }}
             onPressUser={() => {
-              router.push({
-                pathname: "/profile",
-                params: { userId: item.user_id },
-              });
+              router.push({ pathname: "/profile", params: { userId: item.user_id } });
             }}
             onLike={() => toggleLike(item.id)}
             onComment={() => openComments(item.id as number)}
             onRepost={() => {}}
             onShare={() => sharePost(item.id)}
+            onPressLikesCount={() => openLikesSheet(item.id)}
           />
         )}
         ListEmptyComponent={
@@ -708,9 +664,7 @@ const viewerItems: ViewerItem[] = posts.map((p) => ({
           />
         }
         ListFooterComponent={
-          loading && page > 0 ? (
-            <ActivityIndicator style={{ margin: 16 }} />
-          ) : null
+          loading && page > 0 ? <ActivityIndicator style={{ margin: 16 }} /> : null
         }
       />
 
@@ -718,17 +672,10 @@ const viewerItems: ViewerItem[] = posts.map((p) => ({
         visible={viewerOpen}
         items={viewerItems}
         startIndex={viewerIndex}
-        onClose={() => {
-          setViewerOpen(false);
-        }}
+        onClose={() => setViewerOpen(false)}
         getCounts={(id) => {
           const c = counts[id as number];
-          return {
-            likes: c?.likes ?? 0,
-            comments: c?.comments ?? 0,
-            reposts: c?.reposts ?? 0,
-            liked: !!c?.liked,
-          };
+          return { likes: c?.likes ?? 0, comments: c?.comments ?? 0, reposts: c?.reposts ?? 0, liked: !!c?.liked };
         }}
         onLike={(id) => toggleLike(id)}
         onComment={(id) => openComments(id as number)}
@@ -736,7 +683,6 @@ const viewerItems: ViewerItem[] = posts.map((p) => ({
         onShare={(id) => sharePost(id)}
       />
 
-      {/* StoryViewer já encaixado, mas ainda sem stories */}
       <StoryViewer
         visible={storyViewerVisible}
         items={storyViewerItems}
@@ -749,13 +695,27 @@ const viewerItems: ViewerItem[] = posts.map((p) => ({
         postId={commentsPostId}
         onClose={closeComments}
       />
+
+      <LikesSheet
+        visible={likesSheetOpen}
+        postId={likesSheetPostId}
+        onClose={closeLikesSheet}
+        onConnect={handleConnectFromLikes}
+      />
+
+      <FollowModal
+        visible={followModalVisible}
+        onClose={() => setFollowModalVisible(false)}
+        onSelect={handleFollowSelect}
+        existingInterestType={followModalExisting}
+        loading={followModalLoading}
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-
   topBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -763,37 +723,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 4,
   },
-  logoText: {
-    fontSize: 22,
-    fontWeight: "800",
-  },
-
-  listContentWeb: {
-    paddingTop: 6,
-    paddingBottom: 24,
-    alignItems: "center",
-  },
-  listContentMobile: {
-    paddingTop: 6,
-    paddingBottom: 24,
-  },
-
+  logoText: { fontSize: 22, fontWeight: "800" },
+  listContentWeb: { paddingTop: 6, paddingBottom: 24, alignItems: "center" },
+  listContentMobile: { paddingTop: 6, paddingBottom: 24 },
   mute: {
     position: "absolute",
-    top: 54,
-    right: 12,
+    top: 54, right: 12,
     borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 10, paddingVertical: 6,
   },
   muteText: { color: "#fff", fontSize: 16, fontWeight: "800" },
   errorBar: {
     position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    padding: 8,
-    zIndex: 10,
+    top: 0, left: 0, right: 0,
+    padding: 8, zIndex: 10,
   },
   errorText: { color: "white", fontWeight: "700" },
 });

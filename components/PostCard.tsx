@@ -43,6 +43,8 @@ export type PostCardProps = {
   onRepost?: () => void;
   onShare?: () => void;
   onPressUser?: () => void;
+  /** Callback quando clica na quantidade de curtidas */
+  onPressLikesCount?: () => void;
 };
 
 function timeAgo(ts?: string | null) {
@@ -76,22 +78,19 @@ function _PostCard(props: PostCardProps) {
     onRepost,
     onShare,
     onPressUser,
+    onPressLikesCount,
   } = props;
 
   const isWeb = Platform.OS === "web";
-
   const { width: windowWidth } = useWindowDimensions();
 
   const player = useVideoPlayer(media_url, (p) => {
     p.loop = true;
-    // no WEB: nunca mutar o vídeo (som sempre liberado)
-    // no APK / nativo: respeita a prop muted
     p.muted = isWeb ? false : !!muted;
   });
 
   const [paused, setPaused] = useState(!isVisible);
 
-  // controla play/pause quando entra/sai da tela
   useEffect(() => {
     if (media_type !== "video") return;
     if (isVisible) {
@@ -103,7 +102,6 @@ function _PostCard(props: PostCardProps) {
     }
   }, [isVisible, player, media_type]);
 
-  // controla play/pause quando toca na tela
   useEffect(() => {
     if (media_type !== "video") return;
     if (paused) {
@@ -113,18 +111,14 @@ function _PostCard(props: PostCardProps) {
     }
   }, [paused, isVisible, player, media_type]);
 
-  // mute / unmute — só no nativo, para não brigar com o navegador
   useEffect(() => {
     if (media_type !== "video" || isWeb) return;
     player.muted = !!muted;
   }, [muted, player, media_type, isWeb]);
 
-  // cleanup
   useEffect(() => {
     return () => {
-      try {
-        player.pause();
-      } catch {}
+      try { player.pause(); } catch {}
     };
   }, [player]);
 
@@ -162,11 +156,8 @@ function _PostCard(props: PostCardProps) {
 
   const handleSinglePress = useCallback(() => {
     if (media_type === "video") {
-      if (onPressMedia) {
-        onPressMedia();
-      } else {
-        togglePaused();
-      }
+      if (onPressMedia) onPressMedia();
+      else togglePaused();
     } else if (onPressMedia) {
       onPressMedia();
     }
@@ -187,7 +178,6 @@ function _PostCard(props: PostCardProps) {
   const composedGesture = Gesture.Exclusive(doubleTap, singleTap);
 
   const likeIconColor = liked ? Colors.brandStart : Colors.text;
-
   const shouldShowVideo = media_type === "video" && isVisible && !paused;
 
   const cardStyle = [
@@ -197,113 +187,58 @@ function _PostCard(props: PostCardProps) {
       : null,
   ];
 
+  const mediaContent = (
+    <>
+      {media_type === "image" ? (
+        <Image source={{ uri: media_url }} style={styles.media} contentFit="cover" cachePolicy="disk" />
+      ) : shouldShowVideo ? (
+        <VideoView style={styles.media} player={player} contentFit="cover" />
+      ) : thumb_url ? (
+        <Image source={{ uri: thumb_url }} style={styles.media} contentFit="cover" cachePolicy="disk" />
+      ) : (
+        <View style={styles.videoPlaceholder} />
+      )}
+      <Animated.View pointerEvents="none" style={[styles.heartWrap, heartStyle]}>
+        <Text style={styles.heart}>❤</Text>
+      </Animated.View>
+    </>
+  );
+
   return (
     <View style={cardStyle}>
+      {/* Header */}
       <View style={styles.header}>
-        {avatarUrl ? (
-          <Image
-            source={{ uri: avatarUrl }}
-            style={styles.avatar}
-            contentFit="cover"
-            cachePolicy="disk"
-          />
-        ) : (
-          <View style={styles.avatar} />
-        )}
+        <TouchableOpacity activeOpacity={0.7} onPress={onPressUser} disabled={!onPressUser}>
+          {avatarUrl ? (
+            <Image source={{ uri: avatarUrl }} style={styles.avatar} contentFit="cover" cachePolicy="disk" />
+          ) : (
+            <View style={styles.avatar} />
+          )}
+        </TouchableOpacity>
         <View style={{ flex: 1 }}>
-          <TouchableOpacity
-            activeOpacity={0.7}
-            onPress={onPressUser}
-            disabled={!onPressUser}
-          >
+          <TouchableOpacity activeOpacity={0.7} onPress={onPressUser} disabled={!onPressUser}>
             <Text style={styles.username}>{username || "user"}</Text>
           </TouchableOpacity>
           <Text style={styles.date}>{timeAgo(created_at)}</Text>
         </View>
       </View>
 
+      {/* Media */}
       <View style={styles.mediaContainer}>
         {isWeb ? (
-          <TouchableOpacity
-            activeOpacity={1}
-            style={styles.mediaWrapper}
-            accessible
-            accessibilityRole="imagebutton"
-            onPress={handleSinglePress}
-          >
-            {media_type === "image" ? (
-              <Image
-                source={{ uri: media_url }}
-                style={styles.media}
-                contentFit="cover"
-                cachePolicy="disk"
-              />
-            ) : shouldShowVideo ? (
-              <VideoView
-                style={styles.media}
-                player={player}
-                contentFit="cover"
-              />
-            ) : thumb_url ? (
-              <Image
-                source={{ uri: thumb_url }}
-                style={styles.media}
-                contentFit="cover"
-                cachePolicy="disk"
-              />
-            ) : (
-              <View style={styles.videoPlaceholder} />
-            )}
-
-            <Animated.View
-              pointerEvents="none"
-              style={[styles.heartWrap, heartStyle]}
-            >
-              <Text style={styles.heart}>❤</Text>
-            </Animated.View>
+          <TouchableOpacity activeOpacity={1} style={styles.mediaWrapper} onPress={handleSinglePress}>
+            {mediaContent}
           </TouchableOpacity>
         ) : (
           <GestureDetector gesture={composedGesture}>
-            <View
-              style={styles.mediaWrapper}
-              accessible
-              accessibilityRole="imagebutton"
-            >
-              {media_type === "image" ? (
-                <Image
-                  source={{ uri: media_url }}
-                  style={styles.media}
-                  contentFit="cover"
-                  cachePolicy="disk"
-                />
-              ) : shouldShowVideo ? (
-                <VideoView
-                  style={styles.media}
-                  player={player}
-                  contentFit="cover"
-                />
-              ) : thumb_url ? (
-                <Image
-                  source={{ uri: thumb_url }}
-                  style={styles.media}
-                  contentFit="cover"
-                  cachePolicy="disk"
-                />
-              ) : (
-                <View style={styles.videoPlaceholder} />
-              )}
-
-              <Animated.View
-                pointerEvents="none"
-                style={[styles.heartWrap, heartStyle]}
-              >
-                <Text style={styles.heart}>❤</Text>
-              </Animated.View>
+            <View style={styles.mediaWrapper}>
+              {mediaContent}
             </View>
           </GestureDetector>
         )}
       </View>
 
+      {/* Actions */}
       <View style={styles.actionsBar}>
         <TouchableOpacity onPress={onLike} style={styles.actionBtn}>
           <Ionicons
@@ -315,20 +250,12 @@ function _PostCard(props: PostCardProps) {
         </TouchableOpacity>
 
         <TouchableOpacity onPress={onComment} style={styles.actionBtn}>
-          <Ionicons
-            name="chatbubble-outline"
-            size={24}
-            color={Colors.text}
-          />
+          <Ionicons name="chatbubble-outline" size={24} color={Colors.text} />
           <Text style={styles.actionCount}>{commentsCount}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity onPress={onRepost} style={styles.actionBtn}>
-          <Ionicons
-            name="arrow-redo-outline"
-            size={24}
-            color={Colors.text}
-          />
+          <Ionicons name="arrow-redo-outline" size={24} color={Colors.text} />
           <Text style={styles.actionCount}>{repostsCount}</Text>
         </TouchableOpacity>
 
@@ -339,10 +266,17 @@ function _PostCard(props: PostCardProps) {
         </TouchableOpacity>
       </View>
 
+      {/* Likes count — touchable to open likes modal */}
       {likesCount > 0 && (
-        <Text style={styles.likesText}>
-          {likesCount} curtida{likesCount === 1 ? "" : "s"}
-        </Text>
+        <TouchableOpacity
+          activeOpacity={0.7}
+          onPress={onPressLikesCount}
+          disabled={!onPressLikesCount}
+        >
+          <Text style={styles.likesText}>
+            {likesCount} curtida{likesCount === 1 ? "" : "s"}
+          </Text>
+        </TouchableOpacity>
       )}
 
       {caption ? <Text style={styles.caption}>{caption}</Text> : null}
@@ -387,10 +321,7 @@ const styles = StyleSheet.create({
     position: "relative",
     backgroundColor: Colors.border,
   },
-  mediaWrapper: {
-    width: "100%",
-    height: "100%",
-  },
+  mediaWrapper: { width: "100%", height: "100%" },
   media: { width: "100%", height: "100%" },
   videoPlaceholder: {
     width: "100%",
@@ -401,10 +332,7 @@ const styles = StyleSheet.create({
   },
   heartWrap: {
     position: "absolute",
-    left: 0,
-    right: 0,
-    top: 0,
-    bottom: 0,
+    left: 0, right: 0, top: 0, bottom: 0,
     alignItems: "center",
     justifyContent: "center",
   },

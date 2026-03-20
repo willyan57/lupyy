@@ -110,11 +110,28 @@ export async function setFollowInterestType(
       fetchRelationshipStatus(followingId),
     ]);
 
-    if (isCommitted(myStatus)) {
-      throw new Error("CRUSH_BLOCKED_SELF_COMMITTED");
-    }
-    if (isCommitted(targetStatus)) {
-      throw new Error("CRUSH_BLOCKED_TARGET_COMMITTED");
+    // Check if they are linked partners (bypass crush block)
+    const { data: partnerCheck } = await supabase
+      .from("profiles")
+      .select("partner_id")
+      .in("id", [followerId, followingId]);
+
+    const profiles = (partnerCheck || []) as { id?: string; partner_id?: string | null }[];
+    const myProfile = profiles.find((p: any) => p.id === followerId);
+    const theirProfile = profiles.find((p: any) => p.id === followingId);
+    const areLinkedPartners =
+      !!myProfile?.partner_id &&
+      !!theirProfile?.partner_id &&
+      myProfile.partner_id === followingId &&
+      theirProfile.partner_id === followerId;
+
+    if (!areLinkedPartners) {
+      if (isCommitted(myStatus)) {
+        throw new Error("CRUSH_BLOCKED_SELF_COMMITTED");
+      }
+      if (isCommitted(targetStatus)) {
+        throw new Error("CRUSH_BLOCKED_TARGET_COMMITTED");
+      }
     }
   }
 

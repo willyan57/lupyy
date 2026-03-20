@@ -45,7 +45,9 @@ export default function ConversationsScreen() {
 
   // ── Relationship status lock ──
   const [myRelationshipStatus, setMyRelationshipStatus] = useState<string | null>(null);
-  const isCrushLocked = myRelationshipStatus === "committed" || myRelationshipStatus === "other";
+  const isCommittedStatus = myRelationshipStatus === "committed" || myRelationshipStatus === "other";
+  // Se committed mas o RPC retorna crush conversations (parceiro vinculado), não bloquear a aba
+  const isCrushLocked = isCommittedStatus && crushConversations.length === 0;
 
   // ── Animated badge scale ──
   const badgeScale = useRef(new Animated.Value(1)).current;

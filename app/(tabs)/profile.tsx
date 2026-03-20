@@ -75,6 +75,7 @@ type ProfileRow = {
   relationship_status?: RelationshipStatus | null;
   relationship_status_changed_at?: string | null;
   gender?: string | null;
+  partner_id?: string | null;
 };
 
 type StoryRow = {
@@ -218,6 +219,10 @@ const router = useRouter();
   const [draftRelationshipStatus, setDraftRelationshipStatus] = useState<RelationshipStatus | null>(null);
   const [draftGender, setDraftGender] = useState<string>("");
   const [cooldownWarning, setCooldownWarning] = useState<string | null>(null);
+  const [draftPartnerId, setDraftPartnerId] = useState<string | null>(null);
+  const [partnerSearchQuery, setPartnerSearchQuery] = useState("");
+  const [partnerSearchResults, setPartnerSearchResults] = useState<ProfileRow[]>([]);
+  const [partnerProfile, setPartnerProfile] = useState<ProfileRow | null>(null);
   const shakeAnim = useRef(new Animated.Value(0)).current;
 
   const [editing, setEditing] = useState(false);
@@ -452,6 +457,19 @@ const router = useRouter();
           setGender(g);
           setDraftGender(g);
           setDraftRelationshipStatus(relStatus);
+          setDraftPartnerId(r.partner_id ?? null);
+
+          // Carregar perfil do parceiro se existir
+          if (r.partner_id) {
+            const { data: partnerData } = await supabase
+              .from("profiles")
+              .select("id, username, full_name, avatar_url")
+              .eq("id", r.partner_id)
+              .maybeSingle();
+            if (partnerData) setPartnerProfile(partnerData as ProfileRow);
+          } else {
+            setPartnerProfile(null);
+          }
         } else {
           setProfileRow(null);
           setUsername(fallbackUsername);
@@ -502,17 +520,18 @@ const router = useRouter();
       }
 
       if (u.id && targetUserId !== u.id) {
-        // Load MY OWN relationship status for crush blocking
+        // Load MY OWN relationship status + partner_id for crush blocking
         try {
           const { data: myProfile } = await supabase
             .from("profiles")
-            .select("relationship_status")
+            .select("relationship_status, partner_id")
             .eq("id", u.id)
             .maybeSingle();
           if (myProfile) {
             setMyRelationshipStatus(
               (myProfile as any).relationship_status ?? null
             );
+            setDraftPartnerId((myProfile as any).partner_id ?? null);
           }
         } catch {}
 
@@ -817,6 +836,9 @@ const handleChangeAvatar = useCallback(async () => {
         avatar_url: avatarUrl,
         relationship_status: draftRelationshipStatus || null,
         gender: draftGender.trim() || null,
+        partner_id: (draftRelationshipStatus === "committed" || draftRelationshipStatus === "other")
+          ? (draftPartnerId || null)
+          : null,
       };
 
       if (statusChanged) {
@@ -1288,8 +1310,16 @@ const handleChangeAvatar = useCallback(async () => {
     myRelationshipStatus === "committed" || myRelationshipStatus === "other";
   const targetIsCommitted =
     relationshipStatus === "committed" || relationshipStatus === "other";
+
+  // Checar se são parceiros vinculados
+  const areLinkedPartners = !!(
+    profileRow?.partner_id &&
+    profileRow.partner_id === authUserId &&
+    draftPartnerId === userId
+  );
+
   const canOpenCrushConversation =
-    isCrushMatch && !viewerIsCommitted && !targetIsCommitted;
+    isCrushMatch && (!viewerIsCommitted && !targetIsCommitted || areLinkedPartners);
   const canOpenConversation = isMutualFriend || canOpenCrushConversation;
 
   const openConversation = useCallback(
@@ -1297,7 +1327,8 @@ const handleChangeAvatar = useCallback(async () => {
       if (!authUserId || !userId) return;
       if (
         conversationType === "crush" &&
-        (viewerIsCommitted || targetIsCommitted)
+        (viewerIsCommitted || targetIsCommitted) &&
+        !areLinkedPartners
       ) {
         Alert.alert(
           "🔒 Conversa bloqueada",
@@ -1307,6 +1338,21 @@ const handleChangeAvatar = useCallback(async () => {
       }
 
       try {
+        // Reativar conversa caso tenha sido soft-deleted
+        const existingConvs = await supabase
+          .from("conversations")
+          .select("id")
+          .or(`and(user1.eq.${authUserId},user2.eq.${userId}),and(user1.eq.${userId},user2.eq.${authUserId})`)
+          .eq("conversation_type", conversationType)
+          .maybeSingle();
+
+        if (existingConvs?.data?.id) {
+          await supabase.rpc("reactivate_conversation", {
+            _conversation_id: existingConvs.data.id,
+            _user_id: authUserId,
+          }).catch(() => {});
+        }
+
         const conversation = await getOrCreateConversation({
           currentUserId: authUserId,
           otherUserId: userId,
@@ -1324,7 +1370,7 @@ const handleChangeAvatar = useCallback(async () => {
         );
       }
     },
-    [authUserId, userId, router, viewerIsCommitted, targetIsCommitted]
+    [authUserId, userId, router, viewerIsCommitted, targetIsCommitted, areLinkedPartners]
   );
 
   useEffect(() => {
@@ -1753,9 +1799,101 @@ const handleChangeAvatar = useCallback(async () => {
               {(draftRelationshipStatus === "committed" || draftRelationshipStatus === "other") && (
                 <Text style={[styles.editFieldHint, { color: theme.colors.textMuted }]}>
                   🔒 Crushes e mensagens de crush serão bloqueados enquanto esse status estiver ativo. Após ativar, só poderá alterar novamente depois de 24 horas.
+                  {"\n"}💑 Vincule seu parceiro(a) abaixo para manter a conversa de crush entre vocês liberada.
                 </Text>
               )}
             </View>
+
+            {/* Parceiro vinculado — só aparece quando comprometido */}
+            {(draftRelationshipStatus === "committed" || draftRelationshipStatus === "other") && (
+              <View style={[styles.editFieldBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+                <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>
+                  💑 Com quem você está?
+                </Text>
+                <Text style={[styles.editFieldHint, { color: theme.colors.textMuted, marginBottom: 8 }]}>
+                  Vincule seu parceiro(a) para liberar o chat de crush entre vocês.
+                </Text>
+
+                {partnerProfile ? (
+                  <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: "rgba(168,85,247,0.1)", borderRadius: 14, padding: 10, marginBottom: 8 }}>
+                    <ExpoImage
+                      source={{ uri: partnerProfile.avatar_url || undefined }}
+                      style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: "#333", marginRight: 10 }}
+                      contentFit="cover"
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 14 }}>
+                        {partnerProfile.full_name || partnerProfile.username || "Parceiro(a)"}
+                      </Text>
+                      {partnerProfile.username && (
+                        <Text style={{ color: theme.colors.textMuted, fontSize: 12 }}>
+                          @{partnerProfile.username}
+                        </Text>
+                      )}
+                    </View>
+                    <TouchableOpacity
+                      onPress={() => {
+                        setDraftPartnerId(null);
+                        setPartnerProfile(null);
+                        setPartnerSearchQuery("");
+                      }}
+                      style={{ padding: 6 }}
+                    >
+                      <Text style={{ color: "#ef4444", fontSize: 13, fontWeight: "600" }}>Remover</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <>
+                    <TextInput
+                      placeholder="Buscar por username..."
+                      placeholderTextColor={theme.colors.textMuted}
+                      value={partnerSearchQuery}
+                      onChangeText={async (text) => {
+                        setPartnerSearchQuery(text);
+                        if (text.trim().length < 2) {
+                          setPartnerSearchResults([]);
+                          return;
+                        }
+                        const { data } = await supabase
+                          .from("profiles")
+                          .select("id, username, full_name, avatar_url")
+                          .neq("id", userId!)
+                          .ilike("username", `%${text.trim()}%`)
+                          .limit(5);
+                        if (data) setPartnerSearchResults(data as ProfileRow[]);
+                      }}
+                      style={[styles.editFieldInput, { color: theme.colors.text }]}
+                    />
+                    {partnerSearchResults.map((p) => (
+                      <TouchableOpacity
+                        key={p.id}
+                        onPress={() => {
+                          setDraftPartnerId(p.id);
+                          setPartnerProfile(p);
+                          setPartnerSearchQuery("");
+                          setPartnerSearchResults([]);
+                        }}
+                        style={{ flexDirection: "row", alignItems: "center", padding: 8, borderRadius: 10 }}
+                      >
+                        <ExpoImage
+                          source={{ uri: p.avatar_url || undefined }}
+                          style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: "#333", marginRight: 8 }}
+                          contentFit="cover"
+                        />
+                        <View>
+                          <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: "500" }}>
+                            {p.full_name || p.username}
+                          </Text>
+                          {p.username && (
+                            <Text style={{ color: theme.colors.textMuted, fontSize: 12 }}>@{p.username}</Text>
+                          )}
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+                  </>
+                )}
+              </View>
+            )}
 
             {/* Estilo visual */}
             <View style={[styles.editFieldBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
@@ -2518,6 +2656,11 @@ const handleChangeAvatar = useCallback(async () => {
             targetRelationshipStatus={relationshipStatus || "single"}
             existingInterestType={currentInterestType}
             loading={loadingFollow}
+            areLinkedPartners={areLinkedPartners}
+            hadCrushHistory={
+              !!(theirInterestType === "crush" || theirInterestType === "silent_crush") &&
+              !currentInterestType?.includes("crush")
+            }
           />
 
           <PeopleListSheet
