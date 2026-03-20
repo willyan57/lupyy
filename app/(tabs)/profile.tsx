@@ -1367,11 +1367,13 @@ export default function Profile() {
         });
 
         if (rpcError) {
-          await supabase
+          const { error: deleteError } = await supabase
             .from("conversation_deletions")
-            .update({ deleted_at: null })
+            .delete()
             .eq("conversation_id", conversation.id)
             .eq("user_id", authUserId);
+
+          if (deleteError) throw deleteError;
         }
 
         router.push({

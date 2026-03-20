@@ -220,11 +220,13 @@ export default function ConversationsScreen() {
 
       if (!rpcError) return;
 
-      await supabase
+      const { error: deleteError } = await supabase
         .from("conversation_deletions")
-        .update({ deleted_at: null })
+        .delete()
         .eq("conversation_id", conversationId)
         .eq("user_id", userId);
+
+      if (deleteError) throw deleteError;
     },
     []
   );
@@ -357,15 +359,13 @@ export default function ConversationsScreen() {
   const confirmDeleteConversation = useCallback(
     async () => {
       if (!currentUserId || !deleteTarget) return;
-      const now = new Date().toISOString();
       await supabase
         .from("conversation_deletions")
         .upsert(
           {
             conversation_id: deleteTarget,
             user_id: currentUserId,
-            deleted_at: now,
-            messages_hidden_before: now,
+            deleted_at: new Date().toISOString(),
           },
           { onConflict: "conversation_id,user_id" }
         );
