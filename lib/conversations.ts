@@ -56,8 +56,8 @@ function pickConversationForResume(
 
   return (
     pickConversationByType(visibleConversations, conversationType) ??
-    visibleConversations[0] ??
     pickConversationByType(deletedConversations, conversationType) ??
+    visibleConversations[0] ??
     deletedConversations[0] ??
     null
   );
@@ -69,7 +69,7 @@ export async function reactivateConversationForUser(conversationId: string, user
     _user_id: userId,
   });
 
-  if (!rpcError) return;
+  if (!rpcError) return true;
 
   const { error: fallbackError } = await supabase
     .from("conversation_deletions")
@@ -77,7 +77,16 @@ export async function reactivateConversationForUser(conversationId: string, user
     .eq("conversation_id", conversationId)
     .eq("user_id", userId);
 
-  if (fallbackError) throw fallbackError;
+  if (!fallbackError) return true;
+
+  console.warn("reactivateConversationForUser failed", {
+    conversationId,
+    userId,
+    rpcError,
+    fallbackError,
+  });
+
+  return false;
 }
 
 export async function getOrCreateConversation(params: {
@@ -112,7 +121,9 @@ export async function getOrCreateConversation(params: {
       )
       .not("deleted_at", "is", null);
 
-    if (deletedRowsError) throw deletedRowsError;
+    if (deletedRowsError) {
+      console.warn("Could not load conversation deletions", deletedRowsError);
+    }
 
     ((deletedRows || []) as ConversationDeletionMarker[]).forEach((row) => {
       deletedConversationIds.add(row.conversation_id);
@@ -163,7 +174,9 @@ export async function getOrCreateConversation(params: {
         )
         .not("deleted_at", "is", null);
 
-      if (retryDeletedRowsError) throw retryDeletedRowsError;
+      if (retryDeletedRowsError) {
+        console.warn("Could not load retry conversation deletions", retryDeletedRowsError);
+      }
 
       ((retryDeletedRows || []) as ConversationDeletionMarker[]).forEach((row) => {
         retryDeletedConversationIds.add(row.conversation_id);

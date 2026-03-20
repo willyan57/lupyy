@@ -1361,8 +1361,6 @@ export default function Profile() {
           conversationType,
         });
 
-        await reactivateConversationForUser(conversation.id, authUserId);
-
         router.push({
           pathname: "/conversations/[id]",
           params: {
@@ -1370,6 +1368,8 @@ export default function Profile() {
             type: conversation.conversation_type === "crush" ? "crush" : conversationType,
           },
         });
+
+        void reactivateConversationForUser(conversation.id, authUserId);
       } catch (e: any) {
         Alert.alert("Erro ao abrir conversa", e?.message ?? "Não foi possível abrir a conversa.");
       }
