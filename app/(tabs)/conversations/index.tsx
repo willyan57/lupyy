@@ -264,8 +264,6 @@ export default function ConversationsScreen() {
         return;
       }
 
-      await reactivateConversationForUser(conversation.id, currentUserId);
-
       setShowNewChat(false);
       setFollowerSearch("");
 
