@@ -39,9 +39,7 @@ export async function getOrCreateConversation(params: {
     .eq("user2", pair.user2)
     .order("created_at", { ascending: false });
 
-  if (selectError) {
-    throw selectError;
-  }
+  if (selectError) throw selectError;
 
   const existing = (existingRows || []) as Conversation[];
 
@@ -50,18 +48,15 @@ export async function getOrCreateConversation(params: {
 
     const { data: deletionRows, error: deletionError } = await supabase
       .from("conversation_deletions")
-      .select("conversation_id")
+      .select("conversation_id, deleted_at")
       .eq("user_id", currentUserId)
       .in("conversation_id", conversationIds);
 
     if (deletionError) throw deletionError;
 
-    const deletedIds = new Set(
-      (deletionRows || []).map((row: any) => row.conversation_id)
-    );
+    const deletedIds = new Set((deletionRows || []).map((row: any) => row.conversation_id));
 
     const visibleConversation = existing.find((row) => !deletedIds.has(row.id));
-
     if (visibleConversation) {
       if (visibleConversation.conversation_type !== conversationType) {
         const { data: updated, error: updateError } = await supabase
@@ -75,8 +70,23 @@ export async function getOrCreateConversation(params: {
         return updated as Conversation;
       }
 
-      return visibleConversation as Conversation;
+      return visibleConversation;
     }
+
+    const deletedConversation = existing[0];
+    if (deletedConversation.conversation_type !== conversationType) {
+      const { data: updated, error: updateError } = await supabase
+        .from("conversations")
+        .update({ conversation_type: conversationType })
+        .eq("id", deletedConversation.id)
+        .select("*")
+        .single();
+
+      if (updateError) throw updateError;
+      return updated as Conversation;
+    }
+
+    return deletedConversation;
   }
 
   const { data: inserted, error: insertError } = await supabase
@@ -118,6 +128,12 @@ export async function sendMessage(params: {
 }) {
   const { conversationId, senderId, content, mediaUrl } = params;
 
+  await supabase
+    .from("conversation_deletions")
+    .delete()
+    .eq("conversation_id", conversationId)
+    .eq("user_id", senderId);
+
   const { data, error } = await supabase
     .from("messages")
     .insert({
@@ -145,11 +161,34 @@ export async function sendMessage(params: {
 }
 
 export async function fetchMessages(conversationId: string) {
-  const { data, error } = await supabase
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  let cutoff: string | null = null;
+
+  if (user?.id) {
+    const { data: deletionRow } = await supabase
+      .from("conversation_deletions")
+      .select("deleted_at")
+      .eq("conversation_id", conversationId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    cutoff = (deletionRow as { deleted_at?: string | null } | null)?.deleted_at ?? null;
+  }
+
+  let query = supabase
     .from("messages")
     .select("*")
     .eq("conversation_id", conversationId)
     .order("created_at", { ascending: true });
+
+  if (cutoff) {
+    query = query.gt("created_at", cutoff);
+  }
+
+  const { data, error } = await query;
 
   if (error) throw error;
   return (data || []) as Message[];

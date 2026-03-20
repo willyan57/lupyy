@@ -211,6 +211,26 @@ export default function ConversationsScreen() {
     }
   }, [currentUserId]);
 
+  const reactivateConversationForUser = useCallback(
+    async (conversationId: string, userId: string) => {
+      const { error: rpcError } = await supabase.rpc("reactivate_conversation", {
+        _conversation_id: conversationId,
+        _user_id: userId,
+      });
+
+      if (!rpcError) return;
+
+      const { error: deleteError } = await supabase
+        .from("conversation_deletions")
+        .delete()
+        .eq("conversation_id", conversationId)
+        .eq("user_id", userId);
+
+      if (deleteError) throw deleteError;
+    },
+    []
+  );
+
   const handleStartConversation = async (otherUserId: string) => {
     if (!currentUserId) return;
     setCreatingChat(otherUserId);
@@ -244,6 +264,7 @@ export default function ConversationsScreen() {
         return;
       }
 
+      await reactivateConversationForUser(conversation.id, currentUserId);
 
       setShowNewChat(false);
       setFollowerSearch("");
