@@ -20,117 +20,8 @@ export type Message = {
   created_at: string;
 };
 
-type ConversationDeletionMarker = {
-  conversation_id: string;
-};
-
 function normalizePair(a: string, b: string) {
   return a < b ? { user1: a, user2: b } : { user1: b, user2: a };
-}
-
-function pickConversationByType(
-  conversations: Conversation[],
-  conversationType: ConversationType,
-) {
-  return conversations.find((conversation) => conversation.conversation_type === conversationType) ?? null;
-}
-
-async function loadDeletedConversationIds(currentUserId: string, conversations: Conversation[]) {
-  if (conversations.length === 0) return new Set<string>();
-
-  const { data: deletedRows, error } = await supabase
-    .from("conversation_deletions")
-    .select("conversation_id")
-    .eq("user_id", currentUserId)
-    .in(
-      "conversation_id",
-      conversations.map((conversation) => conversation.id),
-    )
-    .not("deleted_at", "is", null);
-
-  if (error) {
-    console.warn("Could not load conversation deletions", error);
-    return new Set<string>();
-  }
-
-  return new Set(
-    ((deletedRows || []) as ConversationDeletionMarker[]).map((row) => row.conversation_id),
-  );
-}
-
-function pickVisibleConversation(
-  conversations: Conversation[],
-  deletedConversationIds: Set<string>,
-  conversationType: ConversationType,
-) {
-  return conversations.find(
-    (conversation) =>
-      conversation.conversation_type === conversationType &&
-      !deletedConversationIds.has(conversation.id),
-  ) ?? null;
-}
-
-function pickConversationForResume(
-  conversations: Conversation[],
-  deletedConversationIds: Set<string>,
-  conversationType: ConversationType,
-) {
-  return conversations.find(
-    (conversation) =>
-      conversation.conversation_type === conversationType &&
-      deletedConversationIds.has(conversation.id),
-  ) ?? null;
-}
-
-export async function reactivateConversationForUser(conversationId: string, userId: string) {
-  const { error: rpcError } = await supabase.rpc("reactivate_conversation", {
-    _conversation_id: conversationId,
-    _user_id: userId,
-  });
-
-  if (!rpcError) return true;
-
-  const { data: deletionRow, error: deletionRowError } = await supabase
-    .from("conversation_deletions")
-    .select("conversation_id, deleted_at, messages_hidden_before")
-    .eq("conversation_id", conversationId)
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (deletionRowError) {
-    console.warn("Could not verify conversation deletion state", {
-      conversationId,
-      userId,
-      rpcError,
-      deletionRowError,
-    });
-    return false;
-  }
-
-  if (!deletionRow || deletionRow.deleted_at === null) return true;
-
-  const { error: fallbackError } = await supabase
-    .from("conversation_deletions")
-    .upsert(
-      {
-        conversation_id: conversationId,
-        user_id: userId,
-        deleted_at: null,
-        messages_hidden_before: deletionRow.messages_hidden_before,
-      },
-      { onConflict: "conversation_id,user_id" },
-    );
-
-  if (!fallbackError) return true;
-
-  console.warn("reactivateConversationForUser failed", {
-    conversationId,
-    userId,
-    rpcError,
-    fallbackError,
-  });
-
-  return false;
 }
 
 export async function getOrCreateConversation(params: {
@@ -141,25 +32,36 @@ export async function getOrCreateConversation(params: {
   const { currentUserId, otherUserId, conversationType } = params;
   const pair = normalizePair(currentUserId, otherUserId);
 
-  const { data: existingRows, error: selectError } = await supabase
+  // Busca QUALQUER conversa entre o par (sem filtrar por tipo)
+  const { data: existing, error: selectError } = await supabase
     .from("conversations")
     .select("*")
     .eq("user1", pair.user1)
     .eq("user2", pair.user2)
-    .order("created_at", { ascending: false });
+    .maybeSingle();
 
-  if (selectError) throw selectError;
+  if (selectError && selectError.code !== "PGRST116") {
+    throw selectError;
+  }
 
-  const existingConversations = (existingRows || []) as Conversation[];
-  const deletedConversationIds = await loadDeletedConversationIds(currentUserId, existingConversations);
+  if (existing) {
+    // Se o tipo for diferente, atualiza
+    if (existing.conversation_type !== conversationType) {
+      const { data: updated, error: updateError } = await supabase
+        .from("conversations")
+        .update({ conversation_type: conversationType })
+        .eq("id", existing.id)
+        .select("*")
+        .single();
 
-  const existingVisibleConversation = pickVisibleConversation(
-    existingConversations,
-    deletedConversationIds,
-    conversationType,
-  );
-  if (existingVisibleConversation) return existingVisibleConversation;
+      if (updateError) throw updateError;
+      return updated as Conversation;
+    }
 
+    return existing as Conversation;
+  }
+
+  // Não existe → cria
   const { data: inserted, error: insertError } = await supabase
     .from("conversations")
     .insert({
@@ -170,42 +72,7 @@ export async function getOrCreateConversation(params: {
     .select("*")
     .single();
 
-  if (insertError) {
-    const isUniqueConflict =
-      insertError.code === "23505" ||
-      /duplicate key|unique/i.test(insertError.message || "");
-
-    if (!isUniqueConflict) throw insertError;
-
-    const { data: retryRows, error: retryError } = await supabase
-      .from("conversations")
-      .select("*")
-      .eq("user1", pair.user1)
-      .eq("user2", pair.user2)
-      .order("created_at", { ascending: false });
-
-    if (retryError) throw retryError;
-
-    const retryConversations = (retryRows || []) as Conversation[];
-    const retryDeletedConversationIds = await loadDeletedConversationIds(currentUserId, retryConversations);
-
-    const retryVisibleConversation = pickVisibleConversation(
-      retryConversations,
-      retryDeletedConversationIds,
-      conversationType,
-    );
-    if (retryVisibleConversation) return retryVisibleConversation;
-
-    const retryConversation = pickConversationForResume(
-      retryConversations,
-      retryDeletedConversationIds,
-      conversationType,
-    );
-    if (retryConversation) return retryConversation;
-
-    throw insertError;
-  }
-
+  if (insertError) throw insertError;
   return inserted as Conversation;
 }
 

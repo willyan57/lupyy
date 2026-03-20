@@ -1,5 +1,5 @@
 // app/(tabs)/conversations/index.tsx
-import { getOrCreateConversation, reactivateConversationForUser } from "@/lib/conversations";
+import { getOrCreateConversation } from "@/lib/conversations";
 import { supabase } from "@/lib/supabase";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
@@ -211,33 +211,50 @@ export default function ConversationsScreen() {
     }
   }, [currentUserId]);
 
+  const reactivateConversationForUser = useCallback(
+    async (conversationId: string, userId: string) => {
+      const { error: rpcError } = await supabase.rpc("reactivate_conversation", {
+        _conversation_id: conversationId,
+        _user_id: userId,
+      });
+
+      if (!rpcError) return;
+
+      await supabase
+        .from("conversation_deletions")
+        .update({ deleted_at: null })
+        .eq("conversation_id", conversationId)
+        .eq("user_id", userId);
+    },
+    []
+  );
+
   const handleStartConversation = async (otherUserId: string) => {
     if (!currentUserId) return;
     setCreatingChat(otherUserId);
     try {
-      const existingVisibleConversation = [...friendConversations, ...crushConversations].find(
-        (conversation) =>
-          conversation.other_user_id === otherUserId &&
-          conversation.conversation_type === activeTab,
-      );
+      const pair =
+        currentUserId < otherUserId
+          ? { user1: currentUserId, user2: otherUserId }
+          : { user1: otherUserId, user2: currentUserId };
 
-      if (existingVisibleConversation?.id) {
-        setShowNewChat(false);
-        setFollowerSearch("");
-        router.push({
-          pathname: "/conversations/[id]",
-          params: {
-            id: existingVisibleConversation.id,
-            type: existingVisibleConversation.conversation_type === "crush" ? "crush" : "friend",
-          },
-        });
-        return;
-      }
+      const { data: existingConversation } = await supabase
+        .from("conversations")
+        .select("id, conversation_type")
+        .eq("user1", pair.user1)
+        .eq("user2", pair.user2)
+        .maybeSingle();
+
+      const conversationType =
+        (existingConversation as { conversation_type?: string | null } | null)
+          ?.conversation_type === "crush"
+          ? "crush"
+          : "friend";
 
       const conversation = await getOrCreateConversation({
         currentUserId,
         otherUserId,
-        conversationType: activeTab,
+        conversationType,
       });
 
       if (!conversation?.id) {
@@ -245,15 +262,10 @@ export default function ConversationsScreen() {
         return;
       }
 
-      const reactivated = await reactivateConversationForUser(conversation.id, currentUserId);
-      if (!reactivated) {
-        console.warn("Não foi possível reativar a conversa para o usuário atual.");
-      }
+      await reactivateConversationForUser(conversation.id, currentUserId);
 
       setShowNewChat(false);
       setFollowerSearch("");
-
-      await loadConversations(currentUserId);
 
       router.push({
         pathname: "/conversations/[id]",
@@ -263,6 +275,7 @@ export default function ConversationsScreen() {
         },
       });
 
+      void loadConversations(currentUserId);
     } catch (e: any) {
       console.error("handleStartConversation error:", e);
       const message = e?.message ?? "Não foi possível iniciar a conversa.";
@@ -306,8 +319,6 @@ export default function ConversationsScreen() {
         { event: "INSERT", schema: "public", table: "messages" },
         () => {
           refreshUnreadCountsForLists();
-          // Recarregar lista para exibir conversas reativadas
-          if (currentUserId) void loadConversations(currentUserId);
         }
       )
       .on(
@@ -315,28 +326,6 @@ export default function ConversationsScreen() {
         { event: "UPDATE", schema: "public", table: "messages" },
         () => {
           refreshUnreadCountsForLists();
-          if (currentUserId) void loadConversations(currentUserId);
-        }
-      )
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "conversation_deletions" },
-        () => {
-          if (currentUserId) void loadConversations(currentUserId);
-        }
-      )
-      .on(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "conversation_deletions" },
-        () => {
-          if (currentUserId) void loadConversations(currentUserId);
-        }
-      )
-      .on(
-        "postgres_changes",
-        { event: "DELETE", schema: "public", table: "conversation_deletions" },
-        () => {
-          if (currentUserId) void loadConversations(currentUserId);
         }
       )
       .subscribe();
@@ -344,7 +333,7 @@ export default function ConversationsScreen() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [friendConversations.length, crushConversations.length, currentUserId, loadConversations]);
+  }, [friendConversations.length, crushConversations.length]);
 
   useFocusEffect(
     useCallback(() => {

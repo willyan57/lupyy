@@ -38,7 +38,7 @@ import MatchCelebration from "@/components/MatchCelebration";
 import PeopleListSheet from "@/components/PeopleListSheet";
 import ThemeSelector from "@/components/ThemeSelector";
 import { useTheme } from "@/contexts/ThemeContext";
-import { ConversationType, getOrCreateConversation, reactivateConversationForUser } from "@/lib/conversations";
+import { ConversationType, getOrCreateConversation } from "@/lib/conversations";
 import { setFollowInterestType } from "@/lib/social";
 import { useIsMobileWeb } from "@/lib/useIsMobileWeb";
 
@@ -1355,36 +1355,23 @@ export default function Profile() {
       }
 
       try {
-        const { data: existingList, error: existingListError } = await supabase.rpc("get_user_conversations_full");
-
-        if (!existingListError && Array.isArray(existingList)) {
-          const existingVisibleConversation = (existingList as any[]).find(
-            (conversation) =>
-              conversation?.other_user_id === userId &&
-              conversation?.conversation_type === conversationType,
-          );
-
-          if (existingVisibleConversation?.id) {
-            router.push({
-              pathname: "/conversations/[id]",
-              params: {
-                id: existingVisibleConversation.id,
-                type: existingVisibleConversation.conversation_type === "crush" ? "crush" : conversationType,
-              },
-            });
-            return;
-          }
-        }
-
         const conversation = await getOrCreateConversation({
           currentUserId: authUserId,
           otherUserId: userId,
           conversationType,
         });
 
-        const reactivated = await reactivateConversationForUser(conversation.id, authUserId);
-        if (!reactivated) {
-          console.warn("Não foi possível reativar a conversa pelo profile.");
+        const { error: rpcError } = await supabase.rpc("reactivate_conversation", {
+          _conversation_id: conversation.id,
+          _user_id: authUserId,
+        });
+
+        if (rpcError) {
+          await supabase
+            .from("conversation_deletions")
+            .update({ deleted_at: null })
+            .eq("conversation_id", conversation.id)
+            .eq("user_id", authUserId);
         }
 
         router.push({
