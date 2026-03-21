@@ -289,7 +289,6 @@ export default function ConversationScreen() {
   async function reactivateConversationForUser() {
     if (!authUserId || !conversationId) return;
 
-    // Tenta via RPC (só faz UPDATE deleted_at = NULL, preserva messages_hidden_before)
     const { error: rpcError } = await supabase.rpc("reactivate_conversation", {
       _conversation_id: conversationId,
       _user_id: authUserId,
@@ -297,39 +296,13 @@ export default function ConversationScreen() {
 
     if (!rpcError) return;
 
-    // Fallback: UPDATE manual em vez de DELETE para preservar messages_hidden_before
-    const { error: updateError } = await supabase
+    const { error: deleteError } = await supabase
       .from("conversation_deletions")
-      .update({ deleted_at: null })
+      .delete()
       .eq("conversation_id", conversationId)
       .eq("user_id", authUserId);
 
-    if (updateError) console.warn("reactivate fallback error:", updateError);
-  }
-
-  async function syncConversationAfterSend(params: {
-    preview: string;
-    sentAt: string;
-  }) {
-    const { preview, sentAt } = params;
-
-    try {
-      await reactivateConversationForUser();
-    } catch (reactivateErr: any) {
-      console.warn("reactivate non-blocking:", reactivateErr);
-    }
-
-    const { error: conversationUpdateError } = await supabase
-      .from("conversations")
-      .update({
-        last_message: preview,
-        last_message_at: sentAt,
-      })
-      .eq("id", conversationId);
-
-    if (conversationUpdateError) {
-      console.warn("conversation sync error:", conversationUpdateError);
-    }
+    if (deleteError) throw deleteError;
   }
 
   // ── Delete entire conversation (hide for current user) ──
@@ -613,10 +586,15 @@ export default function ConversationScreen() {
 
       const sentAt = real.created_at || new Date().toISOString();
 
-      await syncConversationAfterSend({
-        preview: text,
-        sentAt,
-      });
+      await supabase
+        .from("conversations")
+        .update({
+          last_message: text,
+          last_message_at: sentAt,
+        })
+        .eq("id", conversationId);
+
+      await reactivateConversationForUser();
 
     } catch (e: any) {
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
@@ -727,10 +705,15 @@ export default function ConversationScreen() {
 
       const mediaSentAt = real.created_at || new Date().toISOString();
 
-      await syncConversationAfterSend({
-        preview: "[mídia]",
-        sentAt: mediaSentAt,
-      });
+      await supabase
+        .from("conversations")
+        .update({
+          last_message: "[mídia]",
+          last_message_at: mediaSentAt,
+        })
+        .eq("id", conversationId);
+
+      await reactivateConversationForUser();
 
     } catch (e: any) {
       if ((e?.message ?? "").includes("CRUSH_CHAT_LOCKED")) {
