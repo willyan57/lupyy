@@ -289,6 +289,7 @@ export default function ConversationScreen() {
   async function reactivateConversationForUser() {
     if (!authUserId || !conversationId) return;
 
+    // Tenta via RPC (só faz UPDATE deleted_at = NULL, preserva messages_hidden_before)
     const { error: rpcError } = await supabase.rpc("reactivate_conversation", {
       _conversation_id: conversationId,
       _user_id: authUserId,
@@ -296,13 +297,14 @@ export default function ConversationScreen() {
 
     if (!rpcError) return;
 
-    const { error: deleteError } = await supabase
+    // Fallback: UPDATE manual em vez de DELETE para preservar messages_hidden_before
+    const { error: updateError } = await supabase
       .from("conversation_deletions")
-      .delete()
+      .update({ deleted_at: null })
       .eq("conversation_id", conversationId)
       .eq("user_id", authUserId);
 
-    if (deleteError) throw deleteError;
+    if (updateError) console.warn("reactivate fallback error:", updateError);
   }
 
   // ── Delete entire conversation (hide for current user) ──
