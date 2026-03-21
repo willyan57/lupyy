@@ -596,7 +596,11 @@ export default function ConversationScreen() {
         })
         .eq("id", conversationId);
 
-      await reactivateConversationForUser();
+      try {
+        await reactivateConversationForUser();
+      } catch (reactivateErr: any) {
+        console.warn("reactivate non-blocking:", reactivateErr);
+      }
 
     } catch (e: any) {
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
