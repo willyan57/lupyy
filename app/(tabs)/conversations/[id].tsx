@@ -318,13 +318,15 @@ export default function ConversationScreen() {
           text: "Excluir",
           style: "destructive",
           onPress: async () => {
+            const now = new Date().toISOString();
             await supabase
               .from("conversation_deletions")
               .upsert(
                 {
                   conversation_id: conversationId,
                   user_id: authUserId,
-                  deleted_at: new Date().toISOString(),
+                  deleted_at: now,
+                  messages_hidden_before: now,
                 },
                 { onConflict: "conversation_id,user_id" }
               );
@@ -339,12 +341,12 @@ export default function ConversationScreen() {
   async function getMessageCutoffForUser(userId: string, targetConversationId: string) {
     const { data: deletionRow } = await supabase
       .from("conversation_deletions")
-      .select("deleted_at")
+      .select("messages_hidden_before")
       .eq("conversation_id", targetConversationId)
       .eq("user_id", userId)
       .maybeSingle();
 
-    return (deletionRow as { deleted_at?: string | null } | null)?.deleted_at ?? null;
+    return (deletionRow as { messages_hidden_before?: string | null } | null)?.messages_hidden_before ?? null;
   }
 
   const displayName =

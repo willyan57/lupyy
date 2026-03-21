@@ -366,13 +366,15 @@ export default function ConversationsScreen() {
   const confirmDeleteConversation = useCallback(
     async () => {
       if (!currentUserId || !deleteTarget) return;
+      const now = new Date().toISOString();
       await supabase
         .from("conversation_deletions")
         .upsert(
           {
             conversation_id: deleteTarget,
             user_id: currentUserId,
-            deleted_at: new Date().toISOString(),
+            deleted_at: now,
+            messages_hidden_before: now,
           },
           { onConflict: "conversation_id,user_id" }
         );
