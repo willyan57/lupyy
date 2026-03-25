@@ -104,6 +104,7 @@ export default function NewTribeScreen() {
   const { theme } = useTheme();
 
   const [loading, setLoading] = useState(false);
+  const [isPublic, setIsPublic] = useState(true);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [categoryText, setCategoryText] = useState("");
@@ -236,6 +237,7 @@ export default function NewTribeScreen() {
           category_id: selectedCategoryId ?? null,
           owner_id: currentUserId,
           cover_url: coverUrl,
+          is_public: isPublic,
           members_count: 1,
         })
         .select("id")
@@ -402,11 +404,32 @@ export default function NewTribeScreen() {
               </View>
             </View>
 
-            <View style={[s.pill, { backgroundColor: theme.colors.primary + "18" }]}>
-              <Ionicons name="globe-outline" size={14} color={theme.colors.primary} />
-              <Text style={[s.pillText, { color: theme.colors.primary }]}>
-                Tribo pública · qualquer um pode entrar
-              </Text>
+            {/* Public/Private toggle */}
+            <View style={s.visibilityRow}>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => setIsPublic(true)}
+                style={[s.visibilityOption, { backgroundColor: isPublic ? theme.colors.primary + "18" : theme.colors.surface, borderColor: isPublic ? theme.colors.primary : theme.colors.border }]}
+              >
+                <Ionicons name="globe-outline" size={16} color={isPublic ? theme.colors.primary : theme.colors.textMuted} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.visibilityLabel, { color: isPublic ? theme.colors.primary : theme.colors.text }]}>Pública</Text>
+                  <Text style={[s.visibilityDesc, { color: theme.colors.textMuted }]}>Qualquer um pode entrar</Text>
+                </View>
+                {isPublic && <Ionicons name="checkmark-circle" size={20} color={theme.colors.primary} />}
+              </TouchableOpacity>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => setIsPublic(false)}
+                style={[s.visibilityOption, { backgroundColor: !isPublic ? theme.colors.primary + "18" : theme.colors.surface, borderColor: !isPublic ? theme.colors.primary : theme.colors.border }]}
+              >
+                <Ionicons name="lock-closed-outline" size={16} color={!isPublic ? theme.colors.primary : theme.colors.textMuted} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[s.visibilityLabel, { color: !isPublic ? theme.colors.primary : theme.colors.text }]}>Privada</Text>
+                  <Text style={[s.visibilityDesc, { color: theme.colors.textMuted }]}>Entrada por solicitação</Text>
+                </View>
+                {!isPublic && <Ionicons name="checkmark-circle" size={20} color={theme.colors.primary} />}
+              </TouchableOpacity>
             </View>
 
             {/* Capa */}
@@ -514,8 +537,10 @@ const s = StyleSheet.create({
   backButton: { width: 38, height: 38, borderRadius: 999, alignItems: "center", justifyContent: "center" },
   title: { fontSize: 22, fontWeight: "800" },
   subtitle: { fontSize: 14, marginTop: 3, lineHeight: 18 },
-  pill: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7, alignSelf: "flex-start", marginBottom: 18 },
-  pillText: { fontSize: 12, fontWeight: "700" },
+  visibilityRow: { flexDirection: "column", gap: 8, marginBottom: 18 },
+  visibilityOption: { flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, borderWidth: 1 },
+  visibilityLabel: { fontSize: 14, fontWeight: "700" },
+  visibilityDesc: { fontSize: 11, marginTop: 1 },
   fieldBlock: { marginBottom: 18 },
   label: { fontSize: 14, fontWeight: "700", marginBottom: 2 },
   helper: { fontSize: 12, marginBottom: 8, lineHeight: 16 },

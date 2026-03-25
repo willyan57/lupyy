@@ -147,6 +147,11 @@ export default function TribeScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("feed");
 
+  // Join requests (private tribes)
+  const [myJoinRequest, setMyJoinRequest] = useState<{ id: string; status: string } | null>(null);
+  const [pendingRequests, setPendingRequests] = useState<{ id: string; user_id: string; message: string | null; created_at: string; username?: string | null; avatar_url?: string | null; full_name?: string | null }[]>([]);
+  const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
+
   const [isOwner, setIsOwner] = useState(false);
   const [myRole, setMyRole] = useState<"owner" | "moderator" | "member" | null>(null);
   const [canManageMembers, setCanManageMembers] = useState(false);
@@ -388,6 +393,30 @@ export default function TribeScreen() {
     });
   };
 
+  /* ─── Load join request status ─── */
+  const loadMyJoinRequest = async (uid: string, tribeId: string) => {
+    const { data } = await supabase.from("tribe_join_requests").select("id, status").eq("tribe_id", tribeId).eq("user_id", uid).maybeSingle();
+    setMyJoinRequest(data ? { id: data.id as string, status: data.status as string } : null);
+  };
+
+  const loadPendingRequests = async (tribeId: string) => {
+    const { data } = await supabase.from("tribe_join_requests").select("id, user_id, message, created_at").eq("tribe_id", tribeId).eq("status", "pending").order("created_at", { ascending: true });
+    if (data && data.length > 0) {
+      const enriched = await enrichWithProfiles(data as any[]);
+      setPendingRequests(enriched);
+      setPendingRequestsCount(enriched.length);
+    } else {
+      setPendingRequests([]);
+      setPendingRequestsCount(0);
+    }
+  };
+
+  useEffect(() => {
+    if (!id || !userId) return;
+    loadMyJoinRequest(userId, id);
+    if (canManageMembers) loadPendingRequests(id);
+  }, [id, userId, canManageMembers]);
+
   /* ─── Actions ─── */
   const handleToggleMembership = async () => {
     if (!tribe || joining) return;
@@ -405,6 +434,30 @@ export default function TribeScreen() {
         if (error) { notify("Ops", (error as any)?.message || "Erro ao sair."); return; }
         setIsMember(false); await refreshMembersCount(tribe.id); return;
       }
+
+      // Private tribe → send join request
+      if (!tribe.is_public) {
+        if (myJoinRequest?.status === "pending") {
+          // Cancel request
+          await supabase.from("tribe_join_requests").delete().eq("id", myJoinRequest.id);
+          setMyJoinRequest(null);
+          notify("Solicitação cancelada", "Sua solicitação foi cancelada.");
+          return;
+        }
+        const { data, error } = await supabase.from("tribe_join_requests").insert({
+          tribe_id: tribe.id, user_id: currentUserId, status: "pending",
+        } as any).select("id, status").single();
+        if (error) {
+          const code = (error as any)?.code;
+          if (code === "23505") { notify("Já solicitado", "Você já enviou uma solicitação."); return; }
+          notify("Ops", (error as any)?.message || "Erro ao solicitar."); return;
+        }
+        if (data) setMyJoinRequest({ id: data.id as string, status: "pending" });
+        notify("Solicitação enviada! 🎉", "O dono ou moderador da tribo vai analisar seu pedido.");
+        return;
+      }
+
+      // Public tribe → join directly
       const { error } = await supabase.from("tribe_members").insert({ tribe_id: tribe.id, user_id: currentUserId, role: "member" } as any);
       if (error) {
         const code = (error as any)?.code;
@@ -413,6 +466,27 @@ export default function TribeScreen() {
       }
       setIsMember(true); await refreshMembersCount(tribe.id);
     } finally { setJoining(false); }
+  };
+
+  const handleApproveRequest = async (requestId: string) => {
+    if (!userId || !id) return;
+    try {
+      const { error } = await supabase.rpc("approve_join_request", { _request_id: requestId, _reviewer_id: userId });
+      if (error) { notify("Ops", (error as any)?.message || "Erro ao aprovar."); return; }
+      notify("Aprovado! ✅", "O membro foi adicionado à tribo.");
+      await loadPendingRequests(id);
+      await refreshMembersCount(id);
+    } catch (err: any) { notify("Ops", err?.message || "Erro ao aprovar."); }
+  };
+
+  const handleRejectRequest = async (requestId: string) => {
+    if (!userId || !id) return;
+    try {
+      const { error } = await supabase.rpc("reject_join_request", { _request_id: requestId, _reviewer_id: userId });
+      if (error) { notify("Ops", (error as any)?.message || "Erro ao rejeitar."); return; }
+      notify("Rejeitado", "A solicitação foi recusada.");
+      await loadPendingRequests(id);
+    } catch (err: any) { notify("Ops", err?.message || "Erro ao rejeitar."); }
   };
 
   const handleCreatePost = async () => {
@@ -1022,6 +1096,39 @@ export default function TribeScreen() {
               {membersLoading && <ActivityIndicator size="small" />}
             </View>
           </View>
+          {/* Pending join requests (admin only) */}
+          {canManageMembers && pendingRequests.length > 0 && (
+            <View style={{ marginTop: 12 }}>
+              <View style={st.memberSectionHeader}>
+                <Text style={[st.memberSectionTitle, { color: "#F59E0B" }]}>SOLICITAÇÕES PENDENTES — {pendingRequests.length}</Text>
+              </View>
+              {pendingRequests.map((req) => {
+                const display = req.full_name?.trim() || req.username?.trim() || "Usuário";
+                return (
+                  <View key={req.id} style={[st.memberRow, { backgroundColor: theme.colors.surfaceElevated }]}>
+                    {req.avatar_url ? (
+                      <Image source={{ uri: req.avatar_url }} style={st.memberAvatar} />
+                    ) : (
+                      <View style={[st.memberAvatarFallback, { backgroundColor: "#F59E0B" + "22" }]}>
+                        <Text style={[st.memberAvatarText, { color: "#F59E0B" }]}>{display.charAt(0).toUpperCase()}</Text>
+                      </View>
+                    )}
+                    <View style={{ flex: 1 }}>
+                      <Text style={[st.memberName, { color: theme.colors.text }]}>{display}</Text>
+                      <Text style={{ fontSize: 11, color: theme.colors.textMuted, marginTop: 1 }}>Solicitou {formatRelativeTime(req.created_at)}</Text>
+                    </View>
+                    <TouchableOpacity activeOpacity={0.85} onPress={() => handleApproveRequest(req.id)} style={{ backgroundColor: theme.colors.primary, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6 }}>
+                      <Text style={{ fontSize: 12, fontWeight: "700", color: "#fff" }}>Aceitar</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity activeOpacity={0.85} onPress={() => handleRejectRequest(req.id)} style={{ backgroundColor: "#EF4444" + "18", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6 }}>
+                      <Ionicons name="close" size={14} color="#EF4444" />
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+
           {renderMemberSection("DONO", owners, "crown")}
           {renderMemberSection("MODERADORES", mods, "shield")}
           {renderMemberSection("MEMBROS", regularMembers, "person")}
@@ -1130,25 +1237,60 @@ export default function TribeScreen() {
           <View style={{ paddingHorizontal: isLargeWeb ? 32 : 16, paddingTop: 12 }}>
             {/* Description + Join */}
             <View style={st.descriptionRow}>
-              <Text style={[st.descriptionText, { color: theme.colors.textMuted }]} numberOfLines={3}>
-                {tribe.description || "Entre e faça parte dessa comunidade."}
-              </Text>
+              <View style={{ flex: 1 }}>
+                <Text style={[st.descriptionText, { color: theme.colors.textMuted }]} numberOfLines={3}>
+                  {tribe.description || "Entre e faça parte dessa comunidade."}
+                </Text>
+                {!tribe.is_public && !isMember && (
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
+                    <Ionicons name="lock-closed-outline" size={12} color={theme.colors.primary} />
+                    <Text style={{ fontSize: 11, fontWeight: "600", color: theme.colors.primary }}>Tribo privada · entrada por solicitação</Text>
+                  </View>
+                )}
+              </View>
               <TouchableOpacity
                 activeOpacity={0.85}
                 onPress={handleToggleMembership}
-                disabled={joining || membershipLoading}
-                style={[st.joinBtn, { backgroundColor: isMember ? theme.colors.surface : theme.colors.primary }]}
+                disabled={joining || membershipLoading || (myJoinRequest?.status === "rejected" && !isMember)}
+                style={[st.joinBtn, {
+                  backgroundColor: isMember
+                    ? theme.colors.surface
+                    : myJoinRequest?.status === "pending"
+                      ? "#F59E0B"
+                      : myJoinRequest?.status === "rejected"
+                        ? theme.colors.surface
+                        : theme.colors.primary,
+                }]}
               >
                 {joining || membershipLoading ? <ActivityIndicator size="small" color={isMember ? theme.colors.text : "#fff"} /> : (
                   <View style={st.joinBtnContent}>
-                    <Ionicons name={isMember ? "exit-outline" : "enter-outline"} size={16} color={isMember ? theme.colors.text : "#fff"} />
-                    <Text style={[st.joinBtnText, { color: isMember ? theme.colors.text : "#FFFFFF" }]}>
-                      {isMember ? "Sair" : "Entrar"}
+                    <Ionicons
+                      name={isMember ? "exit-outline" : myJoinRequest?.status === "pending" ? "time-outline" : myJoinRequest?.status === "rejected" ? "close-circle-outline" : !tribe.is_public ? "hand-left-outline" : "enter-outline"}
+                      size={16}
+                      color={isMember ? theme.colors.text : myJoinRequest?.status === "rejected" ? theme.colors.textMuted : "#fff"}
+                    />
+                    <Text style={[st.joinBtnText, { color: isMember ? theme.colors.text : myJoinRequest?.status === "rejected" ? theme.colors.textMuted : "#FFFFFF" }]}>
+                      {isMember ? "Sair" : myJoinRequest?.status === "pending" ? "Cancelar" : myJoinRequest?.status === "rejected" ? "Rejeitado" : !tribe.is_public ? "Solicitar" : "Entrar"}
                     </Text>
                   </View>
                 )}
               </TouchableOpacity>
             </View>
+
+            {/* Pending requests badge for admins */}
+            {canManageMembers && pendingRequestsCount > 0 && (
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => setActiveTab("members")}
+                style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8, backgroundColor: "#F59E0B" + "18", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10 }}
+              >
+                <Ionicons name="notifications" size={16} color="#F59E0B" />
+                <Text style={{ fontSize: 13, fontWeight: "700", color: "#F59E0B", flex: 1 }}>
+                  {pendingRequestsCount} solicitação{pendingRequestsCount !== 1 ? "ões" : ""} pendente{pendingRequestsCount !== 1 ? "s" : ""}
+                </Text>
+                <Ionicons name="chevron-forward" size={14} color="#F59E0B" />
+              </TouchableOpacity>
+            )}
 
             {/* Tabs */}
             <View style={[st.tabsContainer, { backgroundColor: theme.colors.surfaceElevated, marginTop: 12 }]}>
@@ -1213,8 +1355,9 @@ export default function TribeScreen() {
 
       {/* Create channel */}
       <Modal transparent visible={channelModalVisible} animationType="fade" onRequestClose={() => setChannelModalVisible(false)}>
-        <TouchableOpacity activeOpacity={1} onPress={() => setChannelModalVisible(false)} style={st.modalOverlay}>
-          <View style={[st.modalCard, { backgroundColor: theme.colors.surfaceElevated }]} onStartShouldSetResponder={() => true}>
+        <View style={st.modalOverlay}>
+          <TouchableOpacity activeOpacity={1} onPress={() => setChannelModalVisible(false)} style={StyleSheet.absoluteFill} />
+          <View style={[st.modalCard, { backgroundColor: theme.colors.surfaceElevated }]}>
             <View style={st.modalHeader}>
               <Text style={[st.modalTitle, { color: theme.colors.text }]}>Criar canal</Text>
               <TouchableOpacity onPress={() => setChannelModalVisible(false)}><Ionicons name="close" size={20} color={theme.colors.textMuted} /></TouchableOpacity>
@@ -1253,7 +1396,7 @@ export default function TribeScreen() {
               <View style={[st.voiceInfoBox, { backgroundColor: theme.colors.primary + "12", borderColor: theme.colors.primary + "30" }]}>
                 <Ionicons name="information-circle-outline" size={16} color={theme.colors.primary} />
                 <Text style={{ fontSize: 12, color: theme.colors.primary, flex: 1, lineHeight: 17 }}>
-                  Salas de voz permitem que membros entrem e conversem em tempo real, como no Discord.
+                  Salas de voz permitem que membros entrem e conversem em tempo real.
                 </Text>
               </View>
             )}
@@ -1273,7 +1416,7 @@ export default function TribeScreen() {
               </TouchableOpacity>
             </View>
           </View>
-        </TouchableOpacity>
+        </View>
       </Modal>
 
       {/* Member actions */}

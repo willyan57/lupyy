@@ -151,8 +151,7 @@ export default function TribesScreen() {
         style={[
           s.trendingCard,
           { backgroundColor: theme.colors.surfaceElevated, borderColor: theme.colors.border },
-          // Fix: allow scroll when touching cards on mobile web
-          Platform.OS === "web" ? ({ cursor: "pointer", touchAction: "pan-y" } as any) : null,
+          Platform.OS === "web" ? ({ cursor: "pointer", touchAction: "manipulation" } as any) : null,
         ]}
       >
         {uri ? (
@@ -260,14 +259,18 @@ export default function TribesScreen() {
               <Ionicons name="flame" size={18} color={theme.colors.primary} />
               <Text style={[s.sectionTitle, { color: theme.colors.text }]}>Em alta</Text>
             </View>
-            <FlatList
-              data={trendingTribes}
-              keyExtractor={(item) => item.id}
-              renderItem={renderTrendingCard}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingVertical: 8, paddingRight: 16 }}
-            />
+            <View style={Platform.OS === "web" ? { overflow: "auto" as any, WebkitOverflowScrolling: "touch" } as any : undefined}>
+              <FlatList
+                data={trendingTribes}
+                keyExtractor={(item) => item.id}
+                renderItem={renderTrendingCard}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingVertical: 8, paddingRight: 16 }}
+                {...(Platform.OS === "web" ? { style: { touchAction: "pan-x pan-y" } as any } : {})}
+                nestedScrollEnabled
+              />
+            </View>
 
             {/* My tribes */}
             <View style={[s.sectionHeader, { marginTop: 20 }]}>
