@@ -702,7 +702,7 @@ export default function TribeScreen() {
     if (activeTab === "chat") {
       const activeChannel = channels.find((c) => c.id === activeChannelId) || null;
       const isWeb = Platform.OS === "web";
-      const chatHeight = isWeb ? (isLargeWeb ? Math.max(520, Math.min(700, height - 420)) : Math.max(420, Math.min(600, height - 380))) : Math.max(380, Math.min(540, height - 380));
+      const chatHeight = isWeb ? (isLargeWeb ? Math.max(520, Math.min(800, height - 340)) : Math.max(420, Math.min(600, height - 380))) : Math.max(380, Math.min(540, height - 380));
 
       // Group consecutive messages from same user
       const groupedMessages: (TribeMessage & { showHeader: boolean })[] = chatMessages.map((msg, i) => {
@@ -1207,7 +1207,7 @@ export default function TribeScreen() {
           style={Platform.OS === "web" ? { flex: 1, touchAction: "pan-y" } as any : { flex: 1 }}
           contentContainerStyle={{ paddingBottom: 32 + insets.bottom }}
           keyboardShouldPersistTaps="handled"
-          scrollEnabled={activeTab !== "chat" || !isLargeWeb}
+          scrollEnabled
         >
           {/* Cover */}
           <View style={st.coverContainer}>
