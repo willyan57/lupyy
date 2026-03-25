@@ -702,7 +702,7 @@ export default function TribeScreen() {
     if (activeTab === "chat") {
       const activeChannel = channels.find((c) => c.id === activeChannelId) || null;
       const isWeb = Platform.OS === "web";
-      const chatHeight = isWeb ? (isLargeWeb ? Math.max(400, Math.min(520, height - 600)) : Math.max(350, Math.min(480, height - 500))) : Math.max(380, Math.min(540, height - 380));
+      const chatHeight = isWeb ? (isLargeWeb ? Math.max(520, Math.min(700, height - 420)) : Math.max(420, Math.min(600, height - 380))) : Math.max(380, Math.min(540, height - 380));
 
       // Group consecutive messages from same user
       const groupedMessages: (TribeMessage & { showHeader: boolean })[] = chatMessages.map((msg, i) => {
@@ -714,7 +714,7 @@ export default function TribeScreen() {
       });
 
       return (
-        <View style={[st.chatContainer, { backgroundColor: theme.colors.surfaceElevated, height: chatHeight, marginTop: isWeb ? 8 : 12 }]}>
+        <View style={[st.chatContainer, { backgroundColor: theme.colors.surfaceElevated, height: chatHeight, marginTop: isWeb ? 8 : 12, flexDirection: isLargeWeb ? "row" : "column" }]}>
           {/* Channels sidebar */}
           <View style={[
             st.channelsSidebar,
@@ -822,7 +822,7 @@ export default function TribeScreen() {
                   <ScrollView
                     ref={chatScrollRef}
                     style={{ flex: 1 }}
-                    contentContainerStyle={{ paddingHorizontal: 12, paddingVertical: 8, paddingBottom: Platform.OS === "web" ? 80 : 120 }}
+                    contentContainerStyle={{ paddingHorizontal: 12, paddingVertical: 8 }}
                     onContentSizeChange={() => chatScrollRef.current?.scrollToEnd({ animated: true })}
                     showsVerticalScrollIndicator
                   >
@@ -1538,7 +1538,7 @@ const st = StyleSheet.create({
   postContent: { fontSize: 14, lineHeight: 21 },
 
   // Chat - Discord style
-  chatContainer: { borderRadius: 16, overflow: "hidden", flexDirection: "row" },
+  chatContainer: { borderRadius: 16, overflow: "hidden" },
   channelsSidebar: { width: 180, borderRightWidth: 1 },
   channelsSidebarHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 12, paddingTop: 10, paddingBottom: 6 },
   channelsSidebarTitle: { fontSize: 10, fontWeight: "800", letterSpacing: 1 },
@@ -1546,7 +1546,7 @@ const st = StyleSheet.create({
   channelRowText: { fontSize: 13, fontWeight: "600" },
   channelPill: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10 },
   channelPillText: { fontSize: 12, fontWeight: "600" },
-  chatArea: { flex: 1, position: "relative" },
+  chatArea: { flex: 1, display: "flex" as any, flexDirection: "column" as any },
   chatAreaHeader: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1 },
   chatAreaHeaderContent: { flexDirection: "row", alignItems: "center", gap: 6, flex: 1 },
   chatAreaHeaderTitle: { fontSize: 15, fontWeight: "700" },
@@ -1573,7 +1573,7 @@ const st = StyleSheet.create({
   emptyChannelSub: { fontSize: 13, textAlign: "center", marginTop: 4 },
 
   // Chat input
-  chatInputBar: { paddingHorizontal: 10, paddingVertical: 8, borderTopWidth: 1, position: "absolute", left: 0, right: 0, bottom: 0 },
+  chatInputBar: { paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: 1 },
   replyBanner: { flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, marginBottom: 6, borderWidth: 1 },
   replyLabel: { fontSize: 12, fontWeight: "700" },
   replyPreview: { fontSize: 12, marginTop: 1 },
