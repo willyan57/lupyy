@@ -7,15 +7,15 @@ import { Image as ExpoImage } from "expo-image";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
-    FlatList,
-    Modal,
-    Platform,
-    Pressable,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  FlatList,
+  Modal,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from "react-native";
 
 type LikeUser = {
@@ -23,6 +23,7 @@ type LikeUser = {
   username: string;
   full_name: string | null;
   avatar_url: string | null;
+  isFollowing?: boolean;
 };
 
 type Props = {
@@ -48,7 +49,7 @@ export default function LikesSheet({ visible, postId, onClose, onConnect }: Prop
   }, []);
 
   const load = useCallback(async () => {
-    if (!postId) return;
+    if (!postId || !currentUserId) return;
     setLoading(true);
 
     const { data, error } = await supabase
@@ -65,18 +66,35 @@ export default function LikesSheet({ visible, postId, onClose, onConnect }: Prop
       .order("created_at", { ascending: false });
 
     if (!error && data) {
+      // Fetch who I already follow among these users
+      const userIds = (data as any[]).map((r) => r.user_id).filter((id: string) => id !== currentUserId);
+      let followingSet = new Set<string>();
+
+      if (userIds.length > 0) {
+        const { data: followRows } = await supabase
+          .from("follows")
+          .select("following_id")
+          .eq("follower_id", currentUserId)
+          .in("following_id", userIds);
+
+        if (followRows) {
+          followingSet = new Set((followRows as any[]).map((r) => r.following_id));
+        }
+      }
+
       const mapped: LikeUser[] = (data as any[]).map((row) => ({
         user_id: row.user_id,
         username: row.profiles?.username ?? "user",
         full_name: row.profiles?.full_name ?? null,
         avatar_url: row.profiles?.avatar_url ?? null,
+        isFollowing: followingSet.has(row.user_id),
       }));
       setUsers(mapped);
       setFiltered(mapped);
     }
 
     setLoading(false);
-  }, [postId]);
+  }, [postId, currentUserId]);
 
   useEffect(() => {
     if (visible && postId) {
@@ -146,7 +164,17 @@ export default function LikesSheet({ visible, postId, onClose, onConnect }: Prop
           </View>
         </TouchableOpacity>
 
-        {!isMe && onConnect && (
+        {!isMe && item.isFollowing && (
+          <TouchableOpacity
+            style={styles.viewBtn}
+            activeOpacity={0.8}
+            onPress={() => handlePressUser(item.user_id)}
+          >
+            <Text style={styles.viewText}>Ver</Text>
+          </TouchableOpacity>
+        )}
+
+        {!isMe && !item.isFollowing && onConnect && (
           <TouchableOpacity
             style={styles.connectBtn}
             activeOpacity={0.8}
@@ -350,6 +378,18 @@ const styles = StyleSheet.create({
   },
   connectText: {
     color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  viewBtn: {
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  viewText: {
+    color: Colors.text,
     fontSize: 13,
     fontWeight: "700",
   },

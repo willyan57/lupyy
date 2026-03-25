@@ -51,7 +51,7 @@ type Props = {
   onDeletePost?: (id: string | number) => void | Promise<void>;
 };
 
-const { height, width } = Dimensions.get("window");
+const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
 
 type FilterId = "none" | "warm" | "cool" | "pink" | "gold" | "night";
 
@@ -67,7 +67,6 @@ const FILTERS: { id: FilterId; overlay?: string; blur?: number; vignette?: boole
 const getFilter = (id?: string | null) =>
   FILTERS.find((f) => f.id === (id as FilterId)) ?? FILTERS[0];
 
-
 const TextLite: React.FC<React.ComponentProps<typeof TextRaw>> = (props) => (
   <TextRaw allowFontScaling={false} {...props} />
 );
@@ -75,19 +74,18 @@ const TextLite: React.FC<React.ComponentProps<typeof TextRaw>> = (props) => (
 const ViewerHeader: React.FC<{ title: string; onBack: () => void }> = ({
   title,
   onBack,
-}) => {
-  return (
-    <View style={styles.header}>
-      <Pressable onPress={onBack} style={styles.headerBtn} hitSlop={10}>
-        <Ionicons name="arrow-back" size={22} color="#fff" />
-      </Pressable>
-      <TextLite style={styles.headerTitle}>{title}</TextLite>
-      <View style={styles.headerRightSpace} />
-    </View>
-  );
-};
+}) => (
+  <View style={styles.header}>
+    <Pressable onPress={onBack} style={styles.headerBtn} hitSlop={10}>
+      <Ionicons name="arrow-back" size={22} color="#fff" />
+    </Pressable>
+    <TextLite style={styles.headerTitle}>{title}</TextLite>
+    <View style={styles.headerRightSpace} />
+  </View>
+);
 
-const ViewerVideo: React.FC<{ uri: string; playing: boolean }> = ({
+/* ─── Video with preload-ready player ─── */
+const ViewerVideo: React.FC<{ uri: string; playing: boolean }> = React.memo(({
   uri,
   playing,
 }) => {
@@ -99,12 +97,13 @@ const ViewerVideo: React.FC<{ uri: string; playing: boolean }> = ({
 
   useEffect(() => {
     if (!player) return;
-    if (playing) player.play();
-    else player.pause();
+    if (playing) {
+      player.play();
+    } else {
+      player.pause();
+    }
     return () => {
-      try {
-        player.pause();
-      } catch {}
+      try { player.pause(); } catch {}
     };
   }, [playing, player]);
 
@@ -114,11 +113,48 @@ const ViewerVideo: React.FC<{ uri: string; playing: boolean }> = ({
       player={player}
       contentFit="cover"
       allowsFullscreen={false}
-      allowsPictureInPicture={Platform.OS === "ios"}
+      allowsPictureInPicture={false}
     />
   );
-};
+});
 
+/* ─── Filter Overlay ─── */
+const FilterOverlay = React.memo(({ filterId }: { filterId?: string | null }) => {
+  const f = getFilter(filterId);
+  if (!f || f.id === "none") return null;
+  return (
+    <>
+      {f.blur ? (
+        <BlurView intensity={f.blur} tint="dark" style={StyleSheet.absoluteFill} />
+      ) : null}
+      {f.overlay ? (
+        <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: f.overlay }]} />
+      ) : null}
+      {f.glow ? (
+        <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+          <LinearGradient
+            colors={["rgba(255,255,255,0.28)", "rgba(255,255,255,0.0)"]}
+            style={styles.glowTop}
+          />
+        </View>
+      ) : null}
+      {f.vignette ? (
+        <>
+          <LinearGradient
+            colors={["rgba(0,0,0,0.55)", "rgba(0,0,0,0)"]}
+            style={styles.vignetteTop}
+          />
+          <LinearGradient
+            colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.65)"]}
+            style={styles.vignetteBottom}
+          />
+        </>
+      ) : null}
+    </>
+  );
+});
+
+/* ─── Single Page ─── */
 const ViewerPage = React.memo(function ViewerPage({
   item,
   index,
@@ -148,6 +184,9 @@ const ViewerPage = React.memo(function ViewerPage({
   const isVideo = item.media_type === "video";
   const likeColor = counts.liked ? "#ff4f7d" : "#ffffff";
 
+  // Only render video player for current ±1 items for performance
+  const shouldRenderVideo = isVideo && Math.abs(index - current) <= 1;
+
   return (
     <Pressable
       style={styles.page}
@@ -155,9 +194,27 @@ const ViewerPage = React.memo(function ViewerPage({
       onLongPress={onHideControls}
       delayLongPress={250}
     >
+      {/* Bottom gradient for readability */}
+      <LinearGradient
+        colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.65)"]}
+        style={styles.pageBottomGradient}
+        pointerEvents="none"
+      />
+
       <View style={styles.mediaContainer}>
         {isVideo ? (
-          <ViewerVideo uri={item.media_url} playing={playing} />
+          shouldRenderVideo ? (
+            <ViewerVideo uri={item.media_url} playing={playing} />
+          ) : item.thumb_url ? (
+            <Image
+              source={{ uri: item.thumb_url }}
+              style={styles.media}
+              contentFit="cover"
+              cachePolicy="disk"
+            />
+          ) : (
+            <View style={[styles.media, { backgroundColor: "#111" }]} />
+          )
         ) : (
           <Image
             source={{ uri: item.media_url }}
@@ -168,41 +225,7 @@ const ViewerPage = React.memo(function ViewerPage({
           />
         )}
 
-{(() => {
-  const f = getFilter((item as any)?.filter);
-  if (!f || f.id === "none") return null;
-  return (
-    <>
-      {f.blur ? (
-        <BlurView intensity={f.blur} tint="dark" style={StyleSheet.absoluteFill} />
-      ) : null}
-      {f.overlay ? (
-        <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: f.overlay }]} />
-      ) : null}
-      {f.glow ? (
-        <View pointerEvents="none" style={styles.glowWrap}>
-          <LinearGradient
-            colors={["rgba(255,255,255,0.28)", "rgba(255,255,255,0.0)"]}
-            style={styles.glowTop}
-          />
-        </View>
-      ) : null}
-      {f.vignette ? (
-        <>
-          <LinearGradient
-            colors={["rgba(0,0,0,0.55)", "rgba(0,0,0,0)"]}
-            style={styles.vignetteTop}
-          />
-          <LinearGradient
-            colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.65)"]}
-            style={styles.vignetteBottom}
-          />
-        </>
-      ) : null}
-    </>
-  );
-})()}
-
+        <FilterOverlay filterId={item.filter} />
       </View>
 
       {controlsVisible && (
@@ -219,22 +242,14 @@ const ViewerPage = React.memo(function ViewerPage({
               )}
             </Pressable>
 
-            <Pressable
-              onPress={onComment}
-              style={styles.sideButton}
-              hitSlop={10}
-            >
+            <Pressable onPress={onComment} style={styles.sideButton} hitSlop={10}>
               <Ionicons name="chatbubble-outline" size={30} color="#ffffff" />
               {counts.comments > 0 && (
                 <TextLite style={styles.sideCount}>{counts.comments}</TextLite>
               )}
             </Pressable>
 
-            <Pressable
-              onPress={onRepost}
-              style={styles.sideButton}
-              hitSlop={10}
-            >
+            <Pressable onPress={onRepost} style={styles.sideButton} hitSlop={10}>
               <Ionicons name="arrow-redo-outline" size={30} color="#ffffff" />
               {counts.reposts > 0 && (
                 <TextLite style={styles.sideCount}>{counts.reposts}</TextLite>
@@ -270,6 +285,7 @@ const ViewerPage = React.memo(function ViewerPage({
   );
 });
 
+/* ─── Main FullscreenViewer ─── */
 export default function FullscreenViewer({
   visible,
   items,
@@ -296,8 +312,7 @@ export default function FullscreenViewer({
   const clampIndex = useCallback(
     (index: number) => {
       if (itemCount === 0) return 0;
-      const maxIndex = itemCount - 1;
-      return Math.min(Math.max(index, 0), maxIndex);
+      return Math.min(Math.max(index, 0), itemCount - 1);
     },
     [itemCount]
   );
@@ -309,8 +324,7 @@ export default function FullscreenViewer({
     currentUserId === currentItem.user_id;
 
   const openMenu = useCallback(() => {
-    if (!currentItem) return;
-    if (!canManage) return;
+    if (!currentItem || !canManage) return;
     setMenuOpen(true);
   }, [currentItem, canManage]);
 
@@ -338,7 +352,6 @@ export default function FullscreenViewer({
     if (!currentItem || !canManage || !onDeletePost) return;
     const ok = await confirmDelete();
     if (!ok) return;
-
     try {
       setMenuBusy(true);
       await onDeletePost(currentItem.id);
@@ -348,6 +361,7 @@ export default function FullscreenViewer({
     }
   }, [currentItem, canManage, onDeletePost, confirmDelete]);
 
+  // Reset on open
   useEffect(() => {
     if (!visible) return;
     if (itemCount === 0) {
@@ -355,7 +369,6 @@ export default function FullscreenViewer({
       setInitialIndex(0);
       return;
     }
-
     const safeIndex = clampIndex(startIndex ?? 0);
     setCurrent(safeIndex);
     setInitialIndex(safeIndex);
@@ -377,13 +390,8 @@ export default function FullscreenViewer({
 
   const keyExtractor = useCallback((it: ViewerItem) => String(it.id), []);
 
-  const toggleControls = useCallback(() => {
-    setControlsVisible((prev) => !prev);
-  }, []);
-
-  const onHideControls = useCallback(() => {
-    setControlsVisible(false);
-  }, []);
+  const toggleControls = useCallback(() => setControlsVisible((p) => !p), []);
+  const onHideControls = useCallback(() => setControlsVisible(false), []);
 
   const countsForId = useCallback(
     (id: string | number): Counts => {
@@ -403,17 +411,15 @@ export default function FullscreenViewer({
       if (!viewableItems || viewableItems.length === 0) return;
       const first = viewableItems[0];
       if (first.index == null) return;
-      setCurrent((prev) => {
-        const next = clampIndex(first.index as number);
-        return typeof next === "number" ? next : prev;
-      });
+      setCurrent(first.index);
     }
   );
 
+  // VERTICAL layout — each page is full screen height
   const getItemLayout = useCallback(
     (_: ArrayLike<ViewerItem> | null | undefined, index: number) => ({
-      length: width,
-      offset: width * index,
+      length: SCREEN_H,
+      offset: SCREEN_H * index,
       index,
     }),
     []
@@ -440,25 +446,28 @@ export default function FullscreenViewer({
           </View>
         ) : (
           <FlatList
-            key={`${Platform.OS}-${visible ? 1 : 0}-${initialIndex}-${itemCount}`}
+            key={`viewer-v-${visible ? 1 : 0}-${initialIndex}-${itemCount}`}
             ref={listRef}
             data={data}
             keyExtractor={keyExtractor}
-            horizontal
+            horizontal={false}
             pagingEnabled
-            showsHorizontalScrollIndicator={false}
+            showsVerticalScrollIndicator={false}
+            snapToInterval={SCREEN_H}
+            snapToAlignment="start"
+            decelerationRate="fast"
             onViewableItemsChanged={onViewableItemsChanged.current}
-            viewabilityConfig={{ itemVisiblePercentThreshold: 80 }}
+            viewabilityConfig={{ itemVisiblePercentThreshold: 60 }}
             initialScrollIndex={Platform.OS === "web" ? initialIndex : undefined}
             getItemLayout={getItemLayout}
             onMomentumScrollEnd={(e) => {
-              const offsetX = e.nativeEvent.contentOffset.x || 0;
-              const pageIndex = Math.round(offsetX / width);
-              setCurrent((prev) => {
-                const next = clampIndex(pageIndex);
-                return typeof next === "number" ? next : prev;
-              });
+              const offsetY = e.nativeEvent.contentOffset.y || 0;
+              const pageIndex = Math.round(offsetY / SCREEN_H);
+              setCurrent(clampIndex(pageIndex));
             }}
+            windowSize={3}
+            maxToRenderPerBatch={2}
+            removeClippedSubviews={Platform.OS !== "web"}
             extraData={current}
             renderItem={({ item, index }) => (
               <ViewerPage
@@ -478,6 +487,7 @@ export default function FullscreenViewer({
           />
         )}
 
+        {/* Options menu modal */}
         <Modal
           visible={menuOpen}
           transparent
@@ -547,7 +557,7 @@ export default function FullscreenViewer({
 }
 
 const styles = StyleSheet.create({
-container: { flex: 1, backgroundColor: "#000" },
+  container: { flex: 1, backgroundColor: "#000" },
 
   header: {
     position: "absolute",
@@ -587,21 +597,33 @@ container: { flex: 1, backgroundColor: "#000" },
     zIndex: 11,
   },
 
-  page: { width, height, alignItems: "center", justifyContent: "center" },
+  // Each page fills the entire screen vertically
+  page: {
+    width: SCREEN_W,
+    height: SCREEN_H,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pageBottomGradient: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 200,
+    zIndex: 2,
+  },
   mediaContainer: {
-    width: Platform.OS === "web" ? 430 : "100%",
-    height: "85%",
+    width: "100%",
+    height: "100%",
     overflow: "hidden",
-    borderRadius: Platform.OS === "web" ? 18 : 0,
   },
   media: { width: "100%", height: "100%" },
 
   actionsWrapper: {
     position: "absolute",
-    right: 16,
-    top: Platform.OS === "web" ? 90 : 100,
-    bottom: Platform.OS === "web" ? 130 : 120,
-    justifyContent: "center",
+    right: 12,
+    bottom: Platform.select({ ios: 120, android: 100, default: 90 }),
+    zIndex: 5,
     alignItems: "center",
   },
   sideActions: { alignItems: "center" },
@@ -613,7 +635,13 @@ container: { flex: 1, backgroundColor: "#000" },
     fontWeight: "600",
   },
 
-  footer: { position: "absolute", bottom: 28, left: 22, right: 90 },
+  footer: {
+    position: "absolute",
+    bottom: Platform.select({ ios: 120, android: 100, default: 90 }),
+    left: 16,
+    right: 80,
+    zIndex: 5,
+  },
   likes: { color: "#ffffff", fontSize: 13, fontWeight: "600", marginBottom: 4 },
   username: { color: "#fff", fontWeight: "bold", fontSize: 16 },
   caption: { color: "#fff", marginTop: 6, fontSize: 14 },
@@ -693,11 +721,7 @@ container: { flex: 1, backgroundColor: "#000" },
   },
   menuCancelText: { color: "#fff", fontSize: 15, fontWeight: "800" },
 
-  glowWrap: { ...StyleSheet.absoluteFillObject },
-
   glowTop: { position: "absolute", top: 0, left: 0, right: 0, height: 160 },
-
   vignetteTop: { position: "absolute", top: 0, left: 0, right: 0, height: 220 },
-
   vignetteBottom: { position: "absolute", bottom: 0, left: 0, right: 0, height: 260 },
 });
