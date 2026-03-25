@@ -853,13 +853,21 @@ export default function Profile() {
       Alert.alert("Destaque vazio", "Este destaque não tem stories.");
       return;
     }
-    const storyItems: StoryItem[] = items.map((i) => ({
-      id: i.story_id,
-      media_type: i.media_type as "image" | "video",
-      media_url: i.media_url,
-      filter: i.filter,
-      createdAt: i.story_created_at,
-    }));
+    const storyItems: StoryItem[] = items.map((i) => {
+      let url = i.media_url;
+      // media_url from DB is a storage path — convert to public URL if needed
+      if (url && !url.startsWith("http")) {
+        const { data } = supabase.storage.from("stories").getPublicUrl(url);
+        url = data?.publicUrl || url;
+      }
+      return {
+        id: i.story_id,
+        media_type: i.media_type as "image" | "video",
+        media_url: url,
+        filter: i.filter,
+        createdAt: i.story_created_at,
+      };
+    });
     setHighlightViewerItems(storyItems);
     setHighlightViewerOpen(true);
   }, []);
@@ -1447,12 +1455,14 @@ export default function Profile() {
       return (
         <TouchableOpacity style={styles.cell} activeOpacity={0.8} onPress={() => openPostFromGrid(index)}>
           {isVideo && !hasThumb ? (
-            // Video without thumbnail — show gradient placeholder instead of black
+            // Video without thumbnail — show gradient placeholder with play icon
             <LinearGradient
-              colors={["#1a1a2e", "#16213e"]}
+              colors={[theme.colors.surface, theme.colors.backgroundAlt || theme.colors.background]}
               style={[styles.item, { alignItems: "center", justifyContent: "center" }]}
             >
-              <Text style={{ color: "rgba(255,255,255,0.7)", fontSize: 28 }}>▶</Text>
+              <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center" }}>
+                <Text style={{ color: "rgba(255,255,255,0.8)", fontSize: 18, marginLeft: 2 }}>▶</Text>
+              </View>
             </LinearGradient>
           ) : (
             <ExpoImage source={{ uri: item.image_url }} style={styles.item} contentFit="cover" cachePolicy="disk" />
@@ -1465,7 +1475,7 @@ export default function Profile() {
         </TouchableOpacity>
       );
     },
-    [openPostFromGrid],
+    [openPostFromGrid, theme],
   );
 
   // Render for videos/reels tab — with view count overlay
@@ -1491,10 +1501,12 @@ export default function Profile() {
         >
           {!hasThumb ? (
             <LinearGradient
-              colors={["#1a1a2e", "#16213e"]}
+              colors={[theme.colors.surface, theme.colors.backgroundAlt || theme.colors.background]}
               style={[styles.item, { alignItems: "center", justifyContent: "center" }]}
             >
-              <Text style={{ color: "rgba(255,255,255,0.7)", fontSize: 28 }}>▶</Text>
+              <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center" }}>
+                <Text style={{ color: "rgba(255,255,255,0.8)", fontSize: 18, marginLeft: 2 }}>▶</Text>
+              </View>
             </LinearGradient>
           ) : (
             <ExpoImage source={{ uri: item.image_url }} style={styles.item} contentFit="cover" cachePolicy="disk" />
@@ -1529,7 +1541,12 @@ export default function Profile() {
   const postsCount = posts.length;
 
   const gridPosts = posts;
-  const reelsPosts = posts.filter((p) => p.media_type === "video");
+  const reelsPosts = posts.filter((p) => {
+    if (p.media_type === "video") return true;
+    // Detect videos by URL pattern (some DB entries may not have media_type set correctly)
+    const url = (p.media_url || p.image_url || "").toLowerCase();
+    return url.includes(".mp4") || url.includes("video%2F") || url.includes("/video/");
+  });
   const taggedPosts: UiPost[] = [];
   const currentPosts = activeTab === "grid" ? gridPosts : activeTab === "reels" ? reelsPosts : taggedPosts;
 

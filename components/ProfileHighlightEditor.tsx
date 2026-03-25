@@ -1,30 +1,31 @@
 // components/ProfileHighlightEditor.tsx — Create/edit highlights from archived stories
 import { useTheme } from "@/contexts/ThemeContext";
 import {
-    type ArchivedStory,
-    type Highlight,
-    addStoriesToHighlight,
-    createHighlight,
-    deleteHighlight,
-    fetchAllUserStories,
-    fetchHighlightItems,
-    removeStoryFromHighlight,
-    updateHighlight,
+  type ArchivedStory,
+  type Highlight,
+  addStoriesToHighlight,
+  createHighlight,
+  deleteHighlight,
+  fetchAllUserStories,
+  fetchHighlightItems,
+  removeStoryFromHighlight,
+  updateHighlight,
 } from "@/lib/profileHighlights";
+import { supabase } from "@/lib/supabase";
 import { Image as ExpoImage } from "expo-image";
 import { useCallback, useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Dimensions,
-    FlatList,
-    Modal,
-    Platform,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  FlatList,
+  Modal,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from "react-native";
 
 type Props = {
@@ -62,7 +63,17 @@ export default function ProfileHighlightEditor({ visible, userId, highlight, onC
     (async () => {
       const allStories = await fetchAllUserStories(userId);
       if (cancelled) return;
-      setStories(allStories);
+      // media_url from DB is actually a storage path — convert to public URLs
+      const storiesWithUrls = allStories.map((s) => {
+        const url = s.media_url;
+        if (url && (url.startsWith("http://") || url.startsWith("https://"))) {
+          return s;
+        }
+        // It's a storage path — get public URL
+        const { data } = supabase.storage.from("stories").getPublicUrl(url);
+        return { ...s, media_url: data?.publicUrl || url };
+      });
+      setStories(storiesWithUrls);
 
       if (highlight) {
         setTitle(highlight.title);

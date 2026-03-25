@@ -6,12 +6,14 @@ import { LinearGradient } from "expo-linear-gradient";
 import { VideoView, useVideoPlayer } from "expo-video";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Animated,
   Dimensions,
   Modal,
   Platform,
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -21,12 +23,10 @@ export type StoryItem = {
   media_type: "image" | "video";
   media_url: string;
   filter?: string | null;
-  duration?: number | null; // em segundos (opcional). Se não vier, usa 30s
-  // Metadados opcionais para cabeçalho estilo IG
+  duration?: number | null;
   userName?: string | null;
   userAvatarUrl?: string | null;
-  createdAt?: string | null; // ISO string
-  // Fallback genérico caso venham de outras fontes
+  createdAt?: string | null;
   username?: string | null;
   avatar_url?: string | null;
   created_at?: string | null;
@@ -37,9 +37,11 @@ type StoryViewerProps = {
   items: StoryItem[];
   startIndex?: number;
   onClose: () => void;
+  onReply?: (text: string, storyId: string | number) => void;
 };
 
-const { width, height } = Dimensions.get("window");
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
+const STORY_DURATION_DEFAULT = 8; // 8s default like IG
 
 type FilterId = "none" | "warm" | "cool" | "pink" | "gold" | "night";
 
@@ -54,7 +56,6 @@ const FILTERS: { id: FilterId; overlay?: string; blur?: number; vignette?: boole
 
 const getFilter = (id?: string | null) =>
   FILTERS.find((f) => f.id === (id as FilterId)) ?? FILTERS[0];
-;
 
 const formatStoryTime = (createdAt?: string | null): string => {
   if (!createdAt) return "";
@@ -65,76 +66,168 @@ const formatStoryTime = (createdAt?: string | null): string => {
   const diffSec = Math.floor(diffMs / 1000);
   if (diffSec < 60) return "agora";
   const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `há ${diffMin} min`;
+  if (diffMin < 60) return `${diffMin} min`;
   const diffH = Math.floor(diffMin / 60);
-  if (diffH < 24) return `há ${diffH} h`;
+  if (diffH < 24) return `${diffH} h`;
   const diffD = Math.floor(diffH / 24);
   if (diffD === 1) return "ontem";
   return `${diffD} d`;
 };
 
-
+/* ─── Video Sub-component ─── */
 function StoryVideo({ uri, playing }: { uri: string; playing: boolean }) {
   const player = useVideoPlayer(uri, (p) => {
     p.loop = true;
-    p.muted = Platform.OS === "web"; // ajuda o autoplay no web
+    p.muted = Platform.OS === "web";
   });
 
   useEffect(() => {
     if (!player) return;
-
-    if (playing) {
-      player.play();
-    } else {
-      player.pause();
-    }
-
-    return () => {
-      try {
-        player.pause();
-      } catch {}
-    };
+    if (playing) player.play();
+    else player.pause();
+    return () => { try { player.pause(); } catch {} };
   }, [playing, player]);
 
   return (
     <VideoView
-      style={styles.media}
+      style={StyleSheet.absoluteFill}
       player={player}
-      contentFit="contain"
+      contentFit="cover"
       allowsFullscreen={false}
-      allowsPictureInPicture={Platform.OS === "ios"}
+      allowsPictureInPicture={false}
     />
   );
 }
 
-/**
- * Viewer de Stories em sequência estilo IG.
- * Recebe a lista de items e o índice inicial.
- */
+/* ─── Animated Progress Bar ─── */
+function ProgressBar({
+  count,
+  currentIndex,
+  paused,
+  durationMs,
+  onFinish,
+}: {
+  count: number;
+  currentIndex: number;
+  paused: boolean;
+  durationMs: number;
+  onFinish: () => void;
+}) {
+  const progressAnim = useRef(new Animated.Value(0)).current;
+  const animRef = useRef<Animated.CompositeAnimation | null>(null);
+  const startTimeRef = useRef(0);
+  const elapsedRef = useRef(0);
+
+  useEffect(() => {
+    // Reset progress for new story
+    progressAnim.setValue(0);
+    elapsedRef.current = 0;
+    startTimeRef.current = Date.now();
+
+    const remaining = durationMs;
+    animRef.current = Animated.timing(progressAnim, {
+      toValue: 1,
+      duration: remaining,
+      useNativeDriver: false,
+    });
+    animRef.current.start(({ finished }) => {
+      if (finished) onFinish();
+    });
+
+    return () => {
+      animRef.current?.stop();
+    };
+  }, [currentIndex, durationMs]);
+
+  useEffect(() => {
+    if (paused) {
+      // Pause: stop animation and record elapsed
+      elapsedRef.current += Date.now() - startTimeRef.current;
+      animRef.current?.stop();
+    } else {
+      // Resume: continue from where we left off
+      const remaining = Math.max(durationMs - elapsedRef.current, 100);
+      startTimeRef.current = Date.now();
+      animRef.current = Animated.timing(progressAnim, {
+        toValue: 1,
+        duration: remaining,
+        useNativeDriver: false,
+      });
+      animRef.current.start(({ finished }) => {
+        if (finished) onFinish();
+      });
+    }
+  }, [paused]);
+
+  return (
+    <View style={pStyles.barRow}>
+      {Array.from({ length: count }).map((_, idx) => (
+        <View key={idx} style={pStyles.barTrack}>
+          <Animated.View
+            style={[
+              pStyles.barFill,
+              idx < currentIndex
+                ? { width: "100%" }
+                : idx === currentIndex
+                ? {
+                    width: progressAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: ["0%", "100%"],
+                    }),
+                  }
+                : { width: "0%" },
+            ]}
+          />
+        </View>
+      ))}
+    </View>
+  );
+}
+
+const pStyles = StyleSheet.create({
+  barRow: {
+    flexDirection: "row",
+    gap: 3,
+    paddingHorizontal: 8,
+    paddingTop: Platform.select({ ios: 54, android: 38, default: 16 }),
+  },
+  barTrack: {
+    flex: 1,
+    height: 2.5,
+    borderRadius: 2,
+    backgroundColor: "rgba(255,255,255,0.25)",
+    overflow: "hidden",
+  },
+  barFill: {
+    height: "100%",
+    borderRadius: 2,
+    backgroundColor: "#fff",
+  },
+});
+
+/* ─── Main StoryViewer ─── */
 export default function StoryViewer({
   visible,
   items,
   startIndex = 0,
   onClose,
+  onReply,
 }: StoryViewerProps) {
   const { theme } = useTheme();
   const [currentIndex, setCurrentIndex] = useState(startIndex);
   const [paused, setPaused] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [liked, setLiked] = useState(false);
+  const [replyText, setReplyText] = useState("");
+  const [showHeart, setShowHeart] = useState(false);
+  const heartScale = useRef(new Animated.Value(0)).current;
 
   const total = items.length;
-
-  const clearTimer = () => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-  };
 
   const goNext = useCallback(() => {
     if (total === 0) return;
     if (currentIndex + 1 < total) {
       setCurrentIndex((prev) => prev + 1);
+      setLiked(false);
     } else {
       onClose();
     }
@@ -144,111 +237,70 @@ export default function StoryViewer({
     if (total === 0) return;
     if (currentIndex > 0) {
       setCurrentIndex((prev) => Math.max(0, prev - 1));
-    } else {
-      // no primeiro, se voltar, fecha
-      onClose();
+      setLiked(false);
     }
-  }, [currentIndex, total, onClose]);
+  }, [currentIndex, total]);
 
-  // Reset de índice quando abrir / mudar startIndex
+  // Reset when opening
   useEffect(() => {
     if (!visible) return;
-
-    clearTimer();
-
     const safeIndex =
-      typeof startIndex === "number" &&
-      startIndex >= 0 &&
-      startIndex < total
+      typeof startIndex === "number" && startIndex >= 0 && startIndex < total
         ? startIndex
         : 0;
-
     setCurrentIndex(safeIndex);
     setPaused(false);
+    setLiked(false);
+    setReplyText("");
   }, [visible, startIndex, total]);
 
-  // Timer de avanço automático
-  useEffect(() => {
-    clearTimer();
-    if (!visible || paused || total === 0) return;
-
-    const current = items[currentIndex];
-
-  const headerName =
-    (current as any)?.userName ||
-    (current as any)?.username ||
-    "Story";
-
-  const headerAvatar: string | null =
-    (current as any)?.userAvatarUrl ||
-    (current as any)?.avatar_url ||
-    null;
-
-  const headerTime = formatStoryTime(
-    (current as any)?.createdAt || (current as any)?.created_at || null
-  );
-    if (!current) return;
-
-    const durationSec =
-      typeof current.duration === "number" && current.duration > 0
-        ? current.duration
-        : 30; // default 30s
-
-    const timeoutMs = durationSec * 1000;
-
-    timerRef.current = setTimeout(goNext, timeoutMs);
-
-    return () => {
-      clearTimer();
-    };
-  }, [visible, paused, currentIndex, items, total, goNext]);
-
-  if (
-    !visible ||
-    total === 0 ||
-    currentIndex < 0 ||
-    currentIndex >= total
-  ) {
+  if (!visible || total === 0 || currentIndex < 0 || currentIndex >= total) {
     return null;
   }
 
   const current = items[currentIndex];
 
-  const headerName =
-    (current as any)?.userName ||
-    (current as any)?.username ||
-    "Story";
+  const headerName = current?.userName || current?.username || "Story";
+  const headerAvatar: string | null = current?.userAvatarUrl || current?.avatar_url || null;
+  const headerTime = formatStoryTime(current?.createdAt || current?.created_at || null);
 
-  const headerAvatar: string | null =
-    (current as any)?.userAvatarUrl ||
-    (current as any)?.avatar_url ||
-    null;
-
-  const headerTime = formatStoryTime(
-    (current as any)?.createdAt || (current as any)?.created_at || null
-  );
+  const durationSec =
+    typeof current.duration === "number" && current.duration > 0
+      ? current.duration
+      : STORY_DURATION_DEFAULT;
 
   const handlePress = (evt: any) => {
     const x = evt.nativeEvent.locationX;
-    if (x < width * 0.35) {
-      // lado esquerdo → volta
-      clearTimer();
+    if (x < SCREEN_W * 0.3) {
       goPrev();
     } else {
-      // lado direito → próximo
-      clearTimer();
       goNext();
     }
   };
 
-  const handleLongPress = () => {
-    setPaused(true);
-    clearTimer();
+  const handleLongPress = () => setPaused(true);
+  const handlePressOut = () => setPaused(false);
+
+  const handleDoubleTap = () => {
+    setLiked(true);
+    setShowHeart(true);
+    heartScale.setValue(0);
+    Animated.sequence([
+      Animated.spring(heartScale, { toValue: 1.2, useNativeDriver: true, speed: 20 }),
+      Animated.spring(heartScale, { toValue: 1, useNativeDriver: true, speed: 20 }),
+      Animated.delay(600),
+      Animated.timing(heartScale, { toValue: 0, duration: 200, useNativeDriver: true }),
+    ]).start(() => setShowHeart(false));
   };
 
-  const handlePressOut = () => {
-    setPaused(false);
+  const handleSendReply = () => {
+    const text = replyText.trim();
+    if (!text) return;
+    onReply?.(text, current.id);
+    setReplyText("");
   };
+
+  const f = getFilter(current?.filter);
 
   return (
     <Modal
@@ -257,225 +309,313 @@ export default function StoryViewer({
       transparent={false}
       statusBarTranslucent
     >
-      <View style={[styles.backdrop, { backgroundColor: "#000" }]}>
-        {/* Botão fechar */}
-        <TouchableOpacity
-          style={styles.closeButton}
-          onPress={() => {
-            clearTimer();
-            onClose();
-          }}
-          activeOpacity={0.9}
-        >
-          <Ionicons name="close" size={26} color="#ffffff" />
-        </TouchableOpacity>
-
-        {/* Área inteira clicável para navegação */}
+      <View style={s.container}>
+        {/* ── Full-screen media ── */}
         <Pressable
-          style={styles.pressArea}
+          style={StyleSheet.absoluteFill}
           onPress={handlePress}
           onLongPress={handleLongPress}
           onPressOut={handlePressOut}
-          delayLongPress={250}
+          delayLongPress={200}
         >
-          <View style={styles.mediaContainer}>
+          <View style={StyleSheet.absoluteFill}>
             {current.media_type === "image" ? (
               <Image
                 source={{ uri: current.media_url }}
-                style={styles.media}
-                contentFit="contain"
+                style={StyleSheet.absoluteFill}
+                contentFit="cover"
                 transition={150}
               />
             ) : (
               <StoryVideo uri={current.media_url} playing={!paused} />
             )}
 
-{(() => {
-  const f = getFilter((current as any)?.filter);
-  if (!f || f.id === "none") return null;
-  return (
-    <>
-      {f.blur ? (
-        <BlurView intensity={f.blur} tint="dark" style={StyleSheet.absoluteFill} />
-      ) : null}
-      {f.overlay ? (
-        <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: f.overlay }]} />
-      ) : null}
-      {f.glow ? (
-        <View pointerEvents="none" style={styles.glowWrap}>
-          <LinearGradient
-            colors={["rgba(255,255,255,0.28)", "rgba(255,255,255,0.0)"]}
-            style={styles.glowTop}
-          />
-        </View>
-      ) : null}
-      {f.vignette ? (
-        <>
-          <LinearGradient
-            colors={["rgba(0,0,0,0.55)", "rgba(0,0,0,0)"]}
-            style={styles.vignetteTop}
-          />
-          <LinearGradient
-            colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.65)"]}
-            style={styles.vignetteBottom}
-          />
-        </>
-      ) : null}
-    </>
-  );
-})()}
-
+            {/* Filter overlays */}
+            {f && f.id !== "none" && (
+              <>
+                {f.blur ? (
+                  <BlurView intensity={f.blur} tint="dark" style={StyleSheet.absoluteFill} />
+                ) : null}
+                {f.overlay ? (
+                  <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: f.overlay }]} />
+                ) : null}
+                {f.glow ? (
+                  <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+                    <LinearGradient
+                      colors={["rgba(255,255,255,0.28)", "rgba(255,255,255,0.0)"]}
+                      style={{ position: "absolute", top: 0, left: 0, right: 0, height: 160 }}
+                    />
+                  </View>
+                ) : null}
+                {f.vignette ? (
+                  <>
+                    <LinearGradient
+                      colors={["rgba(0,0,0,0.55)", "rgba(0,0,0,0)"]}
+                      style={{ position: "absolute", top: 0, left: 0, right: 0, height: 220 }}
+                    />
+                    <LinearGradient
+                      colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.65)"]}
+                      style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 260 }}
+                    />
+                  </>
+                ) : null}
+              </>
+            )}
           </View>
         </Pressable>
 
-        {/* Pequena barra de info em cima: índice / total */}
-        <View style={styles.topInfo}>
-          <View style={styles.indexDotRow}>
-            {items.map((_, idx) => (
-              <View
-                key={idx}
-                style={[
-                  styles.indexDot,
-                  idx === currentIndex && styles.indexDotActive,
-                ]}
-              />
-            ))}
+        {/* ── Top gradient for readability ── */}
+        <LinearGradient
+          colors={["rgba(0,0,0,0.5)", "rgba(0,0,0,0)"]}
+          style={s.topGradient}
+          pointerEvents="none"
+        />
+
+        {/* ── Bottom gradient ── */}
+        <LinearGradient
+          colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.5)"]}
+          style={s.bottomGradient}
+          pointerEvents="none"
+        />
+
+        {/* ── Progress bars ── */}
+        <View style={s.topOverlay} pointerEvents="box-none">
+          <ProgressBar
+            count={total}
+            currentIndex={currentIndex}
+            paused={paused}
+            durationMs={durationSec * 1000}
+            onFinish={goNext}
+          />
+
+          {/* ── Header: avatar, name, time, close ── */}
+          <View style={s.header}>
+            <View style={s.headerLeft}>
+              {headerAvatar ? (
+                <Image
+                  source={{ uri: headerAvatar }}
+                  style={s.avatar}
+                  contentFit="cover"
+                />
+              ) : (
+                <View style={[s.avatar, s.avatarPlaceholder]}>
+                  <Text style={s.avatarInitial}>
+                    {(headerName || "S").charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+              )}
+              <View style={s.headerTextCol}>
+                <Text style={s.headerName} numberOfLines={1}>
+                  {headerName}
+                </Text>
+                {!!headerTime && (
+                  <Text style={s.headerTime}>{headerTime}</Text>
+                )}
+              </View>
+            </View>
+
+            <View style={s.headerRight}>
+              {paused && (
+                <View style={s.pausedBadge}>
+                  <Text style={s.pausedText}>⏸</Text>
+                </View>
+              )}
+              <TouchableOpacity
+                style={s.closeBtn}
+                onPress={onClose}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="close" size={28} color="#fff" />
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
 
-        {/* Rodapé simples com posição */}
-        <View style={styles.bottomInfo}>
-          <Text style={styles.bottomText}>
-            Story {currentIndex + 1} de {total}
-          </Text>
-          {paused && (
-            <Text style={styles.pausedHint}>Pausado (segurou na tela)</Text>
-          )}
+        {/* ── Heart animation on double tap ── */}
+        {showHeart && (
+          <Animated.View
+            style={[s.heartOverlay, { transform: [{ scale: heartScale }] }]}
+            pointerEvents="none"
+          >
+            <Ionicons name="heart" size={80} color="#ff3b5c" />
+          </Animated.View>
+        )}
+
+        {/* ── Bottom: reply + actions ── */}
+        <View style={s.bottomBar} pointerEvents="box-none">
+          <View style={s.replyRow}>
+            <TextInput
+              style={s.replyInput}
+              placeholder="Enviar mensagem..."
+              placeholderTextColor="rgba(255,255,255,0.5)"
+              value={replyText}
+              onChangeText={setReplyText}
+              onFocus={() => setPaused(true)}
+              onBlur={() => setPaused(false)}
+              onSubmitEditing={handleSendReply}
+              returnKeyType="send"
+            />
+            <TouchableOpacity
+              style={[s.actionBtn, liked && { backgroundColor: "rgba(255,59,92,0.2)" }]}
+              onPress={() => {
+                if (!liked) handleDoubleTap();
+                else setLiked(false);
+              }}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name={liked ? "heart" : "heart-outline"}
+                size={24}
+                color={liked ? "#ff3b5c" : "#fff"}
+              />
+            </TouchableOpacity>
+            <TouchableOpacity style={s.actionBtn} activeOpacity={0.7}>
+              <Ionicons name="paper-plane-outline" size={22} color="#fff" />
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     </Modal>
   );
 }
 
-const styles = StyleSheet.create({
-backdrop: {
+const s = StyleSheet.create({
+  container: {
     flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
+    backgroundColor: "#000",
   },
-  pressArea: {
-    flex: 1,
-    width: "100%",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  mediaContainer: {
-    width: "100%",
-    maxWidth: 420,
-    height: height * 0.8,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  media: {
-    width: "100%",
-    height: "100%",
-  },
-  closeButton: {
+  topGradient: {
     position: "absolute",
-    top: Platform.select({ ios: 40, android: 32, default: 24 }),
-    right: 16,
-    zIndex: 20,
-    padding: 6,
-  },
-  topInfo: {
-    position: "absolute",
-    top: Platform.select({ ios: 40, android: 30, default: 20 }),
-    left: 16,
-    right: 60,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  indexDotRow: {
-    flexDirection: "row",
-    justifyContent: "center",
-    gap: 4,
-  },
-  indexDot: {
-    width: 26,
-    height: 3,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.3)",
-  },
-  indexDotActive: {
-    backgroundColor: "#ffffff",
-  },
-  bottomInfo: {
-    position: "absolute",
-    bottom: 26,
+    top: 0,
     left: 0,
     right: 0,
-    alignItems: "center",
+    height: 160,
+    zIndex: 5,
   },
-  bottomText: {
-    color: "#ffffff",
-    fontSize: 13,
-    fontWeight: "500",
+  bottomGradient: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 200,
+    zIndex: 5,
   },
-  pausedHint: {
-    color: "#cccccc",
-    fontSize: 11,
-    marginTop: 4,
+  topOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
   },
-
-  headerRow: {
-    marginTop: 8,
+  header: {
     flexDirection: "row",
     alignItems: "center",
-    alignSelf: "stretch",
-    paddingHorizontal: 4,
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 6,
   },
-  headerAvatar: {
+  headerLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+  },
+  avatar: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    borderWidth: 1.5,
+    borderWidth: 2,
     borderColor: "rgba(255,255,255,0.85)",
   },
-  headerAvatarPlaceholder: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1.5,
-    borderColor: "rgba(255,255,255,0.85)",
+  avatarPlaceholder: {
+    backgroundColor: "rgba(255,255,255,0.15)",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(0,0,0,0.4)",
   },
-  headerAvatarInitial: {
-    color: "#ffffff",
-    fontWeight: "700",
-    fontSize: 16,
+  avatarInitial: {
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 15,
   },
   headerTextCol: {
-    marginLeft: 8,
+    marginLeft: 10,
     flex: 1,
   },
   headerName: {
-    color: "#ffffff",
+    color: "#fff",
     fontSize: 14,
-    fontWeight: "600",
+    fontWeight: "700",
+    textShadowColor: "rgba(0,0,0,0.5)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
   headerTime: {
     color: "rgba(255,255,255,0.7)",
-    fontSize: 11,
+    fontSize: 12,
+    fontWeight: "500",
     marginTop: 1,
   },
-
-  glowWrap: { ...StyleSheet.absoluteFillObject },
-
-  glowTop: { position: "absolute", top: 0, left: 0, right: 0, height: 160 },
-
-  vignetteTop: { position: "absolute", top: 0, left: 0, right: 0, height: 220 },
-
-  vignetteBottom: { position: "absolute", bottom: 0, left: 0, right: 0, height: 260 },
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  pausedBadge: {
+    backgroundColor: "rgba(0,0,0,0.4)",
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  pausedText: {
+    color: "#fff",
+    fontSize: 12,
+  },
+  closeBtn: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  heartOverlay: {
+    position: "absolute",
+    top: "50%",
+    left: "50%",
+    marginLeft: -40,
+    marginTop: -40,
+    zIndex: 20,
+  },
+  bottomBar: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+    paddingHorizontal: 12,
+    paddingBottom: Platform.select({ ios: 40, android: 20, default: 16 }),
+  },
+  replyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  replyInput: {
+    flex: 1,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.3)",
+    backgroundColor: "rgba(0,0,0,0.3)",
+    paddingHorizontal: 16,
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  actionBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
 });
