@@ -17,6 +17,7 @@ import {
   Text as TextRaw,
   View,
 } from "react-native";
+import CommentsSheet from "./CommentsSheet";
 
 export type ViewerItem = {
   id: string | number;
@@ -314,6 +315,8 @@ export default function FullscreenViewer({
   const [initialIndex, setInitialIndex] = useState<number>(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuBusy, setMenuBusy] = useState(false);
+  const [fsCommentsOpen, setFsCommentsOpen] = useState(false);
+  const [fsCommentsPostId, setFsCommentsPostId] = useState<number | null>(null);
 
   const data = useMemo(() => items ?? [], [items]);
   const itemCount = data.length;
@@ -496,7 +499,7 @@ export default function FullscreenViewer({
                 counts={countsForId(item.id)}
                 controlsVisible={controlsVisible}
                 onLike={() => onLike?.(item.id)}
-                onComment={() => onComment?.(item.id)}
+                onComment={() => { setFsCommentsPostId(item.id as number); setFsCommentsOpen(true); }}
                 onRepost={() => onRepost?.(item.id)}
                 onShare={() => onShare?.(item.id)}
                 onPressUser={() => item.user_id && onPressUser?.(item.user_id)}
@@ -571,6 +574,13 @@ export default function FullscreenViewer({
             </View>
           </View>
         </Modal>
+
+        {/* Comments inside the fullscreen modal so it renders on top */}
+        <CommentsSheet
+          visible={fsCommentsOpen}
+          postId={fsCommentsPostId}
+          onClose={() => { setFsCommentsOpen(false); setFsCommentsPostId(null); }}
+        />
       </View>
     </Modal>
   );
