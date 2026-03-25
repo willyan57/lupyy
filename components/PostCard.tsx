@@ -2,6 +2,7 @@ import Colors from "@/constants/Colors";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
+import { LinearGradient } from "expo-linear-gradient";
 import { VideoView, useVideoPlayer } from "expo-video";
 import { memo, useCallback, useEffect, useState } from "react";
 import {
@@ -196,7 +197,14 @@ function _PostCard(props: PostCardProps) {
       ) : thumb_url ? (
         <Image source={{ uri: thumb_url }} style={styles.media} contentFit="cover" cachePolicy="disk" />
       ) : (
-        <View style={styles.videoPlaceholder} />
+        <LinearGradient
+          colors={["#1a1a2e", "#16213e", "#0f3460"]}
+          style={styles.videoPlaceholder}
+        >
+          <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center" }}>
+            <Text style={{ color: "rgba(255,255,255,0.8)", fontSize: 20, marginLeft: 2 }}>▶</Text>
+          </View>
+        </LinearGradient>
       )}
       <Animated.View pointerEvents="none" style={[styles.heartWrap, heartStyle]}>
         <Text style={styles.heart}>❤</Text>
@@ -326,7 +334,6 @@ const styles = StyleSheet.create({
   videoPlaceholder: {
     width: "100%",
     height: "100%",
-    backgroundColor: "#000",
     alignItems: "center",
     justifyContent: "center",
   },

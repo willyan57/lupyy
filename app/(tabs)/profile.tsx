@@ -2510,7 +2510,7 @@ export default function Profile() {
               <View style={[styles.highlightCircle, { borderColor: theme.colors.border }]}>
                 {hl.cover_url ? (
                   <ExpoImage
-                    source={{ uri: hl.cover_url }}
+                    source={{ uri: hl.cover_url.startsWith("http") ? hl.cover_url : supabase.storage.from("stories").getPublicUrl(hl.cover_url).data.publicUrl }}
                     style={styles.highlightImage}
                     contentFit="cover"
                     cachePolicy="disk"

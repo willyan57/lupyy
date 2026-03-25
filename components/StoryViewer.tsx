@@ -106,12 +106,14 @@ function ProgressBar({
   paused,
   durationMs,
   onFinish,
+  fillColor = "#fff",
 }: {
   count: number;
   currentIndex: number;
   paused: boolean;
   durationMs: number;
   onFinish: () => void;
+  fillColor?: string;
 }) {
   const progressAnim = useRef(new Animated.Value(0)).current;
   const animRef = useRef<Animated.CompositeAnimation | null>(null);
@@ -166,6 +168,7 @@ function ProgressBar({
           <Animated.View
             style={[
               pStyles.barFill,
+              { backgroundColor: fillColor },
               idx < currentIndex
                 ? { width: "100%" }
                 : idx === currentIndex
@@ -201,7 +204,6 @@ const pStyles = StyleSheet.create({
   barFill: {
     height: "100%",
     borderRadius: 2,
-    backgroundColor: "#fff",
   },
 });
 
@@ -386,6 +388,7 @@ export default function StoryViewer({
             paused={paused}
             durationMs={durationSec * 1000}
             onFinish={goNext}
+            fillColor={theme.colors.primary || "#fff"}
           />
 
           {/* ── Header: avatar, name, time, close ── */}
