@@ -1,15 +1,19 @@
+// components/PeopleListSheet.tsx — Premium followers/following modal (Instagram-style)
+import { useTheme } from "@/contexts/ThemeContext";
 import { supabase } from "@/lib/supabase";
 import { Image as ExpoImage } from "expo-image";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
+  Dimensions,
   FlatList,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
 
 type Mode = "followers" | "following" | "interested";
@@ -21,7 +25,6 @@ type PeopleListSheetProps = {
   isOwnProfile: boolean;
   onClose: () => void;
   onOpenProfile: (userId: string) => void;
-  /** Pass the logged-in user's relationship status to block crush lists */
   myRelationshipStatus?: string | null;
 };
 
@@ -37,40 +40,28 @@ type PersonRow = {
 };
 
 function getTitle(mode: Mode, isOwnProfile: boolean) {
-  if (mode === "followers") {
-    return isOwnProfile ? "Quem segue você" : "Seguidores";
-  }
-  if (mode === "following") {
-    return isOwnProfile ? "Quem você segue" : "Seguindo";
-  }
-  if (mode === "interested") {
-    return isOwnProfile ? "Interessados em você" : "Interessados";
-  }
+  if (mode === "followers") return isOwnProfile ? "Quem segue você" : "Seguidores";
+  if (mode === "following") return isOwnProfile ? "Quem você segue" : "Seguindo";
+  if (mode === "interested") return isOwnProfile ? "Interessados em você" : "Interessados";
   return "";
 }
 
 function getEmptyText(mode: Mode, isOwnProfile: boolean) {
-  if (mode === "followers") {
-    return isOwnProfile
-      ? "Ninguém segue você ainda."
-      : "Esse perfil ainda não tem seguidores.";
-  }
-  if (mode === "following") {
-    return isOwnProfile
-      ? "Você ainda não está seguindo ninguém."
-      : "Esse perfil ainda não segue ninguém.";
-  }
-  if (mode === "interested") {
-    return isOwnProfile
-      ? "Ainda não teve nenhum crush aqui."
-      : "Ainda não há interessados por aqui.";
-  }
+  if (mode === "followers")
+    return isOwnProfile ? "Ninguém segue você ainda." : "Esse perfil ainda não tem seguidores.";
+  if (mode === "following")
+    return isOwnProfile ? "Você ainda não está seguindo ninguém." : "Esse perfil ainda não segue ninguém.";
+  if (mode === "interested")
+    return isOwnProfile ? "Ainda não teve nenhum crush aqui." : "Ainda não há interessados por aqui.";
   return "";
 }
 
 function isCommitted(status?: string | null) {
   return status === "committed" || status === "other";
 }
+
+const SCREEN_HEIGHT = Dimensions.get("window").height;
+const SHEET_HEIGHT = Math.min(SCREEN_HEIGHT * 0.72, 640);
 
 export default function PeopleListSheet(props: PeopleListSheetProps) {
   const {
@@ -83,16 +74,14 @@ export default function PeopleListSheet(props: PeopleListSheetProps) {
     myRelationshipStatus,
   } = props;
 
+  const { theme } = useTheme();
   const [data, setData] = useState<PersonRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const searchRef = useRef<TextInput>(null);
 
-  const title = useMemo(
-    () => getTitle(mode, isOwnProfile),
-    [mode, isOwnProfile]
-  );
-
-  // Block crush/interested list when committed
+  const title = useMemo(() => getTitle(mode, isOwnProfile), [mode, isOwnProfile]);
   const isCrushBlocked = mode === "interested" && isCommitted(myRelationshipStatus);
 
   useEffect(() => {
@@ -109,13 +98,9 @@ export default function PeopleListSheet(props: PeopleListSheetProps) {
       setError(null);
 
       let viewName = "";
-      if (mode === "followers") {
-        viewName = "view_followers_detailed";
-      } else if (mode === "following") {
-        viewName = "view_following_detailed";
-      } else if (mode === "interested") {
-        viewName = "view_crush_detailed";
-      }
+      if (mode === "followers") viewName = "view_followers_detailed";
+      else if (mode === "following") viewName = "view_following_detailed";
+      else if (mode === "interested") viewName = "view_crush_detailed";
 
       const { data: rows, error: fetchError } = await supabase
         .from(viewName)
@@ -131,198 +116,339 @@ export default function PeopleListSheet(props: PeopleListSheetProps) {
       } else {
         setData((rows ?? []) as PersonRow[]);
       }
-
       setLoading(false);
     }
 
     load();
-
-    return () => {
-      isCancelled = true;
-    };
+    return () => { isCancelled = true; };
   }, [visible, mode, profileId, isCrushBlocked]);
 
-  function renderItem({ item }: { item: PersonRow }) {
-    const displayName =
-      item.full_name?.trim() ||
-      item.username?.trim() ||
-      "Usuário do Lupyy";
-    const username =
-      item.username && item.username.trim().length > 0
-        ? "@" + item.username
-        : "";
-    const showCrushBadge =
-      mode === "interested" && item.interest_type === "crush";
+  // Reset search when modal opens/closes
+  useEffect(() => {
+    if (!visible) setSearch("");
+  }, [visible]);
 
-    return (
-      <TouchableOpacity
-        style={styles.row}
-        onPress={() => onOpenProfile(item.user_id)}
-      >
-        <View style={styles.avatarWrapper}>
-          {item.avatar_url ? (
-            <ExpoImage
-              source={{ uri: item.avatar_url }}
-              style={styles.avatar}
-            />
-          ) : (
-            <View style={styles.avatarFallback}>
-              <Text style={styles.avatarFallbackText}>
-                {displayName.charAt(0).toUpperCase()}
+  const filtered = useMemo(() => {
+    if (!search.trim()) return data;
+    const q = search.trim().toLowerCase();
+    return data.filter(
+      (p) =>
+        (p.full_name && p.full_name.toLowerCase().includes(q)) ||
+        (p.username && p.username.toLowerCase().includes(q))
+    );
+  }, [data, search]);
+
+  const showEmptyState = !loading && !error && filtered.length === 0 && !isCrushBlocked;
+
+  const renderItem = useCallback(
+    ({ item }: { item: PersonRow }) => {
+      const displayName = item.full_name?.trim() || item.username?.trim() || "Usuário do Lupyy";
+      const uname = item.username?.trim() ? `@${item.username}` : "";
+      const showCrushBadge = mode === "interested" && item.interest_type === "crush";
+
+      return (
+        <TouchableOpacity
+          style={s.row}
+          activeOpacity={0.7}
+          onPress={() => {
+            onClose();
+            setTimeout(() => onOpenProfile(item.user_id), 150);
+          }}
+        >
+          <View style={s.avatarWrap}>
+            {item.avatar_url ? (
+              <ExpoImage source={{ uri: item.avatar_url }} style={s.avatar} contentFit="cover" cachePolicy="disk" />
+            ) : (
+              <View style={[s.avatarFallback, { backgroundColor: theme.colors.surface }]}>
+                <Text style={[s.avatarFallbackText, { color: theme.colors.primary || "#a855f7" }]}>
+                  {displayName.charAt(0).toUpperCase()}
+                </Text>
+              </View>
+            )}
+          </View>
+
+          <View style={s.info}>
+            <Text style={[s.name, { color: theme.colors.text }]} numberOfLines={1}>
+              {displayName}
+            </Text>
+            {uname ? (
+              <Text style={[s.username, { color: theme.colors.textMuted }]} numberOfLines={1}>
+                {uname}
               </Text>
+            ) : null}
+          </View>
+
+          {showCrushBadge && (
+            <View style={s.crushBadge}>
+              <Text style={s.crushBadgeText}>💘 Crush</Text>
             </View>
           )}
-        </View>
 
-        <View style={styles.info}>
-          <Text style={styles.name} numberOfLines={1}>
-            {displayName}
-          </Text>
-          {username ? (
-            <Text style={styles.username} numberOfLines={1}>
-              {username}
-            </Text>
-          ) : null}
-        </View>
-
-        {showCrushBadge ? (
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>Crush 💘</Text>
+          <View style={[s.profileBtn, { borderColor: theme.colors.border }]}>
+            <Text style={[s.profileBtnText, { color: theme.colors.text }]}>Ver</Text>
           </View>
-        ) : null}
-      </TouchableOpacity>
-    );
-  }
+        </TouchableOpacity>
+      );
+    },
+    [mode, onClose, onOpenProfile, theme]
+  );
 
-  const showEmptyState = !loading && !error && data.length === 0 && !isCrushBlocked;
+  const keyExtractor = useCallback((item: PersonRow) => item.follow_id, []);
 
   return (
-    <Modal visible={visible} animationType="fade" transparent>
-      <Pressable style={styles.backdrop} onPress={onClose} />
-      <View style={styles.bottomSheetContainer}>
-        <View style={styles.sheet}>
-          <View style={styles.handle} />
-          <Text style={styles.title}>{title}</Text>
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <Pressable style={s.backdrop} onPress={onClose} />
 
-          {/* ── Crush blocked overlay ── */}
+      <View style={s.sheetContainer}>
+        <View style={[s.sheet, { backgroundColor: theme.colors.background }]}>
+          {/* ── Handle ── */}
+          <View style={s.handleWrap}>
+            <View style={[s.handle, { backgroundColor: theme.colors.border }]} />
+          </View>
+
+          {/* ── Header ── */}
+          <View style={[s.header, { borderBottomColor: theme.colors.border }]}>
+            <View style={{ width: 40 }} />
+            <Text style={[s.title, { color: theme.colors.text }]}>{title}</Text>
+            <TouchableOpacity onPress={onClose} style={s.closeBtn} activeOpacity={0.7}>
+              <Text style={[s.closeBtnText, { color: theme.colors.text }]}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* ── Search ── */}
+          {!isCrushBlocked && data.length > 0 && (
+            <View style={[s.searchWrap, { borderBottomColor: theme.colors.border }]}>
+              <View style={[s.searchBox, { backgroundColor: theme.colors.surface }]}>
+                <Text style={[s.searchIcon, { color: theme.colors.textMuted }]}>🔍</Text>
+                <TextInput
+                  ref={searchRef}
+                  value={search}
+                  onChangeText={setSearch}
+                  placeholder="Pesquisar"
+                  placeholderTextColor={theme.colors.textMuted}
+                  style={[s.searchInput, { color: theme.colors.text }]}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="search"
+                />
+                {search.length > 0 && (
+                  <TouchableOpacity onPress={() => { setSearch(""); searchRef.current?.focus(); }}>
+                    <Text style={[s.searchClear, { color: theme.colors.textMuted }]}>✕</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          )}
+
+          {/* ── Crush blocked ── */}
           {isCrushBlocked ? (
-            <View style={styles.blockedContainer}>
+            <View style={s.blockedContainer}>
               <Text style={{ fontSize: 48, marginBottom: 12 }}>🔒</Text>
-              <Text style={styles.blockedTitle}>Lista bloqueada</Text>
-              <Text style={styles.blockedSubtext}>
-                Enquanto seu status for comprometido, a lista de interessados fica oculta. Mude para Solteiro para desbloquear.
+              <Text style={[s.blockedTitle, { color: theme.colors.text }]}>Lista bloqueada</Text>
+              <Text style={[s.blockedSubtext, { color: theme.colors.textMuted }]}>
+                Enquanto seu status for comprometido, a lista de interessados fica oculta. Mude para Solteiro para
+                desbloquear.
               </Text>
             </View>
           ) : (
-            <>
+            <View style={s.listArea}>
               {loading && (
-                <View style={styles.center}>
-                  <ActivityIndicator />
+                <View style={s.center}>
+                  {/* Skeleton loading */}
+                  {[0, 1, 2, 3, 4].map((i) => (
+                    <View key={i} style={s.skeletonRow}>
+                      <View style={[s.skeletonCircle, { backgroundColor: theme.colors.surface }]} />
+                      <View style={s.skeletonText}>
+                        <View
+                          style={[
+                            s.skeletonLine,
+                            { backgroundColor: theme.colors.surface, width: 100 + Math.random() * 60 },
+                          ]}
+                        />
+                        <View
+                          style={[
+                            s.skeletonLine,
+                            { backgroundColor: theme.colors.surface, width: 60 + Math.random() * 40, marginTop: 6 },
+                          ]}
+                        />
+                      </View>
+                    </View>
+                  ))}
                 </View>
               )}
 
               {error && !loading && (
-                <View style={styles.center}>
-                  <Text style={styles.errorText}>
-                    Não foi possível carregar a lista.
-                  </Text>
+                <View style={s.center}>
+                  <Text style={{ fontSize: 36, marginBottom: 8 }}>😕</Text>
+                  <Text style={[s.errorText, { color: "#ff8080" }]}>Não foi possível carregar a lista.</Text>
                 </View>
               )}
 
               {showEmptyState && (
-                <View style={styles.center}>
-                  <Text style={styles.emptyText}>
-                    {getEmptyText(mode, isOwnProfile)}
+                <View style={s.center}>
+                  <Text style={{ fontSize: 36, marginBottom: 8 }}>
+                    {mode === "interested" ? "💘" : "👥"}
+                  </Text>
+                  <Text style={[s.emptyText, { color: theme.colors.textMuted }]}>
+                    {search.trim()
+                      ? `Nenhum resultado para "${search.trim()}"`
+                      : getEmptyText(mode, isOwnProfile)}
                   </Text>
                 </View>
               )}
 
-              {!loading && !error && data.length > 0 && (
+              {!loading && !error && filtered.length > 0 && (
                 <FlatList
-                  data={data}
-                  keyExtractor={(item) => item.follow_id}
+                  data={filtered}
+                  keyExtractor={keyExtractor}
                   renderItem={renderItem}
-                  contentContainerStyle={styles.listContent}
+                  contentContainerStyle={s.listContent}
                   keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}
+                  initialNumToRender={15}
+                  maxToRenderPerBatch={20}
+                  windowSize={10}
+                  getItemLayout={(_, index) => ({
+                    length: 64,
+                    offset: 64 * index,
+                    index,
+                  })}
                 />
               )}
-            </>
+            </View>
           )}
-
-          <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-            <Text style={styles.closeButtonText}>Fechar</Text>
-          </TouchableOpacity>
         </View>
       </View>
     </Modal>
   );
 }
 
-const styles = StyleSheet.create({
+const s = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.4)",
+    backgroundColor: "rgba(0,0,0,0.5)",
   },
-  bottomSheetContainer: {
+  sheetContainer: {
     position: "absolute",
     left: 0,
     right: 0,
     bottom: 0,
-    paddingHorizontal: 12,
-    paddingBottom: 24,
+    maxHeight: SHEET_HEIGHT,
   },
   sheet: {
-    backgroundColor: "rgba(11,11,15,0.98)",
-    borderRadius: 24,
-    paddingHorizontal: 16,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    overflow: "hidden",
+    maxHeight: SHEET_HEIGHT,
+    ...Platform.select({
+      web: {
+        boxShadow: "0 -4px 30px rgba(0,0,0,0.3)",
+      } as any,
+      default: {
+        elevation: 20,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: -4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 12,
+      },
+    }),
+  },
+  handleWrap: {
+    alignItems: "center",
     paddingTop: 10,
-    paddingBottom: 12,
+    paddingBottom: 2,
   },
   handle: {
-    alignSelf: "center",
-    width: 40,
+    width: 36,
     height: 4,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.18)",
-    marginBottom: 8,
+    borderRadius: 2,
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 0.5,
   },
   title: {
     fontSize: 16,
-    fontWeight: "600",
-    color: "rgba(255,255,255,0.95)",
+    fontWeight: "700",
     textAlign: "center",
-    marginBottom: 8,
+    flex: 1,
+  },
+  closeBtn: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 20,
+  },
+  closeBtnText: {
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  searchWrap: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 0.5,
+  },
+  searchBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: Platform.OS === "web" ? 8 : 6,
+    gap: 8,
+  },
+  searchIcon: {
+    fontSize: 14,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: "500",
+    padding: 0,
+    margin: 0,
+    ...(Platform.OS === "web" ? { outlineStyle: "none" } as any : {}),
+  },
+  searchClear: {
+    fontSize: 14,
+    padding: 4,
+  },
+  listArea: {
+    flex: 1,
+    minHeight: 200,
   },
   center: {
-    paddingVertical: 16,
+    paddingVertical: 32,
+    paddingHorizontal: 24,
     alignItems: "center",
     justifyContent: "center",
   },
   errorText: {
-    color: "rgba(255,120,120,0.9)",
-    fontSize: 13,
+    fontSize: 14,
+    fontWeight: "600",
     textAlign: "center",
   },
   emptyText: {
-    color: "rgba(255,255,255,0.6)",
-    fontSize: 13,
+    fontSize: 14,
+    fontWeight: "500",
     textAlign: "center",
-    paddingHorizontal: 16,
+    lineHeight: 20,
   },
   blockedContainer: {
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 28,
-    paddingHorizontal: 20,
+    paddingVertical: 40,
+    paddingHorizontal: 24,
   },
   blockedTitle: {
-    color: "rgba(255,255,255,0.85)",
     fontSize: 17,
     fontWeight: "700",
     marginBottom: 8,
   },
   blockedSubtext: {
-    color: "rgba(255,255,255,0.5)",
     fontSize: 13,
     textAlign: "center",
     lineHeight: 19,
@@ -330,66 +456,86 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingVertical: 4,
+    paddingHorizontal: 16,
   },
   row: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 8,
+    paddingVertical: 10,
+    height: 64,
   },
-  avatarWrapper: {
-    marginRight: 10,
+  avatarWrap: {
+    marginRight: 12,
   },
   avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 999,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
   },
   avatarFallback: {
-    width: 40,
-    height: 40,
-    borderRadius: 999,
-    backgroundColor: "rgba(120,120,255,0.25)",
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: "center",
     justifyContent: "center",
   },
   avatarFallbackText: {
-    color: "rgba(255,255,255,0.9)",
-    fontSize: 18,
-    fontWeight: "600",
+    fontSize: 20,
+    fontWeight: "700",
   },
   info: {
     flex: 1,
     paddingRight: 8,
   },
   name: {
-    color: "rgba(255,255,255,0.95)",
     fontSize: 14,
-    fontWeight: "500",
+    fontWeight: "600",
   },
   username: {
-    color: "rgba(200,200,255,0.7)",
-    fontSize: 12,
+    fontSize: 13,
     marginTop: 1,
   },
-  badge: {
+  crushBadge: {
     paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,128,192,0.18)",
+    borderRadius: 12,
+    backgroundColor: "rgba(255,128,192,0.15)",
+    marginRight: 8,
   },
-  badgeText: {
+  crushBadgeText: {
     color: "rgba(255,180,220,0.95)",
     fontSize: 11,
-    fontWeight: "500",
+    fontWeight: "600",
   },
-  closeButton: {
-    marginTop: 8,
-    alignSelf: "center",
+  profileBtn: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+  profileBtnText: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  // Skeleton
+  skeletonRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    width: "100%",
   },
-  closeButtonText: {
-    color: "rgba(255,255,255,0.8)",
-    fontSize: 14,
+  skeletonCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    marginRight: 12,
+  },
+  skeletonText: {
+    flex: 1,
+  },
+  skeletonLine: {
+    height: 12,
+    borderRadius: 6,
   },
 });

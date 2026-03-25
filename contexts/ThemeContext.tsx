@@ -13,14 +13,14 @@ type ThemeContextValue = {
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
 
 const STORAGE_KEY = "@lupyy:themeId";
-const ALLOWED_THEME_IDS: ThemeId[] = ["softdream", "nebulaflow"];
+const ALLOWED_THEME_IDS: ThemeId[] = ["aurora", "frost", "ember", "ocean", "neon", "midnight"];
 
 function sanitizeThemeId(id: ThemeId): ThemeId {
-  return ALLOWED_THEME_IDS.includes(id) ? id : "nebulaflow";
+  return ALLOWED_THEME_IDS.includes(id) ? id : "midnight";
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [themeId, setThemeIdState] = useState<ThemeId>("nebulaflow");
+  const [themeId, setThemeIdState] = useState<ThemeId>("midnight");
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {

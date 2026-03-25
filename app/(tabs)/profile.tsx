@@ -36,9 +36,16 @@ import FollowModal from "@/components/FollowModal";
 import FullscreenViewer, { ViewerItem } from "@/components/FullscreenViewer";
 import MatchCelebration from "@/components/MatchCelebration";
 import PeopleListSheet from "@/components/PeopleListSheet";
+import ProfileHighlightEditor from "@/components/ProfileHighlightEditor";
 import ThemeSelector from "@/components/ThemeSelector";
 import { useTheme } from "@/contexts/ThemeContext";
 import { ConversationType, getOrCreateConversation } from "@/lib/conversations";
+import {
+  type Highlight,
+  fetchHighlightItems,
+  fetchPostViewCounts,
+  fetchUserHighlights
+} from "@/lib/profileHighlights";
 import { setFollowInterestType } from "@/lib/social";
 import { useIsMobileWeb } from "@/lib/useIsMobileWeb";
 
@@ -226,6 +233,12 @@ export default function Profile() {
   const [refreshing, setRefreshing] = useState(false);
 
   const [highlightCover, setHighlightCover] = useState<string | null>(null);
+  const [highlights, setHighlights] = useState<Highlight[]>([]);
+  const [highlightEditorVisible, setHighlightEditorVisible] = useState(false);
+  const [editingHighlight, setEditingHighlight] = useState<Highlight | null>(null);
+  const [highlightViewerOpen, setHighlightViewerOpen] = useState(false);
+  const [highlightViewerItems, setHighlightViewerItems] = useState<StoryItem[]>([]);
+  const [viewCounts, setViewCounts] = useState<Record<number, number>>({});
 
   const loadingRef = useRef(false);
   const pageRef = useRef(0);
@@ -622,6 +635,12 @@ export default function Profile() {
       }
 
       await loadStories(targetUserId);
+
+      // Load highlights
+      try {
+        const hl = await fetchUserHighlights(targetUserId);
+        setHighlights(hl);
+      } catch { setHighlights([]); }
     } finally {
       setLoadingHeader(false);
     }
@@ -678,6 +697,7 @@ export default function Profile() {
 
         const mapped = await Promise.all(
           (rows ?? []).map(async (p: DbPost) => {
+            // For video grid: use thumbnail if available, otherwise DON'T show video URL as image
             const gridUrl = await pathToUsableUrl(gridPath(p));
             const mediaUrl = await pathToUsableUrl(p.image_path);
 
@@ -685,11 +705,22 @@ export default function Profile() {
               ...p,
               image_url: gridUrl,
               media_url: mediaUrl,
+              // Mark if thumbnail is missing for videos (to show fallback in grid)
+              _hasThumb: p.media_type !== "video" || !!p.thumbnail_path,
             } as UiPost;
           }),
         );
 
         setPosts((prev) => (reset ? mapped : [...prev, ...mapped]));
+
+        // Fetch view counts for video posts
+        const videoIds = mapped.filter((p) => p.media_type === "video").map((p) => p.id);
+        if (videoIds.length > 0) {
+          try {
+            const vc = await fetchPostViewCounts(videoIds);
+            setViewCounts((prev) => ({ ...prev, ...vc }));
+          } catch {}
+        }
 
         const ids = mapped.map((p) => p.id);
         if (ids.length) {
@@ -809,25 +840,40 @@ export default function Profile() {
     }
   }, [userId, isOwnProfile]);
 
-  const handlePickHighlight = useCallback(async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert("Permissão necessária", "Precisamos de acesso às suas fotos para criar destaques.");
+  const handlePickHighlight = useCallback(() => {
+    // Open the highlight editor to create a new highlight from archived stories
+    setEditingHighlight(null);
+    setHighlightEditorVisible(true);
+  }, []);
+
+  const handleOpenHighlight = useCallback(async (hl: Highlight) => {
+    // Fetch highlight items and open the story viewer
+    const items = await fetchHighlightItems(hl.id);
+    if (items.length === 0) {
+      Alert.alert("Destaque vazio", "Este destaque não tem stories.");
       return;
     }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [9, 16],
-      quality: 0.8,
-    });
-
-    if (result.canceled) return;
-
-    const asset = result.assets[0];
-    setHighlightCover(asset.uri);
+    const storyItems: StoryItem[] = items.map((i) => ({
+      id: i.story_id,
+      media_type: i.media_type as "image" | "video",
+      media_url: i.media_url,
+      filter: i.filter,
+      createdAt: i.story_created_at,
+    }));
+    setHighlightViewerItems(storyItems);
+    setHighlightViewerOpen(true);
   }, []);
+
+  const handleEditHighlight = useCallback((hl: Highlight) => {
+    setEditingHighlight(hl);
+    setHighlightEditorVisible(true);
+  }, []);
+
+  const handleHighlightSaved = useCallback(async () => {
+    if (!userId) return;
+    const hl = await fetchUserHighlights(userId);
+    setHighlights(hl);
+  }, [userId]);
 
   const handleSaveProfile = useCallback(async () => {
     if (!userId || !isOwnProfile) return;
@@ -1394,17 +1440,78 @@ export default function Profile() {
   }, [userId, loadPage, loadStories]);
 
   const renderItem = useCallback(
-    ({ item, index }: { item: UiPost; index: number }) => (
-      <TouchableOpacity style={styles.cell} activeOpacity={0.8} onPress={() => openPostFromGrid(index)}>
-        <ExpoImage source={{ uri: item.image_url }} style={styles.item} contentFit="cover" cachePolicy="disk" />
-        {item.media_type === "video" && (
-          <View style={styles.playBadge}>
-            <Text style={styles.playText}>▶︎</Text>
-          </View>
-        )}
-      </TouchableOpacity>
-    ),
+    ({ item, index }: { item: UiPost; index: number }) => {
+      const isVideo = item.media_type === "video";
+      const hasThumb = (item as any)._hasThumb !== false;
+
+      return (
+        <TouchableOpacity style={styles.cell} activeOpacity={0.8} onPress={() => openPostFromGrid(index)}>
+          {isVideo && !hasThumb ? (
+            // Video without thumbnail — show gradient placeholder instead of black
+            <LinearGradient
+              colors={["#1a1a2e", "#16213e"]}
+              style={[styles.item, { alignItems: "center", justifyContent: "center" }]}
+            >
+              <Text style={{ color: "rgba(255,255,255,0.7)", fontSize: 28 }}>▶</Text>
+            </LinearGradient>
+          ) : (
+            <ExpoImage source={{ uri: item.image_url }} style={styles.item} contentFit="cover" cachePolicy="disk" />
+          )}
+          {isVideo && (
+            <View style={styles.playBadge}>
+              <Text style={styles.playText}>▶︎</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      );
+    },
     [openPostFromGrid],
+  );
+
+  // Render for videos/reels tab — with view count overlay
+  const renderReelItem = useCallback(
+    ({ item, index }: { item: UiPost; index: number }) => {
+      const hasThumb = (item as any)._hasThumb !== false;
+      const views = viewCounts[item.id] ?? 0;
+
+      // Find the index in currentPosts for the viewer
+      const realIndex = posts.filter((p) => p.media_type === "video").indexOf(item);
+
+      return (
+        <TouchableOpacity
+          style={[styles.cell, { height: ITEM * 1.4 }]}
+          activeOpacity={0.8}
+          onPress={() => {
+            const videoIndex = reelsPosts.indexOf(item);
+            if (videoIndex >= 0) {
+              setViewerIndex(videoIndex);
+              setViewerOpen(true);
+            }
+          }}
+        >
+          {!hasThumb ? (
+            <LinearGradient
+              colors={["#1a1a2e", "#16213e"]}
+              style={[styles.item, { alignItems: "center", justifyContent: "center" }]}
+            >
+              <Text style={{ color: "rgba(255,255,255,0.7)", fontSize: 28 }}>▶</Text>
+            </LinearGradient>
+          ) : (
+            <ExpoImage source={{ uri: item.image_url }} style={styles.item} contentFit="cover" cachePolicy="disk" />
+          )}
+          {/* Gradient overlay at bottom */}
+          <LinearGradient
+            colors={["transparent", "rgba(0,0,0,0.6)"]}
+            style={styles.reelOverlay}
+          >
+            <View style={styles.reelOverlayContent}>
+              <Text style={styles.reelViewsText}>▶ {views > 0 ? views.toLocaleString("pt-BR") : "—"}</Text>
+            </View>
+          </LinearGradient>
+        </TouchableOpacity>
+      );
+    },
+    [viewCounts, posts, openPostFromGrid],
   );
 
   const handleRefresh = useCallback(() => {
@@ -2358,23 +2465,59 @@ export default function Profile() {
           </Text>
         </View>
 
-        <View style={styles.highlightsRow}>
-          <TouchableOpacity style={styles.highlightItem} onPress={handlePickHighlight} activeOpacity={0.8}>
-            <View style={[styles.highlightCircle, { borderColor: theme.colors.border }]}>
-              {highlightCover ? (
-                <ExpoImage
-                  source={{ uri: highlightCover }}
-                  style={styles.highlightImage}
-                  contentFit="cover"
-                  cachePolicy="disk"
-                />
-              ) : (
+        {/* ── HIGHLIGHTS ROW ── */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.highlightsRow}
+        >
+          {/* "Novo" button — only for own profile */}
+          {isOwnProfile && (
+            <TouchableOpacity style={styles.highlightItem} onPress={handlePickHighlight} activeOpacity={0.8}>
+              <View style={[styles.highlightCircle, { borderColor: theme.colors.border }]}>
                 <Text style={[styles.highlightPlus, { color: theme.colors.text }]}>＋</Text>
-              )}
-            </View>
-            <Text style={[styles.highlightLabel, { color: theme.colors.text }]}>Novo</Text>
-          </TouchableOpacity>
-        </View>
+              </View>
+              <Text style={[styles.highlightLabel, { color: theme.colors.textMuted }]}>Novo</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Existing highlights */}
+          {highlights.map((hl) => (
+            <TouchableOpacity
+              key={hl.id}
+              style={styles.highlightItem}
+              activeOpacity={0.8}
+              onPress={() => handleOpenHighlight(hl)}
+              onLongPress={isOwnProfile ? () => handleEditHighlight(hl) : undefined}
+            >
+              <View style={[styles.highlightCircle, { borderColor: theme.colors.border }]}>
+                {hl.cover_url ? (
+                  <ExpoImage
+                    source={{ uri: hl.cover_url }}
+                    style={styles.highlightImage}
+                    contentFit="cover"
+                    cachePolicy="disk"
+                  />
+                ) : (
+                  <LinearGradient
+                    colors={[Colors.brandStart, Colors.brandEnd]}
+                    style={[styles.highlightImage, { alignItems: "center", justifyContent: "center" }]}
+                  >
+                    <Text style={{ color: "#fff", fontSize: 18, fontWeight: "700" }}>
+                      {hl.title?.[0]?.toUpperCase() || "D"}
+                    </Text>
+                  </LinearGradient>
+                )}
+              </View>
+              <Text
+                style={[styles.highlightLabel, { color: theme.colors.text }]}
+                numberOfLines={1}
+              >
+                {hl.title}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
 
         <View style={[styles.tabsRow, { borderTopColor: theme.colors.border }]}>
           <TouchableOpacity
@@ -2450,10 +2593,11 @@ export default function Profile() {
           <FlatList
             data={currentPosts}
             keyExtractor={(it) => String(it.id)}
-            numColumns={3}
+            numColumns={activeTab === "reels" ? 2 : 3}
+            key={activeTab === "reels" ? "reels-2col" : "grid-3col"}
             columnWrapperStyle={{ gap: GAP }}
             contentContainerStyle={styles.list}
-            renderItem={renderItem}
+            renderItem={activeTab === "reels" ? renderReelItem : renderItem}
             refreshControl={
               <RefreshControl
                 refreshing={refreshing}
@@ -2664,6 +2808,28 @@ export default function Profile() {
               setMatchCelebrationVisible(false);
               openConversation("crush");
             }}
+          />
+
+          {/* ── HIGHLIGHT EDITOR ── */}
+          {isOwnProfile && (
+            <ProfileHighlightEditor
+              visible={highlightEditorVisible}
+              userId={authUserId ?? ""}
+              highlight={editingHighlight}
+              onClose={() => {
+                setHighlightEditorVisible(false);
+                setEditingHighlight(null);
+              }}
+              onSaved={handleHighlightSaved}
+            />
+          )}
+
+          {/* ── HIGHLIGHT VIEWER (Story format) ── */}
+          <StoryViewer
+            visible={highlightViewerOpen}
+            items={highlightViewerItems}
+            startIndex={0}
+            onClose={() => setHighlightViewerOpen(false)}
           />
         </>
       )}
@@ -3104,6 +3270,25 @@ const styles = StyleSheet.create({
   playText: {
     color: "#fff",
     fontSize: 10,
+    fontWeight: "700",
+  },
+  // ── REELS/VIDEO TAB STYLES ──
+  reelOverlay: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 8,
+    paddingBottom: 6,
+    paddingTop: 20,
+  },
+  reelOverlayContent: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  reelViewsText: {
+    color: "rgba(255,255,255,0.9)",
+    fontSize: 12,
     fontWeight: "700",
   },
   btn: {
