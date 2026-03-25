@@ -87,7 +87,7 @@ function _PostCard(props: PostCardProps) {
 
   const player = useVideoPlayer(media_url, (p) => {
     p.loop = true;
-    p.muted = isWeb ? false : !!muted;
+    p.muted = !!muted;
   });
 
   const [paused, setPaused] = useState(!isVisible);

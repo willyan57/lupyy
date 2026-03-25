@@ -13,6 +13,7 @@ import {
   Alert,
   Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -27,84 +28,45 @@ import {
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 
+/* ─── Types ─── */
 type Tribe = {
-  id: string;
-  name: string;
-  description: string | null;
-  category: string | null;
-  cover_url: string | null;
-  members_count: number;
-  is_public: boolean;
-  created_at: string;
-  owner_id: string;
+  id: string; name: string; description: string | null; category: string | null;
+  cover_url: string | null; members_count: number; is_public: boolean;
+  created_at: string; owner_id: string;
 };
-
 type TribePost = {
-  id: string;
-  tribe_id: string;
-  user_id: string;
-  content: string | null;
-  media_url: string | null;
-  created_at: string;
+  id: string; tribe_id: string; user_id: string; content: string | null;
+  media_url: string | null; created_at: string;
+  // enriched
+  username?: string | null; avatar_url?: string | null; full_name?: string | null;
 };
-
 type TribeChannel = {
-  id: string;
-  tribe_id: string;
-  name: string;
-  slug: string;
-  description: string | null;
-  type: string;
-  is_private: boolean;
-  created_by: string | null;
-  created_at: string;
+  id: string; tribe_id: string; name: string; slug: string;
+  description: string | null; type: string; is_private: boolean;
+  created_by: string | null; created_at: string;
 };
-
 type TribeMessage = {
-  id: string;
-  tribe_id: string;
-  channel_id: string;
-  user_id: string;
-  content: string;
-  created_at: string;
-  is_deleted?: boolean;
-  deleted_by_role?: "owner" | "moderator";
-  deleted_at?: string;
+  id: string; tribe_id: string; channel_id: string; user_id: string;
+  content: string; created_at: string; is_deleted?: boolean;
+  deleted_by_role?: "owner" | "moderator"; deleted_at?: string;
   reactions?: { emoji: string; count: number }[];
+  // enriched
+  username?: string | null; avatar_url?: string | null; full_name?: string | null;
 };
-
-type TribeMessageDeletion = {
-  message_id: string;
-  tribe_id: string;
-  channel_id: string;
-  deleted_by: string;
-  deleted_by_role: "owner" | "moderator";
-  deleted_at: string;
-};
-
-type TribeMessageReaction = {
-  message_id: string;
-  tribe_id: string;
-  channel_id: string;
-  user_id: string;
-  emoji: string;
-  created_at: string;
-};
-
-
-
 type TribeMemberDetailed = {
-  tribe_id: string;
-  user_id: string;
-  role: "owner" | "moderator" | "member";
-  joined_at: string;
-  username: string | null;
-  full_name: string | null;
-  avatar_url: string | null;
+  tribe_id: string; user_id: string; role: "owner" | "moderator" | "member";
+  joined_at: string; username: string | null; full_name: string | null; avatar_url: string | null;
 };
-
 
 type TabKey = "feed" | "chat" | "ranking" | "about" | "members";
+
+const TAB_ICONS: Record<TabKey, string> = {
+  feed: "newspaper-outline",
+  chat: "chatbubbles-outline",
+  ranking: "trophy-outline",
+  members: "people-outline",
+  about: "information-circle-outline",
+};
 
 const tabs: { key: TabKey; label: string }[] = [
   { key: "feed", label: "Feed" },
@@ -114,80 +76,69 @@ const tabs: { key: TabKey; label: string }[] = [
   { key: "about", label: "Sobre" },
 ];
 
+const EMOJI_LIST = ["👍", "❤️", "😂", "🔥", "😮", "😢", "🎉", "💯"];
+
+/* ─── Helpers ─── */
+const notify = (title: string, msg: string) => {
+  if (Platform.OS === "web") { window.alert(`${title}\n\n${msg}`); return; }
+  Alert.alert(title, msg);
+};
+
 export default function TribeScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-
-  const goBackToTribes = () => {
-    try {
-      router.replace("/tribes" as any);
-    } catch (e) {
-      // fallback
-      try {
-        router.push("/tribes" as any);
-      } catch {}
-    }
-  };
   const insets = useSafeAreaInsets();
   const { theme } = useTheme();
   const { width, height } = useWindowDimensions();
   const isLargeWeb = Platform.OS === "web" && width >= 1024;
+  const chatScrollRef = useRef<ScrollView>(null);
 
-const getCoverUri = (raw: string | null) => {
-  if (!raw) return null;
-  const v = String(raw);
-  if (v.startsWith("http://") || v.startsWith("https://")) return v;
-  const { data } = supabase.storage.from("tribes").getPublicUrl(v);
-  return data?.publicUrl ?? null;
-};
+  const goBackToTribes = () => {
+    try { router.replace("/tribes" as any); } catch { try { router.push("/tribes" as any); } catch {} }
+  };
 
+  const getCoverUri = (raw: string | null) => {
+    if (!raw) return null;
+    const v = String(raw);
+    if (v.startsWith("http://") || v.startsWith("https://")) return v;
+    const { data } = supabase.storage.from("tribes").getPublicUrl(v);
+    return data?.publicUrl ?? null;
+  };
 
-const guessContentTypeFromExt = (ext: string) => {
-  const e = ext.toLowerCase();
-  if (e === "png") return "image/png";
-  if (e === "webp") return "image/webp";
-  if (e === "gif") return "image/gif";
-  return "image/jpeg";
-};
+  const guessContentTypeFromExt = (ext: string) => {
+    const e = ext.toLowerCase();
+    if (e === "png") return "image/png";
+    if (e === "webp") return "image/webp";
+    return "image/jpeg";
+  };
 
-const prepareCoverImage = async (uri: string) => {
-  try {
-    const out = await ImageManipulator.manipulateAsync(
-      uri,
-      [{ resize: { width: 1600 } }],
-      { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
-    );
-    return { uri: out.uri, ext: "jpg", contentType: "image/jpeg" };
-  } catch {
-    const clean = uri.split("?")[0];
-    const ext = (clean.split(".").pop() || "jpg").toLowerCase();
-    return { uri, ext, contentType: guessContentTypeFromExt(ext) };
-  }
-};
-
-const uriToUploadBody = async (uri: string) => {
-  if (Platform.OS === "web") {
-    const resp = await fetch(uri);
-    const blob = await resp.blob();
-    const ct = (blob as any)?.type || "image/jpeg";
-    return { body: blob as any, contentType: ct };
-  }
-
-  let readUri = uri;
-  if (readUri.startsWith("content://")) {
-    const target = `${FileSystem.cacheDirectory || ""}tribe_cover_${Date.now()}`;
+  const prepareCoverImage = async (uri: string) => {
     try {
-      await FileSystem.copyAsync({ from: readUri, to: target });
-      readUri = target;
-    } catch {}
-  }
+      const out = await ImageManipulator.manipulateAsync(uri, [{ resize: { width: 1600 } }], { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG });
+      return { uri: out.uri, ext: "jpg", contentType: "image/jpeg" };
+    } catch {
+      const clean = uri.split("?")[0];
+      const ext = (clean.split(".").pop() || "jpg").toLowerCase();
+      return { uri, ext, contentType: guessContentTypeFromExt(ext) };
+    }
+  };
 
-  const base64 = await FileSystem.readAsStringAsync(readUri, { encoding: FileSystem.EncodingType.Base64 });
-  const buffer = Buffer.from(base64, "base64");
-  return { body: buffer as any, contentType: null as any };
-};
+  const uriToUploadBody = async (uri: string) => {
+    if (Platform.OS === "web") {
+      const resp = await fetch(uri);
+      const blob = await resp.blob();
+      return { body: blob as any, contentType: (blob as any)?.type || "image/jpeg" };
+    }
+    let readUri = uri;
+    if (readUri.startsWith("content://")) {
+      const target = `${FileSystem.cacheDirectory || ""}tribe_cover_${Date.now()}`;
+      try { await FileSystem.copyAsync({ from: readUri, to: target }); readUri = target; } catch {}
+    }
+    const base64 = await FileSystem.readAsStringAsync(readUri, { encoding: FileSystem.EncodingType.Base64 });
+    return { body: Buffer.from(base64, "base64") as any, contentType: null as any };
+  };
 
-
+  /* ─── State ─── */
   const [tribe, setTribe] = useState<Tribe | null>(null);
   const [loading, setLoading] = useState(true);
   const [joining, setJoining] = useState(false);
@@ -195,34 +146,34 @@ const uriToUploadBody = async (uri: string) => {
   const [membershipLoading, setMembershipLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("feed");
-  const chatScrollRef = useRef<ScrollView>(null);
 
   const [isOwner, setIsOwner] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [myRole, setMyRole] = useState<"owner" | "moderator" | "member" | null>(null);
   const [canManageMembers, setCanManageMembers] = useState(false);
   const [canManageChannels, setCanManageChannels] = useState(false);
   const [canManageRoles, setCanManageRoles] = useState(false);
   const [canManageMessages, setCanManageMessages] = useState(false);
 
-const [myRole, setMyRole] = useState<"owner" | "moderator" | "member" | null>(null);
+  const [uploadingCover, setUploadingCover] = useState(false);
+  const [coverActionsVisible, setCoverActionsVisible] = useState(false);
+  const canManageCover = myRole === "owner" || myRole === "moderator";
 
-const [uploadingCover, setUploadingCover] = useState(false);
-const [coverActionsVisible, setCoverActionsVisible] = useState(false);
+  // Members
+  const [members, setMembers] = useState<TribeMemberDetailed[]>([]);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [memberModalVisible, setMemberModalVisible] = useState(false);
+  const [selectedMember, setSelectedMember] = useState<TribeMemberDetailed | null>(null);
 
-// MEMBERS
-const [members, setMembers] = useState<TribeMemberDetailed[]>([]);
-const [membersLoading, setMembersLoading] = useState(false);
-const [memberModalVisible, setMemberModalVisible] = useState(false);
-const [selectedMember, setSelectedMember] = useState<TribeMemberDetailed | null>(null);
+  // Profiles cache
+  const profilesCache = useRef<Map<string, { username: string | null; avatar_url: string | null; full_name: string | null }>>(new Map());
 
-
-  // FEED
+  // Feed
   const [posts, setPosts] = useState<TribePost[]>([]);
   const [postsLoading, setPostsLoading] = useState(false);
   const [creatingPost, setCreatingPost] = useState(false);
   const [newPostContent, setNewPostContent] = useState("");
 
-  // CHAT
+  // Chat
   const [channels, setChannels] = useState<TribeChannel[]>([]);
   const [channelsLoading, setChannelsLoading] = useState(false);
   const [activeChannelId, setActiveChannelId] = useState<string | null>(null);
@@ -230,153 +181,95 @@ const [selectedMember, setSelectedMember] = useState<TribeMemberDetailed | null>
   const [chatLoading, setChatLoading] = useState(false);
   const [sendingChat, setSendingChat] = useState(false);
   const [newChatMessage, setNewChatMessage] = useState("");
-
   const [messageActionsVisible, setMessageActionsVisible] = useState(false);
   const [selectedMessage, setSelectedMessage] = useState<TribeMessage | null>(null);
   const [emojiPickerVisible, setEmojiPickerVisible] = useState(false);
   const [replyingTo, setReplyingTo] = useState<TribeMessage | null>(null);
-
-
   const [channelModalVisible, setChannelModalVisible] = useState(false);
   const [newChannelName, setNewChannelName] = useState("");
   const [newChannelType, setNewChannelType] = useState<"text" | "voice">("text");
 
+  /* ─── Profile enrichment ─── */
+  const enrichWithProfiles = async <T extends { user_id: string }>(items: T[]): Promise<(T & { username?: string | null; avatar_url?: string | null; full_name?: string | null })[]> => {
+    const uncached = items.filter(i => !profilesCache.current.has(i.user_id)).map(i => i.user_id);
+    const unique = [...new Set(uncached)];
+    if (unique.length > 0) {
+      const { data } = await supabase.from("profiles").select("id, username, avatar_url, full_name").in("id", unique);
+      (data || []).forEach((p: any) => {
+        profilesCache.current.set(p.id, { username: p.username, avatar_url: p.avatar_url, full_name: p.full_name });
+      });
+    }
+    return items.map(i => {
+      const p = profilesCache.current.get(i.user_id);
+      return { ...i, username: p?.username ?? null, avatar_url: p?.avatar_url ?? null, full_name: p?.full_name ?? null };
+    });
+  };
 
-  // ---------- CARREGAR TRIBO ----------
+  /* ─── Load tribe ─── */
   useEffect(() => {
     if (!id) return;
-
     let isMounted = true;
-
     const load = async () => {
       setLoading(true);
-
       const { data: authData } = await supabase.auth.getUser();
       const currentUserId = authData?.user?.id ?? null;
       if (isMounted) setUserId(currentUserId);
-
-      const { data: tribeData, error: tribeError } = await supabase
-        .from("tribes")
-        .select("*")
-        .eq("id", id)
-        .single();
-
-      if (tribeError) {
-        setLoading(false);
-        return;
-      }
-
-      if (isMounted && tribeData) {
-        setTribe(tribeData as Tribe);
-        // sempre pega contagem real de membros (evita ficar 1 na web)
-        refreshMembersCount(id as string);
-      }
-
+      const { data: tribeData, error: tribeError } = await supabase.from("tribes").select("*").eq("id", id).single();
+      if (tribeError) { setLoading(false); return; }
+      if (isMounted && tribeData) { setTribe(tribeData as Tribe); refreshMembersCount(id as string); }
       if (isMounted) setLoading(false);
     };
-
     load();
-
-    return () => {
-      isMounted = false;
-    };
+    return () => { isMounted = false; };
   }, [id]);
 
-  // ---------- MEMBERSHIP + FEED ----------
+  /* ─── Membership + Posts ─── */
   useEffect(() => {
     if (!id) return;
-
     let isMounted = true;
-
     const loadMembershipAndPosts = async () => {
       setMembershipLoading(true);
       const { data: authData } = await supabase.auth.getUser();
       const currentUserId = authData?.user?.id ?? null;
-
       if (currentUserId && isMounted) {
-        const { data: membershipData, error: membershipErr } = await supabase
-          .from("tribe_members")
-          .select("role")
-          .eq("tribe_id", id)
-          .eq("user_id", currentUserId)
-          .maybeSingle();
-
+        const { data: membershipData, error: membershipErr } = await supabase.from("tribe_members").select("role").eq("tribe_id", id).eq("user_id", currentUserId).maybeSingle();
         const memberExists = !!membershipData && !membershipErr;
-        if (isMounted) {
-          setIsMember(memberExists);
-        }
-
+        if (isMounted) setIsMember(memberExists);
         if (memberExists) {
-          const role = (membershipData as any)?.role as
-            | "owner"
-            | "moderator"
-            | "member"
-            | undefined;
-
-          const safeRole =
-            role === "owner" || role === "moderator" || role === "member"
-              ? role
-              : "member";
-
+          const role = (membershipData as any)?.role as "owner" | "moderator" | "member" | undefined;
+          const safeRole = role === "owner" || role === "moderator" || role === "member" ? role : "member";
           if (isMounted) {
-            setMyRole(safeRole);
-            const owner = safeRole === "owner";
-            const moderator = safeRole === "moderator";
-
-            setIsOwner(owner);
-            setIsAdmin(owner || moderator);
-            setCanManageMembers(owner || moderator);
-            setCanManageChannels(owner || moderator);
-            setCanManageRoles(owner);
-            setCanManageMessages(owner || moderator);
+            setMyRole(safeRole); setIsOwner(safeRole === "owner");
+            const admin = safeRole === "owner" || safeRole === "moderator";
+            setCanManageMembers(admin); setCanManageChannels(admin);
+            setCanManageRoles(safeRole === "owner"); setCanManageMessages(admin);
           }
         } else if (isMounted) {
-          setMyRole(null);
-          setIsOwner(false);
-          setIsAdmin(false);
-          setCanManageMembers(false);
-          setCanManageChannels(false);
-          setCanManageRoles(false);
-          setCanManageMessages(false);
+          setMyRole(null); setIsOwner(false); setCanManageMembers(false);
+          setCanManageChannels(false); setCanManageRoles(false); setCanManageMessages(false);
         }
       }
-
       setPostsLoading(true);
-      const { data: postsData } = await supabase
-        .from("tribe_posts")
-        .select("*")
-        .eq("tribe_id", id)
-        .order("created_at", { ascending: false });
-
+      const { data: postsData } = await supabase.from("tribe_posts").select("*").eq("tribe_id", id).order("created_at", { ascending: false });
       if (isMounted && postsData) {
-        setPosts(postsData as TribePost[]);
+        const enriched = await enrichWithProfiles(postsData as TribePost[]);
+        setPosts(enriched);
       }
-      if (isMounted) setPostsLoading(false);
-      if (isMounted) setMembershipLoading(false);
+      if (isMounted) { setPostsLoading(false); setMembershipLoading(false); }
     };
-
     loadMembershipAndPosts();
-
-    return () => {
-      isMounted = false;
-    };
+    return () => { isMounted = false; };
   }, [id]);
 
+  /* ─── Channels ─── */
   const loadChannels = async (opts?: { forceSelectFirst?: boolean; selectChannelId?: string | null }) => {
     if (!id) return;
     setChannelsLoading(true);
-    const { data, error } = await supabase
-      .from("tribe_channels")
-      .select("*")
-      .eq("tribe_id", id)
-      .order("created_at", { ascending: true });
-
+    const { data, error } = await supabase.from("tribe_channels").select("*").eq("tribe_id", id).order("created_at", { ascending: true });
     if (!error && data) {
       const list = data as TribeChannel[];
       setChannels(list);
-
       const desired = opts?.selectChannelId ?? null;
-
       setActiveChannelId((prev) => {
         if (desired) return desired;
         if (!prev || opts?.forceSelectFirst) {
@@ -384,10 +277,7 @@ const [selectedMember, setSelectedMember] = useState<TribeMemberDetailed | null>
           return geral ? geral.id : null;
         }
         const stillExists = list.some((c) => c.id === prev);
-        if (!stillExists) {
-          const geral = list.find((c) => c.slug === "geral") ?? (list.length > 0 ? list[0] : null);
-          return geral ? geral.id : null;
-        }
+        if (!stillExists) { const geral = list.find((c) => c.slug === "geral") ?? (list.length > 0 ? list[0] : null); return geral ? geral.id : null; }
         return prev;
       });
     }
@@ -395,1557 +285,780 @@ const [selectedMember, setSelectedMember] = useState<TribeMemberDetailed | null>
   };
 
   const createChannel = async () => {
-    if (!id) return;
-    if (!canManageChannels) return;
-
+    if (!id || !canManageChannels) return;
     const cleanName = newChannelName.trim();
     if (!cleanName.length) return;
-
-    const slug = cleanName
-      .toLowerCase()
-      .replace(/[^a-z0-9\s-]/g, "")
-      .replace(/\s+/g, "-")
-      .replace(/-+/g, "-")
-      .replace(/^-|-$/g, "");
-
+    const slug = cleanName.toLowerCase().replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
     const { data: authData } = await supabase.auth.getUser();
     const currentUserId = authData?.user?.id ?? userId ?? null;
-
-    const { data, error } = await supabase
-      .from("tribe_channels")
-      .insert({
-        tribe_id: id,
-        name: cleanName,
-        slug: slug || "canal",
-        type: newChannelType,
-        is_private: false,
-        created_by: currentUserId,
-      } as any)
-      .select("id")
-      .single();
-
-    if (error) {
-      Alert.alert("Ops", (error as any)?.message || "Não foi possível criar o canal.");
-      return;
-    }
-
-    setChannelModalVisible(false);
-    setNewChannelName("");
-    setNewChannelType("text");
-
+    const { data, error } = await supabase.from("tribe_channels").insert({
+      tribe_id: id, name: cleanName, slug: slug || "canal", type: newChannelType, is_private: false, created_by: currentUserId,
+    } as any).select("id").single();
+    if (error) { notify("Ops", (error as any)?.message || "Não foi possível criar o canal."); return; }
+    setChannelModalVisible(false); setNewChannelName(""); setNewChannelType("text");
     const newId = (data as any)?.id as string | undefined;
     await loadChannels({ selectChannelId: newId ?? null, forceSelectFirst: true });
   };
 
-  // ---------- CANAIS ----------
+  useEffect(() => { if (id) loadChannels(); }, [id]);
+
+  /* ─── Messages ─── */
   useEffect(() => {
-    if (!id) return;
+    if (!activeChannelId || !id) { setChatMessages([]); return; }
     let isMounted = true;
-
-    const run = async () => {
-      if (!isMounted) return;
-      await loadChannels();
-    };
-
-    run();
-
-    return () => {
-      isMounted = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
-  // ---------- MENSAGENS DO CANAL ATUAL ----------
-  useEffect(() => {
-    if (!activeChannelId || !id) {
-      setChatMessages([]);
-      return;
-    }
-
-    let isMounted = true;
-
     const loadMessages = async () => {
       setChatLoading(true);
-      const { data, error } = await supabase
-        .from("tribe_messages")
-        .select("*")
-        .eq("tribe_id", id)
-        .eq("channel_id", activeChannelId)
-        .order("created_at", { ascending: true });
-
+      const { data, error } = await supabase.from("tribe_messages").select("*").eq("tribe_id", id).eq("channel_id", activeChannelId).order("created_at", { ascending: true });
       if (!isMounted) return;
-
       if (!error && data) {
         const hydrated = await applyMessageMeta(data as TribeMessage[]);
         if (!isMounted) return;
-        setChatMessages(hydrated);
+        const enriched = await enrichWithProfiles(hydrated);
+        if (!isMounted) return;
+        setChatMessages(enriched);
       }
       setChatLoading(false);
     };
-
     loadMessages();
-
-    return () => {
-      isMounted = false;
-    };
+    return () => { isMounted = false; };
   }, [id, activeChannelId]);
 
-  // ---------- TEMPO REAL ----------
+  /* ─── Realtime ─── */
   useEffect(() => {
     if (!id) return;
-
-    const channel = supabase
-      .channel(`tribe_messages_${id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "tribe_messages",
-          filter: `tribe_id=eq.${id}`,
-        },
-        (payload: RealtimePostgresChangesPayload<TribeMessage>) => {
-          const newMsg = payload.new as TribeMessage;
-
-          if (!activeChannelId || newMsg.channel_id !== activeChannelId) {
-            return;
-          }
-
-          setChatMessages((prev) => {
-            if (prev.some((m) => m.id === newMsg.id)) return prev;
-            return [...prev, newMsg];
-          });
-        }
-      );
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    const channel = supabase.channel(`tribe_messages_${id}`).on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "tribe_messages", filter: `tribe_id=eq.${id}` },
+      async (payload: RealtimePostgresChangesPayload<TribeMessage>) => {
+        const newMsg = payload.new as TribeMessage;
+        if (!activeChannelId || newMsg.channel_id !== activeChannelId) return;
+        const [enriched] = await enrichWithProfiles([newMsg]);
+        setChatMessages((prev) => {
+          if (prev.some((m) => m.id === enriched.id)) return prev;
+          return [...prev, enriched];
+        });
+      }
+    );
+    return () => { supabase.removeChannel(channel); };
   }, [id, activeChannelId]);
 
-// ---------- MEMBROS ----------
-useEffect(() => {
-  if (!id) return;
+  /* ─── Members ─── */
+  useEffect(() => {
+    if (!id || !tribe) return;
+    let isMounted = true;
+    const loadMembers = async () => {
+      const canView = tribe.is_public || isMember;
+      if (!canView) { if (isMounted) setMembers([]); return; }
+      setMembersLoading(true);
+      const { data, error } = await supabase.from("view_tribe_members_detailed").select("*").eq("tribe_id", id).order("role", { ascending: true }).order("joined_at", { ascending: true });
+      if (!isMounted) return;
+      if (!error && data) setMembers(data as TribeMemberDetailed[]); else setMembers([]);
+      setMembersLoading(false);
+    };
+    if (activeTab === "members") loadMembers();
+    return () => { isMounted = false; };
+  }, [id, activeTab, isMember, tribe]);
 
-  let isMounted = true;
-
-  const loadMembers = async () => {
-    if (!tribe) return;
-
-    const canView = tribe.is_public || isMember;
-    if (!canView) {
-      if (isMounted) setMembers([]);
-      return;
-    }
-
-    setMembersLoading(true);
-
-    const { data, error } = await supabase
-      .from("view_tribe_members_detailed")
-      .select("*")
-      .eq("tribe_id", id)
-      .order("role", { ascending: true })
-      .order("joined_at", { ascending: true });
-
-    if (!isMounted) return;
-
-    if (!error && data) {
-      setMembers(data as TribeMemberDetailed[]);
-    } else {
-      setMembers([]);
-    }
-
-    setMembersLoading(false);
+  const refreshMembersCount = async (tribeId: string) => {
+    const { count } = await supabase.from("tribe_members").select("user_id", { count: "exact", head: true }).eq("tribe_id", tribeId);
+    if (typeof count === "number") setTribe((prev) => (prev ? { ...prev, members_count: count } : prev));
   };
 
-  if (activeTab === "members") {
-    loadMembers();
-  }
-
-  return () => {
-    isMounted = false;
-  };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [id, activeTab, isMember, tribe]);
-
-const roleLabel = (role: "owner" | "moderator" | "member") => {
-  if (role === "owner") return "Dono";
-  if (role === "moderator") return "Moderador";
-  return "Membro";
-};
-
-const canOpenMemberActions = () => {
-  return isMember && (myRole === "owner" || myRole === "moderator");
-};
-
-const openMemberModal = (m: TribeMemberDetailed) => {
-  if (!canOpenMemberActions()) return;
-  setSelectedMember(m);
-  setMemberModalVisible(true);
-};
-
-const closeMemberModal = () => {
-  setMemberModalVisible(false);
-  setSelectedMember(null);
-};
-
-const refreshMembersCount = async (tribeId: string) => {
-  const { count } = await supabase
-    .from("tribe_members")
-    .select("user_id", { count: "exact", head: true })
-    .eq("tribe_id", tribeId);
-
-  if (typeof count === "number") {
-    setTribe((prev) => (prev ? { ...prev, members_count: count } : prev));
-  }
-};
-
-const handleRemoveMember = async () => {
-  if (!tribe || !selectedMember) return;
-
-  const targetId = selectedMember.user_id;
-
-  if (!userId) return;
-  if (targetId === userId) return;
-  if (selectedMember.role === "owner") return;
-
-  const { error } = await supabase
-    .from("tribe_members")
-    .delete()
-    .eq("tribe_id", tribe.id)
-    .eq("user_id", targetId);
-
-  if (error) {
-    Alert.alert("Ops", error.message || "Não foi possível remover o membro.");
-    return;
-  }
-
-  setMembers((prev) => prev.filter((x) => x.user_id !== targetId));
-  setTribe({ ...tribe, members_count: Math.max(0, tribe.members_count - 1) });
-  closeMemberModal();
-};
-
-const handleSetMemberRole = async (role: "moderator" | "member") => {
-  if (!tribe || !selectedMember) return;
-
-  if (myRole !== "owner") return;
-
-  const targetId = selectedMember.user_id;
-
-  if (!userId) return;
-  if (targetId === userId) return;
-  if (selectedMember.role === "owner") return;
-
-  const { error } = await supabase
-    .from("tribe_members")
-    .update({ role } as any)
-    .eq("tribe_id", tribe.id)
-    .eq("user_id", targetId);
-
-  if (error) {
-    Alert.alert("Ops", error.message || "Não foi possível alterar o cargo.");
-    return;
-  }
-
-  setMembers((prev) =>
-    prev.map((x) => (x.user_id === targetId ? { ...x, role } : x))
-  );
-  setSelectedMember((prev) => (prev ? { ...prev, role } : prev));
-};
-
-  // ---------- AÇÕES ----------
-  const handleToggleMembership = async () => {
-  if (!tribe || joining) return;
-
-  const notify = (title: string, message: string) => {
-    if (Platform.OS === "web" && typeof window !== "undefined") {
-      // @ts-ignore
-      window.alert(`${title}
-
-${message}`);
-      return;
-    }
-    Alert.alert(title, message);
-  };
-
-  setJoining(true);
-  try {
-    let currentUserId = userId;
-
-    if (!currentUserId) {
-      const { data: authData, error: authErr } = await supabase.auth.getUser();
-      currentUserId = authData?.user?.id ?? null;
-      if (currentUserId) setUserId(currentUserId);
-      if (authErr || !currentUserId) {
-        notify("Entrar na tribo", "Você precisa estar logado para entrar na tribo.");
-        return;
-      }
-    }
-
-    if (isMember) {
-      const { error } = await supabase
-        .from("tribe_members")
-        .delete()
-        .eq("tribe_id", tribe.id)
-        .eq("user_id", currentUserId);
-
-      if (error) {
-        console.error("Erro ao sair da tribo:", error);
-        notify("Ops", (error as any)?.message || "Não foi possível sair da tribo. Tente novamente.");
-        return;
-      }
-
-      setIsMember(false);
-      await refreshMembersCount(tribe.id);
-      return;
-    }
-
-    const { error } = await supabase.from("tribe_members").insert({
-            tribe_id: tribe.id,
-            user_id: currentUserId,
-            role: "member",
-          } as any);
-
-    if (error) {
-      // se já existe membership, apenas sincroniza estado (evita duplicate key)
-      const code = (error as any)?.code;
-      const msg = (error as any)?.message as string | undefined;
-
-      if (code === "23505" || (msg && msg.toLowerCase().includes("duplicate key"))) {
-        setIsMember(true);
-        await refreshMembersCount(tribe.id);
-        return;
-      }
-
-      console.error("Erro ao entrar na tribo:", error);
-      notify("Ops", msg || "Não foi possível entrar na tribo. Tente novamente.");
-      return;
-    }
-
-    setIsMember(true);
-    await refreshMembersCount(tribe.id);
-  } finally {
-    setJoining(false);
-  }
-};
-
-  const handleCreatePost = async () => {
-    if (!tribe || !userId || !isMember || creatingPost) return;
-
-    const content = newPostContent.trim();
-    if (!content.length) return;
-
-    setCreatingPost(true);
-
-    const { data, error } = await supabase
-      .from("tribe_posts")
-      .insert({
-        tribe_id: tribe.id,
-        user_id: userId,
-        content,
-      } as any)
-      .select("*")
-      .single();
-
-    if (!error && data) {
-      setPosts((prev) => [data as TribePost, ...prev]);
-      setNewPostContent("");
-    }
-
-    setCreatingPost(false);
-  };
-
-  const handleSendChatMessage = async () => {
-    if (!tribe || !userId || !isMember || sendingChat) return;
-    if (!activeChannelId) return;
-
-    const content = newChatMessage.trim();
-    if (!content.length) return;
-
-    setSendingChat(true);
-
-    const { data, error } = await supabase
-      .from("tribe_messages")
-      .insert({
-        tribe_id: tribe.id,
-        channel_id: activeChannelId,
-        user_id: userId,
-        content: replyingTo
-          ? `↩︎ ${replyingTo.user_id === userId ? "Você" : "Membro"}: ${replyingTo.content.slice(0, 80)}\n${content}`
-          : content,
-      } as any)
-      .select("*")
-      .single();
-
-    if (!error && data) {
-      const inserted = data as TribeMessage;
-      setChatMessages((prev) => {
-        if (prev.some((m) => m.id === inserted.id)) return prev;
-        return [...prev, inserted];
-      });
-      setNewChatMessage("");
-      setReplyingTo(null);
-    }
-
-    setSendingChat(false);
-  };
-
+  /* ─── Message meta (deletions + reactions) ─── */
   const applyMessageMeta = async (base: TribeMessage[]) => {
     if (!id || !activeChannelId || base.length === 0) return base;
-
     const ids = base.map((m) => m.id);
-
     const [{ data: deletions }, { data: reactions }] = await Promise.all([
-      supabase
-        .from("tribe_message_deletions")
-        .select("message_id, deleted_by_role, deleted_at")
-        .in("message_id", ids),
-      supabase
-        .from("tribe_message_reactions")
-        .select("message_id, emoji")
-        .in("message_id", ids),
+      supabase.from("tribe_message_deletions").select("message_id, deleted_by_role, deleted_at").in("message_id", ids),
+      supabase.from("tribe_message_reactions").select("message_id, emoji").in("message_id", ids),
     ]);
-
-    const deletedMap = new Map<
-      string,
-      { deleted_by_role: "owner" | "moderator"; deleted_at: string }
-    >();
-    (deletions || []).forEach((d: any) => {
-      deletedMap.set(d.message_id, {
-        deleted_by_role: d.deleted_by_role,
-        deleted_at: d.deleted_at,
-      });
-    });
-
+    const deletedMap = new Map<string, { deleted_by_role: "owner" | "moderator"; deleted_at: string }>();
+    (deletions || []).forEach((d: any) => { deletedMap.set(d.message_id, { deleted_by_role: d.deleted_by_role, deleted_at: d.deleted_at }); });
     const reactionMap = new Map<string, Map<string, number>>();
     (reactions || []).forEach((r: any) => {
       const perMsg = reactionMap.get(r.message_id) || new Map<string, number>();
       perMsg.set(r.emoji, (perMsg.get(r.emoji) || 0) + 1);
       reactionMap.set(r.message_id, perMsg);
     });
-
     return base.map((m) => {
       const del = deletedMap.get(m.id);
       const per = reactionMap.get(m.id);
-      const summary = per
-        ? Array.from(per.entries()).map(([emoji, count]) => ({ emoji, count }))
-        : [];
-      return {
-        ...m,
-        is_deleted: !!del,
-        deleted_by_role: del?.deleted_by_role,
-        deleted_at: del?.deleted_at,
-        reactions: summary,
-      };
+      const summary = per ? Array.from(per.entries()).map(([emoji, count]) => ({ emoji, count })) : [];
+      return { ...m, is_deleted: !!del, deleted_by_role: del?.deleted_by_role, deleted_at: del?.deleted_at, reactions: summary };
     });
   };
 
-  const openMessageActions = (msg: TribeMessage) => {
-    setSelectedMessage(msg);
-    setMessageActionsVisible(true);
+  /* ─── Actions ─── */
+  const handleToggleMembership = async () => {
+    if (!tribe || joining) return;
+    setJoining(true);
+    try {
+      let currentUserId = userId;
+      if (!currentUserId) {
+        const { data: authData } = await supabase.auth.getUser();
+        currentUserId = authData?.user?.id ?? null;
+        if (currentUserId) setUserId(currentUserId);
+        if (!currentUserId) { notify("Entrar na tribo", "Você precisa estar logado."); return; }
+      }
+      if (isMember) {
+        const { error } = await supabase.from("tribe_members").delete().eq("tribe_id", tribe.id).eq("user_id", currentUserId);
+        if (error) { notify("Ops", (error as any)?.message || "Erro ao sair."); return; }
+        setIsMember(false); await refreshMembersCount(tribe.id); return;
+      }
+      const { error } = await supabase.from("tribe_members").insert({ tribe_id: tribe.id, user_id: currentUserId, role: "member" } as any);
+      if (error) {
+        const code = (error as any)?.code;
+        if (code === "23505") { setIsMember(true); await refreshMembersCount(tribe.id); return; }
+        notify("Ops", (error as any)?.message || "Erro ao entrar."); return;
+      }
+      setIsMember(true); await refreshMembersCount(tribe.id);
+    } finally { setJoining(false); }
   };
 
-  const closeMessageActions = () => {
-    setMessageActionsVisible(false);
-    setSelectedMessage(null);
-    setEmojiPickerVisible(false);
+  const handleCreatePost = async () => {
+    if (!tribe || !userId || !isMember || creatingPost) return;
+    const content = newPostContent.trim();
+    if (!content.length) return;
+    setCreatingPost(true);
+    const { data, error } = await supabase.from("tribe_posts").insert({ tribe_id: tribe.id, user_id: userId, content } as any).select("*").single();
+    if (!error && data) {
+      const [enriched] = await enrichWithProfiles([data as TribePost]);
+      setPosts((prev) => [enriched, ...prev]);
+      setNewPostContent("");
+    }
+    setCreatingPost(false);
   };
 
-  const startReply = () => {
-    if (!selectedMessage || selectedMessage.is_deleted) return;
-    setReplyingTo(selectedMessage);
-    closeMessageActions();
+  const handleSendChatMessage = async () => {
+    if (!tribe || !userId || !isMember || sendingChat || !activeChannelId) return;
+    const content = newChatMessage.trim();
+    if (!content.length) return;
+    setSendingChat(true);
+    const finalContent = replyingTo
+      ? `↩︎ ${replyingTo.user_id === userId ? "Você" : (replyingTo.username || replyingTo.full_name || "Membro")}: ${replyingTo.content.slice(0, 80)}\n${content}`
+      : content;
+    const { data, error } = await supabase.from("tribe_messages").insert({
+      tribe_id: tribe.id, channel_id: activeChannelId, user_id: userId, content: finalContent,
+    } as any).select("*").single();
+    if (!error && data) {
+      const [enriched] = await enrichWithProfiles([data as TribeMessage]);
+      setChatMessages((prev) => { if (prev.some((m) => m.id === enriched.id)) return prev; return [...prev, enriched]; });
+      setNewChatMessage(""); setReplyingTo(null);
+    }
+    setSendingChat(false);
   };
 
-  const cancelReply = () => {
-    setReplyingTo(null);
-  };
+  const openMessageActions = (msg: TribeMessage) => { setSelectedMessage(msg); setMessageActionsVisible(true); };
+  const closeMessageActions = () => { setMessageActionsVisible(false); setSelectedMessage(null); setEmojiPickerVisible(false); };
+  const startReply = () => { if (!selectedMessage || selectedMessage.is_deleted) return; setReplyingTo(selectedMessage); closeMessageActions(); };
+  const cancelReply = () => setReplyingTo(null);
 
   const addReaction = async (emoji: string) => {
-    if (!selectedMessage || !userId || !id || !activeChannelId) return;
-    if (selectedMessage.is_deleted) return;
-
-    await supabase.from("tribe_message_reactions").insert({
-      tribe_id: id,
-      channel_id: activeChannelId,
-      message_id: selectedMessage.id,
-      user_id: userId,
-      emoji,
-    } as any);
-
+    if (!selectedMessage || !userId || !id || !activeChannelId || selectedMessage.is_deleted) return;
+    await supabase.from("tribe_message_reactions").insert({ tribe_id: id, channel_id: activeChannelId, message_id: selectedMessage.id, user_id: userId, emoji } as any);
     const hydrated = await applyMessageMeta(chatMessages);
-    setChatMessages(hydrated);
+    const enriched = await enrichWithProfiles(hydrated);
+    setChatMessages(enriched);
     closeMessageActions();
   };
 
   const deleteMessage = async () => {
-    if (!selectedMessage || !userId || !id || !activeChannelId) return;
-    if (!canManageMessages) return;
-    if (selectedMessage.is_deleted) return;
-
+    if (!selectedMessage || !userId || !id || !activeChannelId || !canManageMessages || selectedMessage.is_deleted) return;
     const role = myRole === "owner" ? "owner" : "moderator";
-
-    await supabase.from("tribe_message_deletions").insert({
-      tribe_id: id,
-      channel_id: activeChannelId,
-      message_id: selectedMessage.id,
-      deleted_by: userId,
-      deleted_by_role: role,
-    } as any);
-
+    await supabase.from("tribe_message_deletions").insert({ tribe_id: id, channel_id: activeChannelId, message_id: selectedMessage.id, deleted_by: userId, deleted_by_role: role } as any);
     const hydrated = await applyMessageMeta(chatMessages);
-    setChatMessages(hydrated);
+    const enriched = await enrichWithProfiles(hydrated);
+    setChatMessages(enriched);
     closeMessageActions();
   };
 
+  // Member actions
+  const roleLabel = (role: "owner" | "moderator" | "member") => role === "owner" ? "Dono" : role === "moderator" ? "Mod" : "Membro";
+  const openMemberModal = (m: TribeMemberDetailed) => { if (!(myRole === "owner" || myRole === "moderator")) return; setSelectedMember(m); setMemberModalVisible(true); };
+  const closeMemberModal = () => { setMemberModalVisible(false); setSelectedMember(null); };
 
+  const handleRemoveMember = async () => {
+    if (!tribe || !selectedMember || !userId || selectedMember.user_id === userId || selectedMember.role === "owner") return;
+    const { error } = await supabase.from("tribe_members").delete().eq("tribe_id", tribe.id).eq("user_id", selectedMember.user_id);
+    if (error) { notify("Ops", error.message || "Erro ao remover."); return; }
+    setMembers((prev) => prev.filter((x) => x.user_id !== selectedMember.user_id));
+    setTribe({ ...tribe, members_count: Math.max(0, tribe.members_count - 1) });
+    closeMemberModal();
+  };
 
-  const canManageCover = myRole === "owner" || myRole === "moderator";
+  const handleSetMemberRole = async (role: "moderator" | "member") => {
+    if (!tribe || !selectedMember || myRole !== "owner" || !userId || selectedMember.user_id === userId || selectedMember.role === "owner") return;
+    const { error } = await supabase.from("tribe_members").update({ role } as any).eq("tribe_id", tribe.id).eq("user_id", selectedMember.user_id);
+    if (error) { notify("Ops", error.message || "Erro ao alterar cargo."); return; }
+    setMembers((prev) => prev.map((x) => (x.user_id === selectedMember.user_id ? { ...x, role } : x)));
+    setSelectedMember((prev) => (prev ? { ...prev, role } : prev));
+  };
 
+  // Cover
   const pickAndUploadCover = async () => {
-    if (!id || !tribe) return;
-    if (!canManageCover) return;
-    if (uploadingCover) return;
-
+    if (!id || !tribe || !canManageCover || uploadingCover) return;
     try {
       setUploadingCover(true);
-
       if (Platform.OS !== "web") {
         const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (perm.status !== "granted") {
-          Alert.alert("Permissão necessária", "Autorize acesso às fotos para trocar a capa.");
-          return;
-        }
+        if (perm.status !== "granted") { notify("Permissão necessária", "Autorize acesso às fotos."); return; }
       }
-
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ((ImagePicker as any).MediaType?.Images ?? (ImagePicker as any).MediaTypeOptions?.Images),
-        quality: 0.85,
-        allowsEditing: true,
-        aspect: [16, 9],
+        quality: 0.85, allowsEditing: true, aspect: [16, 9],
       });
-
       if ((result as any)?.canceled) return;
-
       const asset = (result as any)?.assets?.[0];
       const uri = asset?.uri as string | undefined;
       if (!uri) return;
-
       const prepared = await prepareCoverImage(uri);
       const path = `covers/${id}/${Date.now()}.${prepared.ext}`;
-
       const { body, contentType } = await uriToUploadBody(prepared.uri);
-
-      const { error: upErr } = await supabase.storage.from("tribes").upload(path, body as any, {
-        contentType: contentType || prepared.contentType,
-        upsert: true,
-      });
-
-      if (upErr) {
-        Alert.alert("Ops", (upErr as any)?.message || "Não foi possível enviar a capa.");
-        return;
-      }
-
+      const { error: upErr } = await supabase.storage.from("tribes").upload(path, body as any, { contentType: contentType || prepared.contentType, upsert: true });
+      if (upErr) { notify("Ops", "Não foi possível enviar a capa."); return; }
       const { error: dbErr } = await supabase.from("tribes").update({ cover_url: path } as any).eq("id", id);
-
-      if (dbErr) {
-        Alert.alert("Ops", (dbErr as any)?.message || "Não foi possível salvar a capa.");
-        return;
-      }
-
+      if (dbErr) { notify("Ops", "Não foi possível salvar a capa."); return; }
       setTribe((prev) => (prev ? { ...prev, cover_url: path } : prev));
-    } finally {
-      setUploadingCover(false);
-    }
+    } finally { setUploadingCover(false); }
   };
 
-  const openCoverActions = () => {
-    if (!canManageCover) return;
-    setCoverActionsVisible(true);
+  /* ─── Helpers ─── */
+  const formatDate = (iso: string) => new Date(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" });
+  const formatTime = (iso: string) => new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  const formatRelativeTime = (iso: string) => {
+    const diff = Date.now() - new Date(iso).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return "agora";
+    if (mins < 60) return `${mins}min`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h`;
+    const days = Math.floor(hrs / 24);
+    return `${days}d`;
   };
 
-  const confirmCoverPick = async () => {
-    if (uploadingCover) return;
-    setCoverActionsVisible(false);
-    await pickAndUploadCover();
+  const getDisplayName = (item: { user_id: string; username?: string | null; full_name?: string | null }) => {
+    if (userId && item.user_id === userId) return "Você";
+    return item.full_name?.trim() || item.username?.trim() || "Membro";
   };
 
-  // ---------- HELPERS ----------
-  const formatDate = (iso: string) => {
-    const d = new Date(iso);
-    return d.toLocaleDateString("pt-BR", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
-  };
+  const getAvatarInitial = (name: string) => name.charAt(0).toUpperCase();
 
-  const formatTime = (iso: string) => {
-    const d = new Date(iso);
-    return d.toLocaleTimeString("pt-BR", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
-
-  // ---------- CONTEÚDO DAS TABS ----------
+  /* ─────────────────────────────────────────── */
+  /*  TAB CONTENT                                */
+  /* ─────────────────────────────────────────── */
   const renderTabContent = () => {
     if (!tribe) return null;
 
-    // FEED
+    /* ═══ FEED ═══ */
     if (activeTab === "feed") {
       return (
-        <View style={{ marginTop: 16 }}>
-          {/* Header feed */}
-          <View
-            style={[
-              styles.cardSection,
-              { backgroundColor: theme.colors.surfaceElevated },
-            ]}
-          >
-            <Text style={styles.sectionHeaderLabel}>Feed da tribo</Text>
-            <Text style={[styles.sectionHeaderHelper, { color: "#9CA3AF" }]}>
-              Espaço para anúncios, posts mais longos e recados importantes.
-            </Text>
-          </View>
-
-          {/* Novo post */}
+        <View style={{ marginTop: 12, gap: 10 }}>
+          {/* New post */}
           {isMember ? (
-            <View
-              style={[
-                styles.cardSection,
-                { backgroundColor: theme.colors.surfaceElevated, marginTop: 8 },
-              ]}
-            >
-              <Text style={styles.sectionHeaderLabel}>Criar post no feed</Text>
-              
-                {replyingTo ? (
-                  <View style={styles.replyPreview}>
-                    <View style={styles.replyPreviewLeft}>
-                      <Text style={styles.replyPreviewLabel}>Respondendo</Text>
-                      <Text style={styles.replyPreviewText} numberOfLines={1}>
-                        {replyingTo.content}
-                      </Text>
-                    </View>
-                    <TouchableOpacity
-                      activeOpacity={0.9}
-                      onPress={cancelReply}
-                      style={styles.replyPreviewClose}
-                    >
-                      <Text style={styles.replyPreviewCloseText}>✕</Text>
-                    </TouchableOpacity>
-                  </View>
-                ) : null}
-
-<View style={styles.row}>
-                <View
-                  style={[
-                    styles.flex1,
-                    styles.inputBox,
-                    { backgroundColor: theme.colors.surface },
-                  ]}
-                >
-                  <TextInput
-                    value={newPostContent}
-                    onChangeText={setNewPostContent}
-                    placeholder="Compartilhe uma ideia, anúncio ou insight com toda a tribo..."
-                    placeholderTextColor="#6B7280"
-                    multiline
-                    style={styles.feedInput}
-                  />
-                </View>
-                <TouchableOpacity
-                  activeOpacity={0.9}
-                  onPress={handleCreatePost}
-                  disabled={
-                    creatingPost || !newPostContent.trim().length
-                  }
-                  style={[
-                    styles.primaryChipButton,
-                    {
-                      backgroundColor:
-                        creatingPost || !newPostContent.trim().length
-                          ? theme.colors.surface
-                          : theme.colors.primary,
-                      marginLeft: 8,
-                    },
-                  ]}
-                >
-                  {creatingPost ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <Text style={styles.primaryChipButtonText}>Postar</Text>
-                  )}
-                </TouchableOpacity>
+            <View style={[st.feedCard, { backgroundColor: theme.colors.surfaceElevated }]}>
+              <View style={st.feedNewHeader}>
+                <Ionicons name="create-outline" size={16} color={theme.colors.primary} />
+                <Text style={[st.feedNewLabel, { color: theme.colors.text }]}>Compartilhar com a tribo</Text>
               </View>
+              <View style={[st.feedInputWrap, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+                <TextInput
+                  value={newPostContent}
+                  onChangeText={setNewPostContent}
+                  placeholder="Compartilhe uma ideia, anúncio ou insight..."
+                  placeholderTextColor={theme.colors.textMuted}
+                  multiline
+                  style={[st.feedInput, { color: theme.colors.text }]}
+                />
+              </View>
+              <TouchableOpacity
+                activeOpacity={0.9}
+                onPress={handleCreatePost}
+                disabled={creatingPost || !newPostContent.trim().length}
+                style={[st.postBtn, { backgroundColor: creatingPost || !newPostContent.trim().length ? theme.colors.surface : theme.colors.primary }]}
+              >
+                {creatingPost ? <ActivityIndicator size="small" color="#fff" /> : (
+                  <View style={st.postBtnContent}>
+                    <Ionicons name="send" size={14} color="#fff" />
+                    <Text style={st.postBtnText}>Publicar</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
             </View>
           ) : (
-            <View
-              style={[
-                styles.cardSection,
-                { backgroundColor: theme.colors.surfaceElevated, marginTop: 8 },
-              ]}
-            >
-              <Text style={styles.infoTitle}>
-                Entre na tribo para postar no feed.
-              </Text>
-              <Text style={styles.infoText}>
-                Só membros podem criar posts. Mantém o mural organizado e com
-                a cara da comunidade.
-              </Text>
+            <View style={[st.feedCard, { backgroundColor: theme.colors.surfaceElevated }]}>
+              <Text style={[st.infoTitle, { color: theme.colors.text }]}>Entre na tribo para postar no feed.</Text>
+              <Text style={[st.infoText, { color: theme.colors.textMuted }]}>Só membros podem criar posts.</Text>
             </View>
           )}
 
-          {/* Lista de posts */}
-          <View style={{ marginTop: 12 }}>
-            {postsLoading ? (
-              <View style={styles.centeredBlock}>
-                <ActivityIndicator />
-                <Text style={styles.loadingSmallText}>
-                  Carregando feed da tribo...
-                </Text>
-              </View>
-            ) : posts.length === 0 ? (
-              <View
-                style={[
-                  styles.cardSection,
-                  { backgroundColor: theme.colors.surfaceElevated },
-                ]}
-              >
-                <Text style={styles.infoTitle}>Nenhum post ainda.</Text>
-                <Text style={styles.infoText}>
-                  Quando surgirem novidades, o feed vira o mural oficial dessa
-                  tribo.
-                </Text>
-              </View>
-            ) : (
-              posts.map((post) => {
-                const isOwn = userId && post.user_id === userId;
-                const authorLabel = isOwn ? "Você" : "Membro da tribo";
-
-                return (
-                  <View
-                    key={post.id}
-                    style={[
-                      styles.cardSection,
-                      {
-                        backgroundColor: theme.colors.surfaceElevated,
-                        marginTop: 8,
-                      },
-                    ]}
-                  >
-                    <View style={styles.rowSpaceBetween}>
-                      <Text style={styles.postAuthor}>{authorLabel}</Text>
-                      <Text style={styles.postMeta}>
-                        {formatDate(post.created_at)} ·{" "}
-                        {formatTime(post.created_at)}
-                      </Text>
+          {/* Posts */}
+          {postsLoading ? (
+            <View style={st.centeredBlock}><ActivityIndicator /><Text style={[st.loadingSmall, { color: theme.colors.textMuted }]}>Carregando feed...</Text></View>
+          ) : posts.length === 0 ? (
+            <View style={[st.feedCard, { backgroundColor: theme.colors.surfaceElevated, alignItems: "center", paddingVertical: 28 }]}>
+              <Ionicons name="newspaper-outline" size={32} color={theme.colors.textMuted} />
+              <Text style={[st.infoTitle, { color: theme.colors.text, marginTop: 10 }]}>Nenhum post ainda</Text>
+              <Text style={[st.infoText, { color: theme.colors.textMuted, textAlign: "center" }]}>Quando surgirem novidades, o feed vira o mural oficial da tribo.</Text>
+            </View>
+          ) : (
+            posts.map((post) => (
+              <View key={post.id} style={[st.feedCard, { backgroundColor: theme.colors.surfaceElevated }]}>
+                <View style={st.postHeader}>
+                  {post.avatar_url ? (
+                    <Image source={{ uri: post.avatar_url }} style={st.postAvatar} />
+                  ) : (
+                    <View style={[st.postAvatarFallback, { backgroundColor: theme.colors.primary + "22" }]}>
+                      <Text style={[st.postAvatarText, { color: theme.colors.primary }]}>{getAvatarInitial(getDisplayName(post))}</Text>
                     </View>
-                    {post.content ? (
-                      <Text style={styles.postContent}>{post.content}</Text>
-                    ) : null}
+                  )}
+                  <View style={{ flex: 1 }}>
+                    <Text style={[st.postAuthor, { color: theme.colors.text }]}>{getDisplayName(post)}</Text>
+                    <Text style={[st.postTime, { color: theme.colors.textMuted }]}>{formatRelativeTime(post.created_at)} · {formatDate(post.created_at)}</Text>
                   </View>
-                );
-              })
-            )}
-          </View>
+                </View>
+                {post.content ? <Text style={[st.postContent, { color: theme.colors.text }]}>{post.content}</Text> : null}
+              </View>
+            ))
+          )}
         </View>
       );
     }
 
-    // CHAT
+    /* ═══ CHAT (Discord-style) ═══ */
     if (activeTab === "chat") {
-      const activeChannel =
-        channels.find((c) => c.id === activeChannelId) || null;
-
+      const activeChannel = channels.find((c) => c.id === activeChannelId) || null;
       const isWeb = Platform.OS === "web";
+      const chatHeight = isWeb ? (isLargeWeb ? Math.max(400, Math.min(520, height - 600)) : Math.max(350, Math.min(480, height - 500))) : Math.max(380, Math.min(540, height - 380));
 
-      const baseOffset = isWeb
-        ? isLargeWeb
-          ? 700
-          : 540
-        : 420;
-
-      const chatHeight = isWeb
-        ? isLargeWeb
-          ? Math.max(320, Math.min(440, height - baseOffset))
-          : Math.max(300, Math.min(420, height - baseOffset))
-        : Math.max(360, Math.min(520, height - baseOffset));
+      // Group consecutive messages from same user
+      const groupedMessages: (TribeMessage & { showHeader: boolean })[] = chatMessages.map((msg, i) => {
+        const prev = i > 0 ? chatMessages[i - 1] : null;
+        const sameUser = prev && prev.user_id === msg.user_id;
+        const timeDiff = prev ? (new Date(msg.created_at).getTime() - new Date(prev.created_at).getTime()) : Infinity;
+        const showHeader = !sameUser || timeDiff > 300000; // 5 min
+        return { ...msg, showHeader };
+      });
 
       return (
-        <View
-          style={[
-            styles.chatContainer,
-            { backgroundColor: theme.colors.surfaceElevated },
-            { height: chatHeight, marginTop: isWeb ? 8 : 16 },
-            !isLargeWeb ? { flexDirection: "column" } : null,
-          ]}
-        >
-          {/* Coluna canais */}
-          <View
-            style={[
-              styles.channelsColumn,
-              { borderColor: theme.colors.surface },
-              !isLargeWeb
-                ? {
-                    width: "100%",
-                    borderRightWidth: 0,
-                    borderBottomWidth: 1,
-                  }
-                : null,
-            ]}
-          >
-            <View style={styles.channelsHeaderRow}>
-              <Text style={styles.channelsTitle}>Canais</Text>
-              {canManageChannels ? (
-                <TouchableOpacity
-                  activeOpacity={0.9}
-                  onPress={() => setChannelModalVisible(true)}
-                  style={styles.channelsAddBtn}
-                >
-                  <Ionicons name="add" size={18} color="#FFFFFF" />
-                </TouchableOpacity>
-              ) : null}
-            </View>
-
-            {channelsLoading ? (
-              <View style={styles.centeredBlock}>
-                <ActivityIndicator size="small" />
+        <View style={[st.chatContainer, { backgroundColor: theme.colors.surfaceElevated, height: chatHeight, marginTop: isWeb ? 8 : 12 }]}>
+          {/* Channels sidebar */}
+          <View style={[
+            st.channelsSidebar,
+            { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+            !isLargeWeb ? { width: "100%", borderRightWidth: 0, borderBottomWidth: 1, maxHeight: 50 } : null,
+          ]}>
+            {isLargeWeb && (
+              <View style={st.channelsSidebarHeader}>
+                <Text style={[st.channelsSidebarTitle, { color: theme.colors.textMuted }]}>CANAIS DE TEXTO</Text>
+                {canManageChannels && (
+                  <TouchableOpacity activeOpacity={0.8} onPress={() => setChannelModalVisible(true)}>
+                    <Ionicons name="add" size={18} color={theme.colors.textMuted} />
+                  </TouchableOpacity>
+                )}
               </View>
-            ) : channels.length === 0 ? (
-              <View style={styles.channelsEmpty}>
-                <Text style={styles.infoText}>
-                  Nenhum canal criado ainda. O LUPYY já cria o canal{" "}
-                  <Text style={styles.bold}>#geral</Text> nas tribos novas.
-                </Text>
-              </View>
-            ) : (
-              <ScrollView
-                horizontal={!isLargeWeb}
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={!isLargeWeb ? { paddingHorizontal: 6, paddingBottom: 8 } : undefined}
-              >
-                <View style={!isLargeWeb ? { flexDirection: "row", gap: 6 } : undefined}>
-                  {channels.map((channel) => {
-                    const isActive = channel.id === activeChannelId;
-                    return (
-                      <TouchableOpacity
-                        key={channel.id}
-                        activeOpacity={0.9}
-                        onPress={() => setActiveChannelId(channel.id)}
-                        style={[
-                          styles.channelItem,
-                          !isLargeWeb ? { marginHorizontal: 0, marginTop: 0 } : null,
-                          {
-                            backgroundColor: isActive
-                              ? theme.colors.primary
-                              : "transparent",
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.channelItemText,
-                            {
-                              color: isActive
-                                ? "#FFFFFF"
-                                : theme.colors.textMuted,
-                            },
-                          ]}
-                        >
-                          #{channel.slug}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </ScrollView>
             )}
+            <ScrollView horizontal={!isLargeWeb} showsHorizontalScrollIndicator={false} contentContainerStyle={!isLargeWeb ? { paddingHorizontal: 8, gap: 4 } : { paddingHorizontal: 4 }}>
+              {!isLargeWeb && canManageChannels && (
+                <TouchableOpacity activeOpacity={0.8} onPress={() => setChannelModalVisible(true)} style={[st.channelPill, { backgroundColor: theme.colors.primary + "22" }]}>
+                  <Ionicons name="add" size={14} color={theme.colors.primary} />
+                </TouchableOpacity>
+              )}
+              {channels.filter(c => c.type !== "voice").map((channel) => {
+                const isActive = channel.id === activeChannelId;
+                return (
+                  <TouchableOpacity
+                    key={channel.id}
+                    activeOpacity={0.85}
+                    onPress={() => setActiveChannelId(channel.id)}
+                    style={[
+                      isLargeWeb ? st.channelRow : st.channelPill,
+                      { backgroundColor: isActive ? theme.colors.primary + "22" : "transparent" },
+                    ]}
+                  >
+                    <Text style={{ fontSize: 14, color: theme.colors.textMuted }}>#</Text>
+                    <Text style={[
+                      isLargeWeb ? st.channelRowText : st.channelPillText,
+                      { color: isActive ? theme.colors.text : theme.colors.textMuted },
+                    ]}>{channel.name}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+              {/* Voice channels */}
+              {isLargeWeb && channels.filter(c => c.type === "voice").length > 0 && (
+                <View style={[st.channelsSidebarHeader, { marginTop: 8 }]}>
+                  <Text style={[st.channelsSidebarTitle, { color: theme.colors.textMuted }]}>CANAIS DE VOZ</Text>
+                </View>
+              )}
+              {channels.filter(c => c.type === "voice").map((channel) => (
+                <TouchableOpacity
+                  key={channel.id}
+                  activeOpacity={0.85}
+                  onPress={() => notify("Sala de Voz", `A sala "${channel.name}" será ativada em breve com áudio em tempo real.`)}
+                  style={[
+                    isLargeWeb ? st.channelRow : st.channelPill,
+                    { backgroundColor: "transparent" },
+                  ]}
+                >
+                  <Ionicons name="mic-outline" size={14} color={theme.colors.primary} />
+                  <Text style={[isLargeWeb ? st.channelRowText : st.channelPillText, { color: theme.colors.textMuted }]}>{channel.name}</Text>
+                  <View style={{ backgroundColor: theme.colors.primary + "22", borderRadius: 999, paddingHorizontal: 6, paddingVertical: 2 }}>
+                    <Text style={{ fontSize: 8, color: theme.colors.primary, fontWeight: "800" }}>EM BREVE</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
           </View>
 
-          {/* Área mensagens */}
-          <KeyboardAvoidingView
-            style={styles.chatMain}
-            behavior={Platform.OS === "ios" ? "padding" : undefined}
-            keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 64 : 0}
-          >
-            {/* Header */}
-            <View
-              style={[
-                styles.chatHeader,
-                { borderColor: theme.colors.surface },
-              ]}
-            >
+          {/* Chat area */}
+          <View style={st.chatArea}>
+            {/* Chat header */}
+            <View style={[st.chatAreaHeader, { borderColor: theme.colors.border }]}>
               {activeChannel ? (
-                <>
-                  <View>
-                    <Text style={styles.chatHeaderTitle}>
-                      #{activeChannel.slug}
-                    </Text>
-                    <Text style={styles.chatHeaderSubtitle}>
-                      {activeChannel.description ||
-                        "Canal principal da tribo."}
-                    </Text>
-                  </View>
-                  <Text style={styles.chatHeaderMeta}>
-                    {chatMessages.length} mensagem
-                    {chatMessages.length === 1 ? "" : "s"}
+                <View style={st.chatAreaHeaderContent}>
+                  <Text style={{ fontSize: 16, color: theme.colors.textMuted }}>#</Text>
+                  <Text style={[st.chatAreaHeaderTitle, { color: theme.colors.text }]}>{activeChannel.name}</Text>
+                  <View style={[st.chatAreaHeaderDivider, { backgroundColor: theme.colors.border }]} />
+                  <Text style={[st.chatAreaHeaderDesc, { color: theme.colors.textMuted }]} numberOfLines={1}>
+                    {activeChannel.description || "Canal principal"}
                   </Text>
-                </>
+                </View>
               ) : (
-                <Text style={styles.infoText}>
-                  Escolha um canal na coluna à esquerda.
-                </Text>
+                <Text style={[st.infoText, { color: theme.colors.textMuted }]}>Selecione um canal</Text>
               )}
             </View>
 
-            {/* Mensagens */}
-            <View
-              style={[
-                styles.chatMessagesArea,
-                { flex: 1, minHeight: 0 },
-              ]}
-            >
+            {/* Messages - Discord style */}
+            <View style={{ flex: 1, minHeight: 0 }}>
               {activeChannel ? (
                 chatLoading ? (
-                  <View style={styles.centeredBlock}>
-                    <ActivityIndicator size="small" />
-                    <Text style={styles.loadingSmallText}>
-                      Carregando mensagens...
-                    </Text>
-                  </View>
+                  <View style={st.centeredBlock}><ActivityIndicator size="small" /></View>
                 ) : chatMessages.length === 0 ? (
-                  <View style={styles.channelsEmpty}>
-                    <Text style={styles.infoTitle}>
-                      Nenhuma mensagem ainda.
+                  <View style={[st.centeredBlock, { paddingHorizontal: 20 }]}>
+                    <View style={[st.emptyChannelIcon, { backgroundColor: theme.colors.primary + "18" }]}>
+                      <Text style={{ fontSize: 28 }}>#</Text>
+                    </View>
+                    <Text style={[st.emptyChannelTitle, { color: theme.colors.text }]}>
+                      Bem-vindo ao #{activeChannel.name}!
                     </Text>
-                    <Text style={styles.infoText}>
-                      Seja a primeira pessoa a mandar algo nesse canal.
+                    <Text style={[st.emptyChannelSub, { color: theme.colors.textMuted }]}>
+                      Este é o começo do canal. Mande a primeira mensagem!
                     </Text>
                   </View>
                 ) : (
                   <ScrollView
                     ref={chatScrollRef}
-                    style={[{ flex: 1, minHeight: 0 }, Platform.OS === "web" ? ({ overflowY: "auto" } as any) : null]}
-                    persistentScrollbar={Platform.OS === "android"}
-                    keyboardShouldPersistTaps="handled"
-                    onContentSizeChange={() => {
-                      chatScrollRef.current?.scrollToEnd({ animated: true });
-                    }}
-                    contentContainerStyle={{
-                      paddingHorizontal: 8,
-                      paddingVertical: 6,
-                      paddingBottom: Platform.OS === "web" ? 120 : 200,
-          }}
-                    showsVerticalScrollIndicator={true}
+                    style={{ flex: 1 }}
+                    contentContainerStyle={{ paddingHorizontal: 12, paddingVertical: 8, paddingBottom: Platform.OS === "web" ? 80 : 120 }}
+                    onContentSizeChange={() => chatScrollRef.current?.scrollToEnd({ animated: true })}
+                    showsVerticalScrollIndicator
                   >
-                    {chatMessages.map((msg) => {
-                      const isOwn = userId && msg.user_id === userId;
-                      const authorLabel = isOwn ? "Você" : "Membro da tribo";
-
-                      return (
-                        <View
-                          key={msg.id}
-                          style={[
-                            styles.chatBubbleRow,
-                            {
-                              justifyContent: isOwn
-                                ? "flex-end"
-                                : "flex-start",
-                            },
-                          ]}
-                        >
-                          <TouchableOpacity activeOpacity={0.9} onPress={() => openMessageActions(msg)}>
-                          <View
-                            style={[
-                              styles.chatBubble,
-                              {
-                                backgroundColor: isOwn
-                                  ? theme.colors.primary
-                                  : theme.colors.surface,
-                              },
-                            ]}
-                          >
-                            <View style={styles.rowSpaceBetween}>
-                              <Text
-                                style={[
-                                  styles.chatBubbleAuthor,
-                                  {
-                                    color: isOwn
-                                      ? "#ffffff"
-                                      : "#e5e7eb",
-                                  },
-                                ]}
-                              >
-                                {authorLabel}
-                              </Text>
-                              <Text
-                                style={[
-                                  styles.chatBubbleTime,
-                                  {
-                                    color: isOwn
-                                      ? "#f9fafb"
-                                      : "#9ca3af",
-                                  },
-                                ]}
-                              >
-                                {formatTime(msg.created_at)}
-                              </Text>
+                    {groupedMessages.map((msg) => (
+                      <TouchableOpacity
+                        key={msg.id}
+                        activeOpacity={0.8}
+                        onLongPress={() => openMessageActions(msg)}
+                        onPress={Platform.OS === "web" ? () => {} : undefined}
+                        delayLongPress={400}
+                        style={[st.discordMsgRow, msg.showHeader ? { marginTop: 12 } : { marginTop: 2 }]}
+                        {...(Platform.OS === "web" ? {
+                          // @ts-ignore
+                          onContextMenu: (e: any) => { e.preventDefault?.(); openMessageActions(msg); },
+                        } : {})}
+                      >
+                        {msg.showHeader ? (
+                          <>
+                            {/* Avatar */}
+                            <View style={st.discordAvatarCol}>
+                              {msg.avatar_url ? (
+                                <Image source={{ uri: msg.avatar_url }} style={st.discordAvatar} />
+                              ) : (
+                                <View style={[st.discordAvatarFallback, { backgroundColor: theme.colors.primary + "33" }]}>
+                                  <Text style={[st.discordAvatarText, { color: theme.colors.primary }]}>{getAvatarInitial(getDisplayName(msg))}</Text>
+                                </View>
+                              )}
                             </View>
-                            <Text
-                              style={[
-                                styles.chatBubbleText,
-                                msg.is_deleted ? { fontStyle: "italic", opacity: 0.85 } : null,
-                                {
-                                  color: isOwn
-                                    ? "#ffffff"
-                                    : "#e5e7eb",
-                                },
-                              ]}
-                            >
-                              {msg.is_deleted ? (msg.deleted_by_role === "owner" ? "Excluída pelo dono" : "Excluída pelo moderador") : msg.content}
-                            </Text>
-                            {msg.reactions && msg.reactions.length > 0 ? (
-                              <View style={styles.reactionsRow}>
-                                {msg.reactions.slice(0, 6).map((r) => (
-                                  <View key={`${msg.id}-${r.emoji}`} style={styles.reactionPill}>
-                                    <Text style={styles.reactionPillText}>
-                                      {r.emoji} {r.count}
-                                    </Text>
-                                  </View>
-                                ))}
+                            <View style={{ flex: 1 }}>
+                              <View style={st.discordNameRow}>
+                                <Text style={[st.discordUsername, { color: theme.colors.primary }]}>{getDisplayName(msg)}</Text>
+                                <Text style={[st.discordTimestamp, { color: theme.colors.textMuted }]}>{formatDate(msg.created_at)} {formatTime(msg.created_at)}</Text>
                               </View>
-                            ) : null}
-                          </View>
-                        </TouchableOpacity>
-                        </View>
-                      );
-                    })}
+                              <Text style={[
+                                st.discordContent,
+                                msg.is_deleted ? { fontStyle: "italic", opacity: 0.5 } : null,
+                                { color: theme.colors.text },
+                              ]}>
+                                {msg.is_deleted ? (msg.deleted_by_role === "owner" ? "Mensagem excluída pelo dono" : "Mensagem excluída por moderador") : msg.content}
+                              </Text>
+                              {msg.reactions && msg.reactions.length > 0 && (
+                                <View style={st.reactionsRow}>
+                                  {msg.reactions.slice(0, 8).map((r) => (
+                                    <View key={`${msg.id}-${r.emoji}`} style={[st.reactionPill, { backgroundColor: theme.colors.primary + "18", borderColor: theme.colors.primary + "30" }]}>
+                                      <Text style={st.reactionText}>{r.emoji} {r.count}</Text>
+                                    </View>
+                                  ))}
+                                </View>
+                              )}
+                            </View>
+                          </>
+                        ) : (
+                          <>
+                            <View style={st.discordAvatarCol}>
+                              <Text style={[st.discordCompactTime, { color: theme.colors.textMuted }]}>{formatTime(msg.created_at)}</Text>
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={[
+                                st.discordContent,
+                                msg.is_deleted ? { fontStyle: "italic", opacity: 0.5 } : null,
+                                { color: theme.colors.text },
+                              ]}>
+                                {msg.is_deleted ? "Mensagem excluída" : msg.content}
+                              </Text>
+                              {msg.reactions && msg.reactions.length > 0 && (
+                                <View style={st.reactionsRow}>
+                                  {msg.reactions.slice(0, 8).map((r) => (
+                                    <View key={`${msg.id}-${r.emoji}`} style={[st.reactionPill, { backgroundColor: theme.colors.primary + "18", borderColor: theme.colors.primary + "30" }]}>
+                                      <Text style={st.reactionText}>{r.emoji} {r.count}</Text>
+                                    </View>
+                                  ))}
+                                </View>
+                              )}
+                            </View>
+                          </>
+                        )}
+                      </TouchableOpacity>
+                    ))}
                   </ScrollView>
                 )
-              ) : (
-                <View style={styles.channelsEmpty}>
-                  <Text style={styles.infoText}>
-                    Nenhum canal selecionado. Toque em{" "}
-                    <Text style={styles.bold}>#geral</Text> para começar a
-                    conversar.
-                  </Text>
-                </View>
-              )}
+              ) : null}
             </View>
 
             {/* Input */}
-            <View
-              style={[
-                styles.chatInputBar,
-                { borderColor: theme.colors.surface },
-                { paddingBottom: Math.max(6, insets.bottom) },
-              ]}
-            >
+            <View style={[st.chatInputBar, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
               {isMember ? (
-                <View style={styles.row}>
-                  <View
-                    style={[
-                      styles.flex1,
-                      styles.inputBox,
-                      { backgroundColor: theme.colors.surface },
-                    ]}
-                  >
+                <>
+                  {replyingTo && (
+                    <View style={[st.replyBanner, { backgroundColor: theme.colors.primary + "12", borderColor: theme.colors.primary + "30" }]}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[st.replyLabel, { color: theme.colors.primary }]}>Respondendo a {getDisplayName(replyingTo)}</Text>
+                        <Text style={[st.replyPreview, { color: theme.colors.textMuted }]} numberOfLines={1}>{replyingTo.content}</Text>
+                      </View>
+                      <TouchableOpacity onPress={cancelReply}><Ionicons name="close" size={16} color={theme.colors.textMuted} /></TouchableOpacity>
+                    </View>
+                  )}
+                  <View style={st.chatInputRow}>
                     <TextInput
                       value={newChatMessage}
                       onChangeText={setNewChatMessage}
-                      onFocus={() => {
-                        requestAnimationFrame(() => {
-                          chatScrollRef.current?.scrollToEnd({ animated: true });
-                        });
-                      }}
-                      placeholder={
-                        activeChannel
-                          ? `Enviar mensagem em #${activeChannel.slug}...`
-                          : "Escolha um canal para mandar mensagem..."
-                      }
-                      placeholderTextColor="#6B7280"
+                      placeholder={activeChannel ? `Conversar em #${activeChannel.name}` : "Selecione um canal"}
+                      placeholderTextColor={theme.colors.textMuted}
                       multiline
-                      textAlignVertical="top"
-                      style={styles.chatInput}
+                      style={[st.chatInput, { color: theme.colors.text, backgroundColor: theme.colors.surfaceElevated, borderColor: theme.colors.border }]}
+                      onSubmitEditing={handleSendChatMessage}
                     />
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      onPress={handleSendChatMessage}
+                      disabled={sendingChat || !newChatMessage.trim().length}
+                      style={[st.chatSendBtn, { backgroundColor: sendingChat || !newChatMessage.trim().length ? theme.colors.border : theme.colors.primary }]}
+                    >
+                      {sendingChat ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="send" size={16} color="#fff" />}
+                    </TouchableOpacity>
                   </View>
-                  <TouchableOpacity
-                    activeOpacity={0.9}
-                    onPress={handleSendChatMessage}
-                    disabled={
-                      sendingChat ||
-                      !newChatMessage.trim().length ||
-                      !activeChannelId
-                    }
-                    style={[
-                      styles.primaryChipButton,
-                      {
-                        backgroundColor:
-                          sendingChat ||
-                          !newChatMessage.trim().length ||
-                          !activeChannelId
-                            ? theme.colors.surface
-                            : theme.colors.primary,
-                        marginLeft: 8,
-                      },
-                    ]}
-                  >
-                    {sendingChat ? (
-                      <ActivityIndicator size="small" color="#fff" />
-                    ) : (
-                      <Text style={styles.primaryChipButtonText}>
-                        Enviar
-                      </Text>
-                    )}
-                  </TouchableOpacity>
-                </View>
+                </>
               ) : (
-                <Text style={styles.infoText}>
-                  Entre na tribo para participar do chat.
-                </Text>
+                <Text style={[st.infoText, { color: theme.colors.textMuted, textAlign: "center", paddingVertical: 8 }]}>Entre na tribo para participar do chat.</Text>
               )}
             </View>
-          </KeyboardAvoidingView>
-
-          
-      {/* Modal ações da mensagem */}
-      {messageActionsVisible && selectedMessage ? (
-        <View style={styles.modalOverlay}>
-          <View
-            style={[
-              styles.modalCard,
-              { backgroundColor: theme.colors.surfaceElevated },
-            ]}
-          >
-            <View style={styles.rowSpaceBetween}>
-              <Text style={styles.modalTitle}>Mensagem</Text>
-              <TouchableOpacity activeOpacity={0.9} onPress={closeMessageActions}>
-                <Text style={styles.modalClose}>✕</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={{ gap: 10, marginTop: 12 }}>
-              <TouchableOpacity
-                activeOpacity={0.9}
-                style={styles.modalAction}
-                onPress={startReply}
-              >
-                <Text style={styles.modalActionText}>Responder</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                activeOpacity={0.9}
-                style={styles.modalAction}
-                onPress={() => setEmojiPickerVisible(true)}
-              >
-                <Text style={styles.modalActionText}>Reagir</Text>
-              </TouchableOpacity>
-
-              {canManageMessages ? (
-                <TouchableOpacity
-                  activeOpacity={0.9}
-                  style={[styles.modalAction, styles.modalActionDanger]}
-                  onPress={deleteMessage}
-                >
-                  <Text style={styles.modalActionText}>Apagar</Text>
-                </TouchableOpacity>
-              ) : null}
-
-              <TouchableOpacity
-                activeOpacity={0.9}
-                style={styles.modalAction}
-                onPress={closeMessageActions}
-              >
-                <Text style={styles.modalActionText}>Cancelar</Text>
-              </TouchableOpacity>
-            </View>
-
-            {emojiPickerVisible ? (
-              <View style={styles.emojiGrid}>
-                {["👍", "❤️", "😂", "🔥", "😮", "😢"].map((e) => (
-                  <TouchableOpacity
-                    key={e}
-                    activeOpacity={0.9}
-                    style={styles.emojiBtn}
-                    onPress={() => addReaction(e)}
-                  >
-                    <Text style={styles.emojiText}>{e}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            ) : null}
           </View>
-        </View>
-      ) : null}
-
-{channelModalVisible ? (
-            <View style={styles.modalOverlay}>
-              <View style={[styles.modalCard, { backgroundColor: theme.colors.surfaceElevated }]}>
-                <View style={styles.rowSpaceBetween}>
-                  <Text style={styles.modalTitle}>Criar canal</Text>
-                  <TouchableOpacity activeOpacity={0.9} onPress={() => setChannelModalVisible(false)}>
-                    <Text style={styles.modalClose}>✕</Text>
-                  </TouchableOpacity>
-                </View>
-
-                <Text style={styles.modalSubtitle}>
-                  Apenas dono e moderadores podem criar salas.
-                </Text>
-
-                <View style={{ marginTop: 10 }}>
-                  <TextInput
-                    value={newChannelName}
-                    onChangeText={setNewChannelName}
-                    placeholder="Nome do canal (ex: Projetos)"
-                    placeholderTextColor="#6B7280"
-                    style={[styles.modalInput, { backgroundColor: theme.colors.surface, color: "#F9FAFB" }]}
-                  />
-                </View>
-
-                <View style={styles.modalTypeRow}>
-                  <TouchableOpacity
-                    activeOpacity={0.9}
-                    onPress={() => setNewChannelType("text")}
-                    style={[
-                      styles.modalTypeOption,
-                      { backgroundColor: newChannelType === "text" ? theme.colors.primary : theme.colors.surface },
-                    ]}
-                  >
-                    <Text style={[styles.modalTypeText, { color: newChannelType === "text" ? "#FFFFFF" : "#E5E7EB" }]}>
-                      Texto
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    activeOpacity={0.9}
-                    onPress={() => setNewChannelType("voice")}
-                    style={[
-                      styles.modalTypeOption,
-                      { backgroundColor: newChannelType === "voice" ? theme.colors.primary : theme.colors.surface },
-                    ]}
-                  >
-                    <Text style={[styles.modalTypeText, { color: newChannelType === "voice" ? "#FFFFFF" : "#E5E7EB" }]}>
-                      Voz
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-
-                <View style={{ marginTop: 10, gap: 8 }}>
-                  <TouchableOpacity
-                    activeOpacity={0.9}
-                    onPress={createChannel}
-                    disabled={!newChannelName.trim().length}
-                    style={[
-                      styles.modalAction,
-                      {
-                        backgroundColor: !newChannelName.trim().length ? theme.colors.surface : theme.colors.primary,
-                      },
-                    ]}
-                  >
-                    <Text style={styles.modalActionText}>Criar</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    activeOpacity={0.9}
-                    onPress={() => setChannelModalVisible(false)}
-                    style={[styles.modalCancel, { backgroundColor: theme.colors.surface }]}
-                  >
-                    <Text style={styles.modalCancelText}>Cancelar</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-          ) : null}
-
         </View>
       );
     }
 
-
-// MEMBROS
-if (activeTab === "members") {
-  const canView = tribe.is_public || isMember;
-
-  if (!canView) {
-    return (
-      <View
-        style={[
-          styles.cardSection,
-          { backgroundColor: theme.colors.surfaceElevated, marginTop: 16 },
-        ]}
-      >
-        <Text style={styles.sectionTitle}>Membros</Text>
-        <Text style={styles.infoText}>
-          Entre na tribo para ver quem está aqui dentro.
-        </Text>
-      </View>
-    );
-  }
-
-  return (
-    <View
-      style={[
-        styles.cardSection,
-        { backgroundColor: theme.colors.surfaceElevated, marginTop: 16 },
-      ]}
-    >
-      <View style={styles.rowSpaceBetween}>
-        <View>
-          <Text style={styles.sectionTitle}>Membros</Text>
-          <Text style={styles.infoText}>
-            Toque em um membro para ações (dono/mod).
-          </Text>
-        </View>
-        {membersLoading ? <ActivityIndicator size="small" /> : null}
-      </View>
-
-      <View style={{ marginTop: 12, gap: 10 }}>
-        {members.length === 0 && !membersLoading ? (
-          <Text style={styles.infoText}>Nenhum membro encontrado.</Text>
-        ) : (
-          members.map((m) => {
-            const isYou = userId && m.user_id === userId;
-            const display =
-              m.full_name?.trim() ||
-              m.username?.trim() ||
-              "Usuário";
-
-            const sub =
-              m.username?.trim() ? `@${m.username.trim()}` : "";
-
-            const canClick =
-              isMember &&
-              (myRole === "owner" || myRole === "moderator") &&
-              !isYou;
-
-            return (
-              <TouchableOpacity
-                key={`${m.tribe_id}_${m.user_id}`}
-                activeOpacity={0.9}
-                onPress={() => (canClick ? openMemberModal(m) : undefined)}
-                style={[
-                  styles.memberRow,
-                  { backgroundColor: theme.colors.surface },
-                ]}
-              >
-                <View style={styles.row}>
-                  <View style={styles.memberAvatarWrap}>
-                    {m.avatar_url ? (
-                      <Image
-                        source={{ uri: m.avatar_url }}
-                        style={styles.memberAvatar}
-                      />
-                    ) : (
-                      <View style={styles.memberAvatarFallback}>
-                        <Text style={styles.memberAvatarFallbackText}>
-                          {display.slice(0, 1).toUpperCase()}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.memberName}>
-                      {display}
-                      {isYou ? " (você)" : ""}
-                    </Text>
-                    {sub ? (
-                      <Text style={styles.memberUser}>{sub}</Text>
-                    ) : null}
-                  </View>
-
-                  <View style={styles.rolePill}>
-                    <Text style={styles.rolePillText}>
-                      {roleLabel(m.role)}
-                    </Text>
-                  </View>
-                </View>
-              </TouchableOpacity>
-            );
-          })
-        )}
-      </View>
-
-      {/* Modal ações */}
-      {memberModalVisible && selectedMember ? (
-        <View style={styles.modalOverlay}>
-          <View
-            style={[
-              styles.modalCard,
-              { backgroundColor: theme.colors.surfaceElevated },
-            ]}
-          >
-            <View style={styles.rowSpaceBetween}>
-              <Text style={styles.modalTitle}>Gerenciar membro</Text>
-              <TouchableOpacity activeOpacity={0.9} onPress={closeMemberModal}>
-                <Text style={styles.modalClose}>✕</Text>
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.modalSubtitle}>
-              {selectedMember.full_name?.trim() ||
-                selectedMember.username?.trim() ||
-                "Usuário"}
-            </Text>
-
-            <View style={{ marginTop: 10, gap: 8 }}>
-              {myRole === "owner" ? (
-                <>
-                  <TouchableOpacity
-                    activeOpacity={0.9}
-                    onPress={() => handleSetMemberRole("moderator")}
-                    disabled={selectedMember.role === "moderator"}
-                    style={[
-                      styles.modalAction,
-                      {
-                        backgroundColor:
-                          selectedMember.role === "moderator"
-                            ? theme.colors.surface
-                            : theme.colors.primary,
-                      },
-                    ]}
-                  >
-                    <Text style={styles.modalActionText}>
-                      Promover a moderador
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    activeOpacity={0.9}
-                    onPress={() => handleSetMemberRole("member")}
-                    disabled={selectedMember.role === "member"}
-                    style={[
-                      styles.modalAction,
-                      {
-                        backgroundColor:
-                          selectedMember.role === "member"
-                            ? theme.colors.surface
-                            : theme.colors.primary,
-                      },
-                    ]}
-                  >
-                    <Text style={styles.modalActionText}>
-                      Rebaixar para membro
-                    </Text>
-                  </TouchableOpacity>
-                </>
-              ) : null}
-
-              {(myRole === "owner" || myRole === "moderator") ? (
-                <TouchableOpacity
-                  activeOpacity={0.9}
-                  onPress={handleRemoveMember}
-                  style={[
-                    styles.modalDanger,
-                    { backgroundColor: theme.colors.surface },
-                  ]}
-                >
-                  <Text style={styles.modalDangerText}>Remover membro</Text>
-                </TouchableOpacity>
-              ) : null}
-
-              <TouchableOpacity
-                activeOpacity={0.9}
-                onPress={closeMemberModal}
-                style={[styles.modalCancel, { backgroundColor: theme.colors.surface }]}
-              >
-                <Text style={styles.modalCancelText}>Fechar</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      ) : null}
-    </View>
-  );
-}
-
-    // RANKING
+    /* ═══ RANKING ═══ */
     if (activeTab === "ranking") {
-      return (
-        <View
-          style={[
-            styles.cardSection,
-            { backgroundColor: theme.colors.surfaceElevated, marginTop: 16 },
-          ]}
-        >
-          <Text style={styles.sectionTitle}>Ranking e gamificação</Text>
-          <Text style={styles.infoText}>
-            Em breve: ranking de engajamento, níveis sociais da tribo e badges
-            que aparecem no seu perfil LUPYY.
-          </Text>
+      // Calculate ranking from members + post/message counts
+      const rankedMembers = [...members].sort((a, b) => {
+        const aScore = (a.role === "owner" ? 100 : a.role === "moderator" ? 50 : 0);
+        const bScore = (b.role === "owner" ? 100 : b.role === "moderator" ? 50 : 0);
+        return bScore - aScore;
+      });
 
-          <View style={{ marginTop: 12, gap: 8 }}>
-            {[1, 2, 3].map((pos) => (
-              <View
-                key={pos}
-                style={[
-                  styles.rankingRow,
-                  { backgroundColor: theme.colors.surface },
-                ]}
-              >
-                <View style={styles.row}>
-                  <View style={styles.rankingBadge}>
-                    <Text style={styles.rankingBadgeText}>{pos}</Text>
+      const getRankIcon = (pos: number) => {
+        if (pos === 0) return "🥇";
+        if (pos === 1) return "🥈";
+        if (pos === 2) return "🥉";
+        return `#${pos + 1}`;
+      };
+
+      const getRoleBadgeColor = (role: string) => {
+        if (role === "owner") return "#FFD700";
+        if (role === "moderator") return "#7C3AED";
+        return theme.colors.textMuted;
+      };
+
+      return (
+        <View style={{ marginTop: 12, gap: 10 }}>
+          <View style={[st.feedCard, { backgroundColor: theme.colors.surfaceElevated }]}>
+            <View style={st.rankingHeader}>
+              <Ionicons name="trophy" size={20} color="#FFD700" />
+              <Text style={[st.rankingTitle, { color: theme.colors.text }]}>Ranking da Tribo</Text>
+            </View>
+            <Text style={[st.infoText, { color: theme.colors.textMuted }]}>
+              Membros mais ativos e engajados da comunidade.
+            </Text>
+          </View>
+
+          {membersLoading || members.length === 0 ? (
+            <View style={[st.feedCard, { backgroundColor: theme.colors.surfaceElevated, alignItems: "center", paddingVertical: 24 }]}>
+              {membersLoading ? <ActivityIndicator /> : (
+                <>
+                  <Ionicons name="people-outline" size={28} color={theme.colors.textMuted} />
+                  <Text style={[st.infoText, { color: theme.colors.textMuted, marginTop: 8 }]}>Ranking disponível quando a tribo tiver membros.</Text>
+                </>
+              )}
+            </View>
+          ) : (
+            rankedMembers.slice(0, 20).map((m, i) => {
+              const display = m.full_name?.trim() || m.username?.trim() || "Usuário";
+              const isYou = userId && m.user_id === userId;
+              return (
+                <View key={`${m.tribe_id}_${m.user_id}`} style={[st.rankRow, { backgroundColor: theme.colors.surfaceElevated, borderLeftColor: i < 3 ? getRoleBadgeColor(m.role) : "transparent" }]}>
+                  <View style={st.rankPos}>
+                    <Text style={[st.rankPosText, { color: i < 3 ? "#FFD700" : theme.colors.textMuted }]}>{getRankIcon(i)}</Text>
                   </View>
-                  <View>
-                    <Text style={styles.rankingName}>
-                      Membro da tribo #{pos}
-                    </Text>
-                    <Text style={styles.rankingSubtitle}>
-                      XP e participação (placeholder)
-                    </Text>
+                  {m.avatar_url ? (
+                    <Image source={{ uri: m.avatar_url }} style={st.rankAvatar} />
+                  ) : (
+                    <View style={[st.rankAvatarFallback, { backgroundColor: theme.colors.primary + "22" }]}>
+                      <Text style={[st.rankAvatarText, { color: theme.colors.primary }]}>{display.charAt(0).toUpperCase()}</Text>
+                    </View>
+                  )}
+                  <View style={{ flex: 1 }}>
+                    <Text style={[st.rankName, { color: theme.colors.text }]}>{display}{isYou ? " (você)" : ""}</Text>
+                    <Text style={[st.rankSub, { color: theme.colors.textMuted }]}>{m.username ? `@${m.username}` : roleLabel(m.role)}</Text>
+                  </View>
+                  <View style={[st.rankRolePill, { backgroundColor: getRoleBadgeColor(m.role) + "22" }]}>
+                    <Text style={[st.rankRoleText, { color: getRoleBadgeColor(m.role) }]}>{roleLabel(m.role)}</Text>
                   </View>
                 </View>
-                <Text style={styles.rankingTag}>Em breve</Text>
-              </View>
-            ))}
-          </View>
-        </View>
-      );
-    }
-
-    // SOBRE
-    if (activeTab === "about") {
-      return (
-        <View
-          style={[
-            styles.cardSection,
-            { backgroundColor: theme.colors.surfaceElevated, marginTop: 16 },
-          ]}
-        >
-          <Text style={styles.sectionTitle}>Sobre a tribo</Text>
-
-          {tribe.description ? (
-            <Text style={styles.infoTextStrong}>{tribe.description}</Text>
-          ) : (
-            <Text style={styles.infoText}>
-              Essa tribo ainda não tem uma descrição. O criador pode usar esse
-              espaço para explicar o propósito, as regras e a vibe da comunidade.
-            </Text>
+              );
+            })
           )}
 
-          <View style={styles.chipsRow}>
-            {tribe.category ? (
-              <View style={styles.chip}>
-                <Text style={styles.chipText}>{tribe.category}</Text>
+          <View style={[st.feedCard, { backgroundColor: theme.colors.surfaceElevated, alignItems: "center" }]}>
+            <View style={st.comingSoonRow}>
+              <Ionicons name="sparkles" size={16} color={theme.colors.primary} />
+              <Text style={[st.comingSoonText, { color: theme.colors.primary }]}>Em breve: XP, badges e níveis</Text>
+            </View>
+            <Text style={[st.infoText, { color: theme.colors.textMuted, textAlign: "center" }]}>
+              Sistema de XP baseado em mensagens, posts e engajamento com badges exclusivas no perfil LUPYY.
+            </Text>
+          </View>
+        </View>
+      );
+    }
+
+    /* ═══ MEMBERS ═══ */
+    if (activeTab === "members") {
+      const canView = tribe.is_public || isMember;
+      if (!canView) {
+        return (
+          <View style={[st.feedCard, { backgroundColor: theme.colors.surfaceElevated, marginTop: 12 }]}>
+            <Text style={[st.infoTitle, { color: theme.colors.text }]}>Membros</Text>
+            <Text style={[st.infoText, { color: theme.colors.textMuted }]}>Entre na tribo para ver quem está aqui.</Text>
+          </View>
+        );
+      }
+
+      const owners = members.filter(m => m.role === "owner");
+      const mods = members.filter(m => m.role === "moderator");
+      const regularMembers = members.filter(m => m.role === "member");
+
+      const renderMemberSection = (title: string, list: TribeMemberDetailed[], icon: string) => {
+        if (list.length === 0) return null;
+        return (
+          <View style={{ marginTop: 12 }}>
+            <View style={st.memberSectionHeader}>
+              <Text style={[st.memberSectionTitle, { color: theme.colors.textMuted }]}>{title} — {list.length}</Text>
+            </View>
+            {list.map((m) => {
+              const display = m.full_name?.trim() || m.username?.trim() || "Usuário";
+              const isYou = userId && m.user_id === userId;
+              const canClick = isMember && (myRole === "owner" || myRole === "moderator") && !isYou;
+              return (
+                <TouchableOpacity
+                  key={`${m.tribe_id}_${m.user_id}`}
+                  activeOpacity={0.85}
+                  onPress={() => (canClick ? openMemberModal(m) : undefined)}
+                  style={[st.memberRow, { backgroundColor: theme.colors.surfaceElevated }]}
+                >
+                  {m.avatar_url ? (
+                    <Image source={{ uri: m.avatar_url }} style={st.memberAvatar} />
+                  ) : (
+                    <View style={[st.memberAvatarFallback, { backgroundColor: theme.colors.primary + "22" }]}>
+                      <Text style={[st.memberAvatarText, { color: theme.colors.primary }]}>{display.charAt(0).toUpperCase()}</Text>
+                    </View>
+                  )}
+                  <View style={{ flex: 1 }}>
+                    <Text style={[st.memberName, { color: theme.colors.text }]}>{display}{isYou ? " (você)" : ""}</Text>
+                    {m.username && <Text style={[st.memberUsername, { color: theme.colors.textMuted }]}>@{m.username}</Text>}
+                  </View>
+                  <View style={[st.memberRolePill, { backgroundColor: m.role === "owner" ? "#FFD700" + "22" : m.role === "moderator" ? theme.colors.primary + "22" : theme.colors.surface }]}>
+                    <Text style={[st.memberRoleText, { color: m.role === "owner" ? "#FFD700" : m.role === "moderator" ? theme.colors.primary : theme.colors.textMuted }]}>{roleLabel(m.role)}</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        );
+      };
+
+      return (
+        <View style={{ marginTop: 8 }}>
+          <View style={[st.feedCard, { backgroundColor: theme.colors.surfaceElevated }]}>
+            <View style={st.membersTotalRow}>
+              <Ionicons name="people" size={18} color={theme.colors.primary} />
+              <Text style={[st.membersTotalText, { color: theme.colors.text }]}>{members.length} membro{members.length !== 1 ? "s" : ""}</Text>
+              {membersLoading && <ActivityIndicator size="small" />}
+            </View>
+          </View>
+          {renderMemberSection("DONO", owners, "crown")}
+          {renderMemberSection("MODERADORES", mods, "shield")}
+          {renderMemberSection("MEMBROS", regularMembers, "person")}
+        </View>
+      );
+    }
+
+    /* ═══ ABOUT ═══ */
+    if (activeTab === "about") {
+      return (
+        <View style={[st.feedCard, { backgroundColor: theme.colors.surfaceElevated, marginTop: 12 }]}>
+          <View style={st.aboutHeader}>
+            <Ionicons name="information-circle" size={20} color={theme.colors.primary} />
+            <Text style={[st.aboutTitle, { color: theme.colors.text }]}>Sobre a tribo</Text>
+          </View>
+          {tribe.description ? (
+            <Text style={[st.aboutDesc, { color: theme.colors.text }]}>{tribe.description}</Text>
+          ) : (
+            <Text style={[st.infoText, { color: theme.colors.textMuted }]}>Sem descrição ainda.</Text>
+          )}
+          <View style={st.aboutChips}>
+            {tribe.category && (
+              <View style={[st.aboutChip, { backgroundColor: theme.colors.primary + "18" }]}>
+                <Text style={[st.aboutChipText, { color: theme.colors.primary }]}>{tribe.category}</Text>
               </View>
-            ) : null}
-
-            <View style={styles.chip}>
-              <Text style={styles.chipText}>
-                {tribe.is_public ? "Tribo pública" : "Tribo privada"}
-              </Text>
+            )}
+            <View style={[st.aboutChip, { backgroundColor: theme.colors.surface }]}>
+              <Ionicons name={tribe.is_public ? "globe-outline" : "lock-closed-outline"} size={12} color={theme.colors.textMuted} />
+              <Text style={[st.aboutChipText, { color: theme.colors.textMuted }]}>{tribe.is_public ? "Pública" : "Privada"}</Text>
             </View>
-
-            <View style={styles.chip}>
-              <Text style={styles.chipText}>
-                Criada em {formatDate(tribe.created_at)}
-              </Text>
+            <View style={[st.aboutChip, { backgroundColor: theme.colors.surface }]}>
+              <Ionicons name="calendar-outline" size={12} color={theme.colors.textMuted} />
+              <Text style={[st.aboutChipText, { color: theme.colors.textMuted }]}>Criada em {formatDate(tribe.created_at)}</Text>
             </View>
-
-            <View style={styles.chip}>
-              <Text style={styles.chipText}>
-                {isOwner ? "Criada por você" : "Criador: membro da tribo"}
-              </Text>
+            <View style={[st.aboutChip, { backgroundColor: theme.colors.surface }]}>
+              <Ionicons name="people-outline" size={12} color={theme.colors.textMuted} />
+              <Text style={[st.aboutChipText, { color: theme.colors.textMuted }]}>{tribe.members_count} membro{tribe.members_count !== 1 ? "s" : ""}</Text>
             </View>
           </View>
         </View>
@@ -1955,1121 +1068,434 @@ if (activeTab === "members") {
     return null;
   };
 
-  // ---------- LOADING ----------
+  /* ─── Loading / Not found ─── */
   if (loading) {
     return (
-      <SafeAreaView
-        style={{
-          flex: 1,
-          paddingTop: insets.top,
-          backgroundColor: theme.colors.background,
-        }}
-      >
-        <View style={styles.centeredBlockFlex}>
-          <ActivityIndicator />
-          <Text style={styles.loadingText}>Carregando tribo...</Text>
-        </View>
+      <SafeAreaView style={{ flex: 1, paddingTop: insets.top, backgroundColor: theme.colors.background }}>
+        <View style={st.centeredFlex}><ActivityIndicator /><Text style={[st.loadingText, { color: theme.colors.textMuted }]}>Carregando tribo...</Text></View>
       </SafeAreaView>
     );
   }
 
   if (!tribe) {
     return (
-      <SafeAreaView
-        style={{
-          flex: 1,
-          paddingTop: insets.top,
-          backgroundColor: theme.colors.background,
-        }}
-      >
-        <View style={styles.centeredBlockFlex}>
-          <Text style={styles.loadingText}>
-            Não foi possível carregar essa tribo.
-          </Text>
-          <TouchableOpacity
-            activeOpacity={0.9}
-            onPress={goBackToTribes}
-            style={styles.primaryChipButton}
-          >
-            <Text style={styles.primaryChipButtonText}>
-              Voltar para as tribos
-            </Text>
+      <SafeAreaView style={{ flex: 1, paddingTop: insets.top, backgroundColor: theme.colors.background }}>
+        <View style={st.centeredFlex}>
+          <Text style={[st.loadingText, { color: theme.colors.textMuted }]}>Tribo não encontrada.</Text>
+          <TouchableOpacity activeOpacity={0.9} onPress={goBackToTribes} style={[st.backBtn, { backgroundColor: theme.colors.primary }]}>
+            <Text style={st.backBtnText}>Voltar</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
   }
 
-  // ---------- UI ----------
-  const coverUri = getCoverUri(tribe?.cover_url ?? null);
+  /* ─── Main UI ─── */
+  const coverUri = getCoverUri(tribe.cover_url);
 
   return (
-    <SafeAreaView
-      style={{
-        flex: 1,
-        paddingTop: insets.top,
-        backgroundColor: theme.colors.background,
-      }}
-    >
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
-      >
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={
-          Platform.OS !== "web" && activeTab === "chat"
-            ? { paddingBottom: insets.bottom }
-            : { paddingBottom: 32 + insets.bottom }
-        }
-        keyboardShouldPersistTaps="handled"
-        scrollEnabled={
-          Platform.OS === "web"
-            ? !(isLargeWeb && activeTab === "chat")
-            : activeTab !== "chat"
-        }
-      >
-        {/* HEADER / CAPA */}
-        <View style={styles.coverContainer}>
-          <TouchableOpacity activeOpacity={1} style={StyleSheet.absoluteFill} onPress={() => {}} onLongPress={canManageCover ? openCoverActions : undefined} delayLongPress={350}>
-          {coverUri ? (
-            <Image
-              source={{ uri: coverUri }}
-              style={styles.coverImage}
-              resizeMode="cover"
-            />
-          ) : (
-            <View style={styles.coverPlaceholder} />
-          )}
-          </TouchableOpacity>
-
-          {/* Top bar */}
-          <View style={styles.coverTopBar} pointerEvents="box-none">
-            <TouchableOpacity
-              activeOpacity={0.8}
-              onPress={goBackToTribes}
-              style={styles.coverBackButton}
-            >
-              <Text style={styles.coverBackText}>{"‹"}</Text>
+    <SafeAreaView style={{ flex: 1, paddingTop: insets.top, backgroundColor: theme.colors.background }}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <ScrollView
+          style={Platform.OS === "web" ? { flex: 1, touchAction: "pan-y" } as any : { flex: 1 }}
+          contentContainerStyle={{ paddingBottom: 32 + insets.bottom }}
+          keyboardShouldPersistTaps="handled"
+          scrollEnabled={activeTab !== "chat" || !isLargeWeb}
+        >
+          {/* Cover */}
+          <View style={st.coverContainer}>
+            <TouchableOpacity activeOpacity={1} style={StyleSheet.absoluteFill} onLongPress={canManageCover ? () => setCoverActionsVisible(true) : undefined} delayLongPress={350}>
+              {coverUri ? <Image source={{ uri: coverUri }} style={st.coverImage} resizeMode="cover" /> : <View style={[st.coverPlaceholder, { backgroundColor: theme.colors.primary + "22" }]} />}
             </TouchableOpacity>
-
-            <View style={styles.coverTag}>
-              <Text style={styles.coverTagText}>TRIBO</Text>
+            <View style={st.coverTopBar} pointerEvents="box-none">
+              <TouchableOpacity activeOpacity={0.8} onPress={goBackToTribes} style={st.coverBackButton}>
+                <Ionicons name="chevron-back" size={20} color="#fff" />
+              </TouchableOpacity>
+              <View style={st.coverTag}><Text style={st.coverTagText}>TRIBO</Text></View>
+            </View>
+            <View pointerEvents="none" style={st.coverGradient} />
+            <View style={st.coverBottomInfo}>
+              <Text style={st.coverTitle} numberOfLines={2}>{tribe.name}</Text>
+              <View style={st.coverMetaRow}>
+                <View style={st.coverMetaBadge}><Ionicons name="people" size={12} color="#E5E7EB" /><Text style={st.coverMetaText}>{tribe.members_count} membro{tribe.members_count !== 1 ? "s" : ""}</Text></View>
+                {tribe.category && <View style={st.coverMetaBadge}><Text style={st.coverMetaText}>{tribe.category}</Text></View>}
+              </View>
+              {canManageCover && (
+                <Text style={st.coverEditHint}>{uploadingCover ? "Enviando..." : "Segure na capa para trocar"}</Text>
+              )}
             </View>
           </View>
 
-          {/* Gradient overlay */}
-          <View pointerEvents="none" style={styles.coverGradientOverlay} />
-
-          {/* Nome + info básica */}
-          <View style={styles.coverBottomInfo}>
-            <Text style={styles.coverTitle} numberOfLines={2}>
-              {tribe.name}
-            </Text>
-            <View style={styles.row}>
-              <Text style={styles.coverMeta}>
-                {tribe.members_count} membro
-                {tribe.members_count === 1 ? "" : "s"}
+          {/* Content */}
+          <View style={{ paddingHorizontal: isLargeWeb ? 32 : 16, paddingTop: 12 }}>
+            {/* Description + Join */}
+            <View style={st.descriptionRow}>
+              <Text style={[st.descriptionText, { color: theme.colors.textMuted }]} numberOfLines={3}>
+                {tribe.description || "Entre e faça parte dessa comunidade."}
               </Text>
-              {tribe.category ? (
-                <Text style={[styles.coverMeta, { marginLeft: 8 }]}>
-                  • {tribe.category}
-                </Text>
-              ) : null}
-            </View>
-          
-            {canManageCover ? (
-              <View style={styles.coverEditHint}>
-                <Text style={styles.coverEditHintText}>{uploadingCover ? "Enviando capa..." : "Segure na capa para trocar"}</Text>
-              </View>
-            ) : null}
-</View>
-        </View>
-
-        {/* CONTEÚDO */}
-        <View
-          style={{
-            paddingHorizontal: isLargeWeb ? 32 : 16,
-            paddingTop: 16,
-          }}
-        >
-          {isLargeWeb ? (
-            // WEB: modal centralizado estilo Discord
-            <View style={styles.webWrapper}>
-              <View
-                style={[
-                  styles.webModal,
-                  { backgroundColor: theme.colors.background },
-                ]}
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={handleToggleMembership}
+                disabled={joining || membershipLoading}
+                style={[st.joinBtn, { backgroundColor: isMember ? theme.colors.surface : theme.colors.primary }]}
               >
-                {/* CARD INTERNO */}
-                <View
-                  style={[
-                    styles.webModalCard,
-                    {
-                      backgroundColor: theme.colors.surfaceElevated,
-                      borderColor: theme.colors.surface,
-                    },
-                  ]}
-                >
-                  <View style={styles.webColumns}>
-                    {/* COLUNA ESQUERDA */}
-                    <View style={styles.webLeft}>
-                      <Text style={styles.leftTitle}>Sobre essa tribo</Text>
-                      <Text style={styles.leftDescription}>
-                        {tribe.description
-                          ? tribe.description
-                          : "Entre para a tribo e começa a construir uma nova bolha social com a cara do LUPYY."}
-                      </Text>
-
-                      <View style={styles.chipsRow}>
-                        {tribe.category ? (
-                          <View style={styles.chip}>
-                            <Text style={styles.chipText}>
-                              {tribe.category}
-                            </Text>
-                          </View>
-                        ) : null}
-
-                        <View style={styles.chip}>
-                          <Text style={styles.chipText}>
-                            {tribe.is_public
-                              ? "Tribo pública"
-                              : "Tribo privada"}
-                          </Text>
-                        </View>
-
-                        <View style={styles.chip}>
-                          <Text style={styles.chipText}>
-                            Criada em {formatDate(tribe.created_at)}
-                          </Text>
-                        </View>
-                      </View>
-
-                      <TouchableOpacity
-                        activeOpacity={0.85}
-                        onPress={handleToggleMembership}
-                        disabled={joining || membershipLoading}
-                        style={[
-                          styles.leftButton,
-                          {
-                            backgroundColor: isMember
-                              ? theme.colors.surface
-                              : theme.colors.primary,
-                          },
-                        ]}
-                      >
-                        {joining || membershipLoading ? (
-                          <ActivityIndicator size="small" color="#fff" />
-                        ) : (
-                          <Text
-                            style={[
-                              styles.leftButtonText,
-                              {
-                                color: isMember
-                                  ? theme.colors.text
-                                  : "#FFFFFF",
-                              },
-                            ]}
-                          >
-                            {membershipLoading ? "Carregando..." : isMember ? "Sair da tribo" : "Entrar na tribo"}
-                          </Text>
-                        )}
-                      </TouchableOpacity>
-                    </View>
-
-                    {/* COLUNA DIREITA */}
-                    <View style={styles.webRight}>
-                      {/* Tabs */}
-                      <View
-                        style={[
-                          styles.tabsContainer,
-                          {
-                            backgroundColor: theme.colors.background,
-                          },
-                        ]}
-                      >
-                        {tabs.map((tab) => (
-                          <TouchableOpacity
-                            key={tab.key}
-                            activeOpacity={0.9}
-                            onPress={() => setActiveTab(tab.key)}
-                            style={[
-                              styles.tabItem,
-                              {
-                                backgroundColor:
-                                  activeTab === tab.key
-                                    ? theme.colors.primary
-                                    : "transparent",
-                              },
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.tabItemText,
-                                {
-                                  color:
-                                    activeTab === tab.key
-                                      ? "#FFFFFF"
-                                      : theme.colors.textMuted,
-                                },
-                              ]}
-                            >
-                              {tab.label}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-
-                      {renderTabContent()}
-                    </View>
+                {joining || membershipLoading ? <ActivityIndicator size="small" color={isMember ? theme.colors.text : "#fff"} /> : (
+                  <View style={st.joinBtnContent}>
+                    <Ionicons name={isMember ? "exit-outline" : "enter-outline"} size={16} color={isMember ? theme.colors.text : "#fff"} />
+                    <Text style={[st.joinBtnText, { color: isMember ? theme.colors.text : "#FFFFFF" }]}>
+                      {isMember ? "Sair" : "Entrar"}
+                    </Text>
                   </View>
-                </View>
-              </View>
+                )}
+              </TouchableOpacity>
             </View>
-          ) : (
-            // MOBILE / APP
-            <>
-              <View style={styles.mobileHeaderRow}>
-                <View style={{ flex: 1, paddingRight: 8 }}>
-                  <Text style={styles.mobileDescription} numberOfLines={3}>
-                    {tribe.description
-                      ? tribe.description
-                      : "Entre para a tribo e começa a construir uma nova bolha social com a cara do LUPYY."}
-                  </Text>
-                </View>
 
+            {/* Tabs */}
+            <View style={[st.tabsContainer, { backgroundColor: theme.colors.surfaceElevated, marginTop: 12 }]}>
+              {tabs.map((tab) => (
                 <TouchableOpacity
+                  key={tab.key}
                   activeOpacity={0.85}
-                  onPress={handleToggleMembership}
-                  disabled={joining || membershipLoading}
-                  style={[
-                    styles.leftButton,
-                    {
-                      backgroundColor: isMember
-                        ? theme.colors.surface
-                        : theme.colors.primary,
-                    },
-                  ]}
+                  onPress={() => setActiveTab(tab.key)}
+                  style={[st.tabItem, { backgroundColor: activeTab === tab.key ? theme.colors.primary : "transparent" }]}
                 >
-                  {joining || membershipLoading ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <Text
-                      style={[
-                        styles.leftButtonText,
-                        {
-                          color: isMember ? theme.colors.text : "#FFFFFF",
-                        },
-                      ]}
-                    >
-                      {membershipLoading ? "Carregando..." : isMember ? "Sair da tribo" : "Entrar na tribo"}
-                    </Text>
-                  )}
+                  <Ionicons name={TAB_ICONS[tab.key] as any} size={14} color={activeTab === tab.key ? "#fff" : theme.colors.textMuted} />
+                  <Text style={[st.tabItemText, { color: activeTab === tab.key ? "#FFFFFF" : theme.colors.textMuted }]}>{tab.label}</Text>
                 </TouchableOpacity>
-              </View>
+              ))}
+            </View>
 
-              {/* Tabs */}
-              <View
-                style={[
-                  styles.tabsContainer,
-                  {
-                    marginTop: 16,
-                    backgroundColor: theme.colors.surfaceElevated,
-                  },
-                ]}
-              >
-                {tabs.map((tab) => (
-                  <TouchableOpacity
-                    key={tab.key}
-                    activeOpacity={0.9}
-                    onPress={() => setActiveTab(tab.key)}
-                    style={[
-                      styles.tabItem,
-                      {
-                        backgroundColor:
-                          activeTab === tab.key
-                            ? theme.colors.primary
-                            : "transparent",
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.tabItemText,
-                        {
-                          color:
-                            activeTab === tab.key
-                              ? "#FFFFFF"
-                              : theme.colors.textMuted,
-                        },
-                      ]}
-                    >
-                      {tab.label}
-                    </Text>
+            {renderTabContent()}
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      {/* ─── Modals ─── */}
+
+      {/* Message actions */}
+      <Modal transparent visible={messageActionsVisible && !!selectedMessage} animationType="fade" onRequestClose={closeMessageActions}>
+        <TouchableOpacity activeOpacity={1} onPress={closeMessageActions} style={st.modalOverlay}>
+          <View style={[st.modalCard, { backgroundColor: theme.colors.surfaceElevated }]} onStartShouldSetResponder={() => true}>
+            <View style={st.modalHeader}>
+              <Text style={[st.modalTitle, { color: theme.colors.text }]}>Ações da mensagem</Text>
+              <TouchableOpacity onPress={closeMessageActions}><Ionicons name="close" size={20} color={theme.colors.textMuted} /></TouchableOpacity>
+            </View>
+            {selectedMessage && !selectedMessage.is_deleted && (
+              <View style={[st.modalMsgPreview, { backgroundColor: theme.colors.surface }]}>
+                <Text style={[st.modalMsgText, { color: theme.colors.text }]} numberOfLines={3}>{selectedMessage.content}</Text>
+              </View>
+            )}
+            <View style={{ gap: 6, marginTop: 12 }}>
+              <TouchableOpacity activeOpacity={0.85} style={[st.modalAction, { backgroundColor: theme.colors.surface }]} onPress={startReply}>
+                <Ionicons name="arrow-undo" size={16} color={theme.colors.text} /><Text style={[st.modalActionText, { color: theme.colors.text }]}>Responder</Text>
+              </TouchableOpacity>
+              <TouchableOpacity activeOpacity={0.85} style={[st.modalAction, { backgroundColor: theme.colors.surface }]} onPress={() => setEmojiPickerVisible(!emojiPickerVisible)}>
+                <Ionicons name="happy-outline" size={16} color={theme.colors.text} /><Text style={[st.modalActionText, { color: theme.colors.text }]}>Reagir</Text>
+              </TouchableOpacity>
+              {canManageMessages && (
+                <TouchableOpacity activeOpacity={0.85} style={[st.modalAction, { backgroundColor: "#EF4444" + "18" }]} onPress={deleteMessage}>
+                  <Ionicons name="trash-outline" size={16} color="#EF4444" /><Text style={[st.modalActionText, { color: "#EF4444" }]}>Apagar</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            {emojiPickerVisible && (
+              <View style={st.emojiGrid}>
+                {EMOJI_LIST.map((e) => (
+                  <TouchableOpacity key={e} activeOpacity={0.85} style={[st.emojiBtn, { backgroundColor: theme.colors.surface }]} onPress={() => addReaction(e)}>
+                    <Text style={{ fontSize: 24 }}>{e}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
+            )}
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
-              {renderTabContent()}
-            </>
-          )}
-        </View>
-      </ScrollView>
-      </KeyboardAvoidingView>
+      {/* Create channel */}
+      <Modal transparent visible={channelModalVisible} animationType="fade" onRequestClose={() => setChannelModalVisible(false)}>
+        <TouchableOpacity activeOpacity={1} onPress={() => setChannelModalVisible(false)} style={st.modalOverlay}>
+          <View style={[st.modalCard, { backgroundColor: theme.colors.surfaceElevated }]} onStartShouldSetResponder={() => true}>
+            <View style={st.modalHeader}>
+              <Text style={[st.modalTitle, { color: theme.colors.text }]}>Criar canal</Text>
+              <TouchableOpacity onPress={() => setChannelModalVisible(false)}><Ionicons name="close" size={20} color={theme.colors.textMuted} /></TouchableOpacity>
+            </View>
+            <Text style={[st.modalSub, { color: theme.colors.textMuted }]}>Apenas dono e moderadores podem criar canais.</Text>
 
-      {coverActionsVisible && canManageCover ? (
-        <View style={styles.modalOverlay}>
-          <View
-            style={[
-              styles.modalCard,
-              { backgroundColor: theme.colors.surfaceElevated },
-            ]}
-          >
-            <View style={styles.rowSpaceBetween}>
-              <Text style={styles.modalTitle}>Capa da tribo</Text>
+            {/* Channel type selector */}
+            <View style={st.channelTypeRow}>
               <TouchableOpacity
-                activeOpacity={0.8}
-                onPress={() => setCoverActionsVisible(false)}
+                activeOpacity={0.85}
+                onPress={() => setNewChannelType("text")}
+                style={[st.channelTypeOption, { backgroundColor: newChannelType === "text" ? theme.colors.primary : theme.colors.surface }]}
               >
-                <Text style={styles.modalClose}>×</Text>
+                <Ionicons name="chatbubble-ellipses-outline" size={18} color={newChannelType === "text" ? "#fff" : theme.colors.textMuted} />
+                <Text style={{ fontSize: 13, fontWeight: "700", color: newChannelType === "text" ? "#fff" : theme.colors.textMuted }}>Texto</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => setNewChannelType("voice")}
+                style={[st.channelTypeOption, { backgroundColor: newChannelType === "voice" ? theme.colors.primary : theme.colors.surface }]}
+              >
+                <Ionicons name="mic-outline" size={18} color={newChannelType === "voice" ? "#fff" : theme.colors.textMuted} />
+                <Text style={{ fontSize: 13, fontWeight: "700", color: newChannelType === "voice" ? "#fff" : theme.colors.textMuted }}>Voz</Text>
               </TouchableOpacity>
             </View>
-            <Text style={styles.modalSubtitle}>
-              {Platform.OS === "web"
-                ? "Isso vai abrir o seletor de arquivos do navegador."
-                : "Isso vai abrir sua galeria de fotos."}
-            </Text>
 
-            <TouchableOpacity
-              activeOpacity={0.85}
-              disabled={uploadingCover}
-              onPress={confirmCoverPick}
-              style={[
-                styles.coverModalPrimary,
-                { backgroundColor: theme.colors.primary },
-                uploadingCover ? { opacity: 0.7 } : null,
-              ]}
-            >
-              {uploadingCover ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Text style={styles.coverModalPrimaryText}>Trocar capa</Text>
-              )}
-            </TouchableOpacity>
+            <TextInput
+              value={newChannelName}
+              onChangeText={setNewChannelName}
+              placeholder={newChannelType === "voice" ? "Nome da sala (ex: Reuniões)" : "Nome do canal (ex: Projetos)"}
+              placeholderTextColor={theme.colors.textMuted}
+              style={[st.modalInput, { backgroundColor: theme.colors.surface, color: theme.colors.text, borderColor: theme.colors.border }]}
+            />
 
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={() => setCoverActionsVisible(false)}
-              style={[
-                styles.coverModalSecondary,
-                { backgroundColor: theme.colors.surface },
-              ]}
-            >
-              <Text style={styles.coverModalSecondaryText}>Cancelar</Text>
-            </TouchableOpacity>
+            {newChannelType === "voice" && (
+              <View style={[st.voiceInfoBox, { backgroundColor: theme.colors.primary + "12", borderColor: theme.colors.primary + "30" }]}>
+                <Ionicons name="information-circle-outline" size={16} color={theme.colors.primary} />
+                <Text style={{ fontSize: 12, color: theme.colors.primary, flex: 1, lineHeight: 17 }}>
+                  Salas de voz permitem que membros entrem e conversem em tempo real, como no Discord.
+                </Text>
+              </View>
+            )}
+
+            <View style={{ gap: 8, marginTop: 14 }}>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={createChannel}
+                disabled={!newChannelName.trim().length}
+                style={[st.modalPrimaryBtn, { backgroundColor: !newChannelName.trim().length ? theme.colors.surface : theme.colors.primary }]}
+              >
+                <Ionicons name={newChannelType === "voice" ? "mic" : "add-circle"} size={16} color="#fff" />
+                <Text style={st.modalPrimaryBtnText}>Criar {newChannelType === "voice" ? "sala de voz" : "canal"}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity activeOpacity={0.85} onPress={() => setChannelModalVisible(false)} style={[st.modalSecondaryBtn, { backgroundColor: theme.colors.surface }]}>
+                <Text style={[st.modalSecondaryBtnText, { color: theme.colors.textMuted }]}>Cancelar</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
-      ) : null}
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Member actions */}
+      <Modal transparent visible={memberModalVisible && !!selectedMember} animationType="fade" onRequestClose={closeMemberModal}>
+        <TouchableOpacity activeOpacity={1} onPress={closeMemberModal} style={st.modalOverlay}>
+          <View style={[st.modalCard, { backgroundColor: theme.colors.surfaceElevated }]} onStartShouldSetResponder={() => true}>
+            <View style={st.modalHeader}>
+              <Text style={[st.modalTitle, { color: theme.colors.text }]}>Gerenciar membro</Text>
+              <TouchableOpacity onPress={closeMemberModal}><Ionicons name="close" size={20} color={theme.colors.textMuted} /></TouchableOpacity>
+            </View>
+            {selectedMember && (
+              <>
+                <Text style={[st.modalSub, { color: theme.colors.text }]}>{selectedMember.full_name?.trim() || selectedMember.username?.trim() || "Usuário"}</Text>
+                <View style={{ gap: 8, marginTop: 12 }}>
+                  {myRole === "owner" && (
+                    <>
+                      <TouchableOpacity activeOpacity={0.85} disabled={selectedMember.role === "moderator"} onPress={() => handleSetMemberRole("moderator")}
+                        style={[st.modalAction, { backgroundColor: selectedMember.role === "moderator" ? theme.colors.surface : theme.colors.primary }]}>
+                        <Ionicons name="shield-checkmark" size={16} color={selectedMember.role === "moderator" ? theme.colors.textMuted : "#fff"} />
+                        <Text style={[st.modalActionText, { color: selectedMember.role === "moderator" ? theme.colors.textMuted : "#fff" }]}>Promover a moderador</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity activeOpacity={0.85} disabled={selectedMember.role === "member"} onPress={() => handleSetMemberRole("member")}
+                        style={[st.modalAction, { backgroundColor: selectedMember.role === "member" ? theme.colors.surface : theme.colors.primary }]}>
+                        <Ionicons name="person" size={16} color={selectedMember.role === "member" ? theme.colors.textMuted : "#fff"} />
+                        <Text style={[st.modalActionText, { color: selectedMember.role === "member" ? theme.colors.textMuted : "#fff" }]}>Rebaixar para membro</Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
+                  <TouchableOpacity activeOpacity={0.85} onPress={handleRemoveMember} style={[st.modalAction, { backgroundColor: "#EF4444" + "18" }]}>
+                    <Ionicons name="person-remove" size={16} color="#EF4444" />
+                    <Text style={[st.modalActionText, { color: "#EF4444" }]}>Remover membro</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Cover actions */}
+      <Modal transparent visible={coverActionsVisible && canManageCover} animationType="fade" onRequestClose={() => setCoverActionsVisible(false)}>
+        <TouchableOpacity activeOpacity={1} onPress={() => setCoverActionsVisible(false)} style={st.modalOverlay}>
+          <View style={[st.modalCard, { backgroundColor: theme.colors.surfaceElevated }]} onStartShouldSetResponder={() => true}>
+            <Text style={[st.modalTitle, { color: theme.colors.text }]}>Capa da tribo</Text>
+            <Text style={[st.modalSub, { color: theme.colors.textMuted, marginTop: 6 }]}>Escolha uma nova imagem de capa.</Text>
+            <View style={{ gap: 8, marginTop: 14 }}>
+              <TouchableOpacity activeOpacity={0.85} disabled={uploadingCover} onPress={() => { setCoverActionsVisible(false); pickAndUploadCover(); }}
+                style={[st.modalPrimaryBtn, { backgroundColor: theme.colors.primary }]}>
+                {uploadingCover ? <ActivityIndicator size="small" color="#fff" /> : (
+                  <><Ionicons name="image" size={16} color="#fff" /><Text style={st.modalPrimaryBtnText}>Trocar capa</Text></>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity activeOpacity={0.85} onPress={() => setCoverActionsVisible(false)} style={[st.modalSecondaryBtn, { backgroundColor: theme.colors.surface }]}>
+                <Text style={[st.modalSecondaryBtnText, { color: theme.colors.textMuted }]}>Cancelar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  // gerais
-  row: { flexDirection: "row", alignItems: "center" },
-  rowSpaceBetween: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  flex1: { flex: 1 },
+/* ─── Styles ─── */
+const st = StyleSheet.create({
+  // General
+  centeredFlex: { flex: 1, alignItems: "center", justifyContent: "center" },
+  centeredBlock: { alignItems: "center", justifyContent: "center", paddingVertical: 20 },
+  loadingText: { marginTop: 10, fontSize: 14 },
+  loadingSmall: { marginTop: 6, fontSize: 12 },
+  infoTitle: { fontSize: 14, fontWeight: "700" },
+  infoText: { fontSize: 13, marginTop: 4, lineHeight: 18 },
+  backBtn: { marginTop: 12, borderRadius: 999, paddingHorizontal: 20, paddingVertical: 10 },
+  backBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
 
-  centeredBlockFlex: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  centeredBlock: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 16,
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 14,
-    color: "#E5E7EB",
-  },
-  loadingSmallText: {
-    marginTop: 6,
-    fontSize: 11,
-    color: "#9CA3AF",
-  },
-
-  // capa
-  coverContainer: { position: "relative", height: 210, width: "100%" },
+  // Cover
+  coverContainer: { position: "relative", height: 220, width: "100%" },
   coverImage: { height: "100%", width: "100%" },
-  coverPlaceholder: {
-    height: "100%",
-    width: "100%",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#130636",
-  },
-  coverInitial: { fontSize: 42, fontWeight: "bold", color: "#fff" },
-  coverTopBar: {
-    position: "absolute",
-    left: 16,
-    right: 16,
-    top: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    zIndex: 50,
-    elevation: 50,
-  },
-  coverBackButton: {
-    height: 36,
-    width: 36,
-    borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(0,0,0,0.6)",
-  },
-  coverBackText: { fontSize: 20, color: "#fff" },
-  coverTag: {
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    backgroundColor: "rgba(0,0,0,0.6)",
-  },
-  coverTagText: {
-    fontSize: 11,
-    fontWeight: "600",
-    letterSpacing: 1,
-    color: "#F9FAFB",
-  },
-  coverGradientOverlay: {
-    position: "absolute",
-    inset: 0,
-    backgroundColor: "rgba(0,0,0,0.45)",
-    zIndex: 10,
-    elevation: 10,
-  },
-  coverBottomInfo: {
-    position: "absolute",
-    left: 16,
-    right: 16,
-    bottom: 16,
-    zIndex: 40,
-    elevation: 40,
-  },
-  coverTitle: {
-    fontSize: 24,
-    fontWeight: "800",
-    color: "#FFFFFF",
-  },
-  coverMeta: {
-    fontSize: 12,
-    fontWeight: "500",
-    color: "#E5E7EB",
-  },
+  coverPlaceholder: { height: "100%", width: "100%", alignItems: "center", justifyContent: "center" },
+  coverTopBar: { position: "absolute", left: 16, right: 16, top: 10, flexDirection: "row", alignItems: "center", justifyContent: "space-between", zIndex: 50 },
+  coverBackButton: { height: 38, width: 38, borderRadius: 999, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.5)" },
+  coverTag: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: "rgba(0,0,0,0.5)" },
+  coverTagText: { fontSize: 11, fontWeight: "700", letterSpacing: 1, color: "#F9FAFB" },
+  coverGradient: { position: "absolute", left: 0, right: 0, bottom: 0, height: 120, backgroundColor: "transparent", zIndex: 10 },
+  coverBottomInfo: { position: "absolute", left: 16, right: 16, bottom: 16, zIndex: 40 },
+  coverTitle: { fontSize: 26, fontWeight: "800", color: "#FFFFFF", textShadowColor: "rgba(0,0,0,0.6)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 },
+  coverMetaRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 },
+  coverMetaBadge: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(0,0,0,0.4)", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  coverMetaText: { fontSize: 12, fontWeight: "600", color: "#E5E7EB" },
+  coverEditHint: { fontSize: 11, fontWeight: "600", color: "rgba(255,255,255,0.6)", marginTop: 6 },
 
-  coverEditHint: {
-    marginTop: 8,
-    alignSelf: "flex-start",
-    borderRadius: 999,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    backgroundColor: "rgba(0,0,0,0.45)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
-  },
-  coverEditHintText: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#F9FAFB",
-  },
+  // Description + Join
+  descriptionRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  descriptionText: { flex: 1, fontSize: 14, lineHeight: 20 },
+  joinBtn: { borderRadius: 999, paddingVertical: 10, paddingHorizontal: 18 },
+  joinBtnContent: { flexDirection: "row", alignItems: "center", gap: 6 },
+  joinBtnText: { fontSize: 14, fontWeight: "700" },
 
-  coverModalPrimary: {
-    marginTop: 14,
-    borderRadius: 16,
-    paddingVertical: 12,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  coverModalPrimaryText: {
-    fontSize: 13,
-    fontWeight: "800",
-    color: "#FFFFFF",
-  },
-  coverModalSecondary: {
-    marginTop: 10,
-    borderRadius: 16,
-    paddingVertical: 12,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  coverModalSecondaryText: {
-    fontSize: 13,
-    fontWeight: "800",
-    color: "#E5E7EB",
-  },
+  // Tabs
+  tabsContainer: { flexDirection: "row", borderRadius: 14, padding: 3, gap: 2 },
+  tabItem: { flex: 1, borderRadius: 12, alignItems: "center", justifyContent: "center", paddingVertical: 8, flexDirection: "row", gap: 4 },
+  tabItemText: { fontSize: 11, fontWeight: "700" },
 
-  // web modal
-  webWrapper: {
-    width: "100%",
-    alignItems: "center",
-  },
-  webModal: {
-    width: "100%",
-    maxWidth: 1200,
-    borderRadius: 24,
-    marginTop: -32,
-    padding: 2,
-  },
-  webModalCard: {
-    borderRadius: 20,
-    padding: 18,
-    borderWidth: 1,
-  },
-  webColumns: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: 24,
-  },
-  webLeft: {
-    width: 300,
-  },
-  webRight: {
-    flex: 1,
-  },
+  // Feed
+  feedCard: { borderRadius: 16, paddingHorizontal: 16, paddingVertical: 14 },
+  feedNewHeader: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 },
+  feedNewLabel: { fontSize: 14, fontWeight: "700" },
+  feedInputWrap: { borderRadius: 14, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8 },
+  feedInput: { maxHeight: 100, fontSize: 14, lineHeight: 20 },
+  postBtn: { marginTop: 10, borderRadius: 12, paddingVertical: 10, alignItems: "center" },
+  postBtnContent: { flexDirection: "row", alignItems: "center", gap: 6 },
+  postBtnText: { fontSize: 13, fontWeight: "700", color: "#fff" },
+  postHeader: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 },
+  postAvatar: { width: 36, height: 36, borderRadius: 999 },
+  postAvatarFallback: { width: 36, height: 36, borderRadius: 999, alignItems: "center", justifyContent: "center" },
+  postAvatarText: { fontSize: 15, fontWeight: "800" },
+  postAuthor: { fontSize: 14, fontWeight: "700" },
+  postTime: { fontSize: 11, marginTop: 1 },
+  postContent: { fontSize: 14, lineHeight: 21 },
 
-  leftTitle: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#E5E7EB",
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
-  },
-  leftDescription: {
-    marginTop: 8,
-    fontSize: 13,
-    color: "#D1D5DB",
-  },
-  leftButton: {
-    marginTop: 16,
-    borderRadius: 999,
-    paddingVertical: 10,
-    paddingHorizontal: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    position: "relative",
-    zIndex: 9999,
-    elevation: 9999,
-  },
-  leftButtonText: {
-    fontSize: 14,
-    fontWeight: "600",
-  },
+  // Chat - Discord style
+  chatContainer: { borderRadius: 16, overflow: "hidden", flexDirection: "row" },
+  channelsSidebar: { width: 180, borderRightWidth: 1 },
+  channelsSidebarHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 12, paddingTop: 10, paddingBottom: 6 },
+  channelsSidebarTitle: { fontSize: 10, fontWeight: "800", letterSpacing: 1 },
+  channelRow: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 7, marginHorizontal: 4, marginTop: 2, borderRadius: 8 },
+  channelRowText: { fontSize: 13, fontWeight: "600" },
+  channelPill: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10 },
+  channelPillText: { fontSize: 12, fontWeight: "600" },
+  chatArea: { flex: 1, position: "relative" },
+  chatAreaHeader: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1 },
+  chatAreaHeaderContent: { flexDirection: "row", alignItems: "center", gap: 6, flex: 1 },
+  chatAreaHeaderTitle: { fontSize: 15, fontWeight: "700" },
+  chatAreaHeaderDivider: { width: 1, height: 16 },
+  chatAreaHeaderDesc: { fontSize: 12, flex: 1 },
 
-  // mobile header
-  mobileHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  mobileDescription: {
-    fontSize: 13,
-    color: "#D1D5DB",
-  },
+  // Discord messages
+  discordMsgRow: { flexDirection: "row", paddingHorizontal: 4, paddingVertical: 2 },
+  discordAvatarCol: { width: 42, alignItems: "center", paddingTop: 2 },
+  discordAvatar: { width: 34, height: 34, borderRadius: 999 },
+  discordAvatarFallback: { width: 34, height: 34, borderRadius: 999, alignItems: "center", justifyContent: "center" },
+  discordAvatarText: { fontSize: 14, fontWeight: "800" },
+  discordCompactTime: { fontSize: 9, marginTop: 4 },
+  discordNameRow: { flexDirection: "row", alignItems: "baseline", gap: 8, marginBottom: 2 },
+  discordUsername: { fontSize: 14, fontWeight: "700" },
+  discordTimestamp: { fontSize: 11 },
+  discordContent: { fontSize: 14, lineHeight: 20 },
+  reactionsRow: { flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 4 },
+  reactionPill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, borderWidth: 1 },
+  reactionText: { fontSize: 12, fontWeight: "700" },
 
-  // chips
-  chipsRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginTop: 12,
-  },
-  chip: {
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    backgroundColor: "#111827",
-  },
-  chipText: {
-    fontSize: 11,
-    fontWeight: "600",
-    textTransform: "uppercase",
-    letterSpacing: 0.6,
-    color: "#E5E7EB",
-  },
+  emptyChannelIcon: { width: 60, height: 60, borderRadius: 999, alignItems: "center", justifyContent: "center", marginBottom: 12 },
+  emptyChannelTitle: { fontSize: 16, fontWeight: "800", textAlign: "center" },
+  emptyChannelSub: { fontSize: 13, textAlign: "center", marginTop: 4 },
 
-  // tabs
-  tabsContainer: {
-    flexDirection: "row",
-    borderRadius: 999,
-    padding: 3,
-  },
-  tabItem: {
-    flex: 1,
-    borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 8,
-  },
-  tabItemText: {
-    fontSize: 12,
-    fontWeight: "600",
-  },
+  // Chat input
+  chatInputBar: { paddingHorizontal: 10, paddingVertical: 8, borderTopWidth: 1, position: "absolute", left: 0, right: 0, bottom: 0 },
+  replyBanner: { flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, marginBottom: 6, borderWidth: 1 },
+  replyLabel: { fontSize: 12, fontWeight: "700" },
+  replyPreview: { fontSize: 12, marginTop: 1 },
+  chatInputRow: { flexDirection: "row", alignItems: "flex-end", gap: 8 },
+  chatInput: { flex: 1, minHeight: 38, maxHeight: 100, fontSize: 14, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1 },
+  chatSendBtn: { width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center" },
 
-  // sections/card
-  cardSection: {
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  sectionHeaderLabel: {
-    fontSize: 11,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
-    color: "#9CA3AF",
-  },
-  sectionHeaderHelper: { fontSize: 12, marginTop: 4 },
-  sectionTitle: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: "#F9FAFB",
-  },
+  // Ranking
+  rankingHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 6 },
+  rankingTitle: { fontSize: 18, fontWeight: "800" },
+  rankRow: { flexDirection: "row", alignItems: "center", borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, gap: 10, borderLeftWidth: 3 },
+  rankPos: { width: 28, alignItems: "center" },
+  rankPosText: { fontSize: 16, fontWeight: "800" },
+  rankAvatar: { width: 36, height: 36, borderRadius: 999 },
+  rankAvatarFallback: { width: 36, height: 36, borderRadius: 999, alignItems: "center", justifyContent: "center" },
+  rankAvatarText: { fontSize: 14, fontWeight: "800" },
+  rankName: { fontSize: 14, fontWeight: "700" },
+  rankSub: { fontSize: 11, marginTop: 1 },
+  rankRolePill: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
+  rankRoleText: { fontSize: 10, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.5 },
+  comingSoonRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 },
+  comingSoonText: { fontSize: 13, fontWeight: "700" },
 
-  infoTitle: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#E5E7EB",
-  },
-  infoText: {
-    fontSize: 12,
-    marginTop: 4,
-    color: "#9CA3AF",
-  },
-  infoTextStrong: {
-    fontSize: 13,
-    marginTop: 4,
-    color: "#E5E7EB",
-  },
+  // Members
+  memberSectionHeader: { paddingHorizontal: 4, paddingVertical: 6 },
+  memberSectionTitle: { fontSize: 11, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase" },
+  memberRow: { flexDirection: "row", alignItems: "center", borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, gap: 10, marginBottom: 4 },
+  memberAvatar: { width: 38, height: 38, borderRadius: 999 },
+  memberAvatarFallback: { width: 38, height: 38, borderRadius: 999, alignItems: "center", justifyContent: "center" },
+  memberAvatarText: { fontSize: 15, fontWeight: "800" },
+  memberName: { fontSize: 14, fontWeight: "700" },
+  memberUsername: { fontSize: 12, marginTop: 1 },
+  memberRolePill: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
+  memberRoleText: { fontSize: 10, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.5 },
+  membersTotalRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  membersTotalText: { fontSize: 15, fontWeight: "700" },
 
-  // feed
-  inputBox: {
-    borderRadius: 18,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  feedInput: {
-    maxHeight: 96,
-    fontSize: 13,
-    color: "#F9FAFB",
-  },
-  primaryChipButton: {
-    borderRadius: 18,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  primaryChipButtonText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#FFFFFF",
-  },
-  postAuthor: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#F9A8D4",
-  },
-  postMeta: {
-    fontSize: 10,
-    color: "#9CA3AF",
-  },
-  postContent: {
-    marginTop: 6,
-    fontSize: 13,
-    color: "#F9FAFB",
-  },
+  // About
+  aboutHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 },
+  aboutTitle: { fontSize: 18, fontWeight: "800" },
+  aboutDesc: { fontSize: 14, lineHeight: 22 },
+  aboutChips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 14 },
+  aboutChip: { flexDirection: "row", alignItems: "center", gap: 4, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
+  aboutChipText: { fontSize: 12, fontWeight: "600" },
 
-  // chat
-  chatContainer: {
-    marginTop: 16,
-    borderRadius: 18,
-    overflow: "hidden",
-    flexDirection: "row",
-  },
-  channelsColumn: {
-    width: 170,
-    borderRightWidth: 1,
-  },
-  channelsTitle: {
-    fontSize: 11,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
-    color: "#9CA3AF",
-  },  channelsHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 10,
-    paddingTop: 10,
-    paddingBottom: 6,
-  },
-  channelsAddBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#6D28D9",
-  },
+  // Modals
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", padding: 16 },
+  modalCard: { width: "100%", maxWidth: 440, borderRadius: 20, padding: 20 },
+  modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
+  modalTitle: { fontSize: 17, fontWeight: "800" },
+  modalSub: { fontSize: 13, marginTop: 2 },
+  modalInput: { marginTop: 10, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, borderWidth: 1 },
+  modalAction: { flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11 },
+  modalActionText: { fontSize: 14, fontWeight: "600" },
+  modalPrimaryBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderRadius: 14, paddingVertical: 12 },
+  modalPrimaryBtnText: { fontSize: 14, fontWeight: "700", color: "#fff" },
+  modalSecondaryBtn: { borderRadius: 14, paddingVertical: 12, alignItems: "center" },
+  modalSecondaryBtnText: { fontSize: 14, fontWeight: "600" },
+  modalMsgPreview: { borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, marginTop: 8 },
+  modalMsgText: { fontSize: 13, lineHeight: 18 },
+  emojiGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 14, justifyContent: "center" },
+  emojiBtn: { width: 48, height: 48, borderRadius: 12, alignItems: "center", justifyContent: "center" },
 
-  channelsEmpty: {
-    paddingHorizontal: 10,
-    paddingVertical: 12,
-  },
-  channelItem: {
-    marginHorizontal: 6,
-    marginTop: 6,
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  channelItemText: { fontSize: 12, fontWeight: "600" },
-  chatMain: { flex: 1, position: "relative" },
-  chatHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-  },
-  chatHeaderTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#F9FAFB",
-  },
-  chatHeaderSubtitle: {
-    fontSize: 11,
-    color: "#9CA3AF",
-  },
-  chatHeaderMeta: {
-    fontSize: 10,
-    color: "#9CA3AF",
-  },
-  chatMessagesArea: { flex: 1, minHeight: 0 },
-  chatBubbleRow: { marginVertical: 2, flexDirection: "row" },
-  chatBubble: {
-    maxWidth: "80%",
-    borderRadius: 18,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  chatBubbleAuthor: { fontSize: 11, fontWeight: "600" },
-  chatBubbleTime: { fontSize: 9 },
-  chatBubbleText: { marginTop: 2, fontSize: 12 },
-  chatInputBar: {
-    borderTopWidth: 1,
-    borderTopColor: "rgba(156,74,255,0.18)",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: "rgba(10,6,22,0.92)",
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 40,
-  },
-  chatInput: {
-    flex: 1,
-    minHeight: 42,
-    maxHeight: 120,
-    fontSize: 13,
-    color: "#F9FAFB",
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderWidth: 1,
-    borderColor: "rgba(156,74,255,0.22)",
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-
-  // ranking
-  rankingRow: {
-    borderRadius: 16,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  rankingBadge: {
-    height: 32,
-    width: 32,
-    borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#111827",
-    marginRight: 8,
-  },
-  rankingBadgeText: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#E5E7EB",
-  },
-  rankingName: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#F9FAFB",
-  },
-  rankingSubtitle: {
-    fontSize: 11,
-    color: "#9CA3AF",
-  },
-  rankingTag: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#F9A8D4",
-  },
-
-
-// members
-memberRow: {
-  borderRadius: 16,
-  paddingHorizontal: 12,
-  paddingVertical: 10,
-},
-memberAvatarWrap: {
-  height: 40,
-  width: 40,
-  borderRadius: 999,
-  overflow: "hidden",
-  marginRight: 10,
-  backgroundColor: "#0b1020",
-  alignItems: "center",
-  justifyContent: "center",
-},
-memberAvatar: { height: "100%", width: "100%" },
-memberAvatarFallback: {
-  height: "100%",
-  width: "100%",
-  alignItems: "center",
-  justifyContent: "center",
-},
-memberAvatarFallbackText: {
-  fontSize: 16,
-  fontWeight: "800",
-  color: "#E5E7EB",
-},
-memberName: {
-  fontSize: 13,
-  fontWeight: "700",
-  color: "#F9FAFB",
-},
-memberUser: {
-  fontSize: 11,
-  marginTop: 2,
-  color: "#9CA3AF",
-},
-rolePill: {
-  borderRadius: 999,
-  paddingHorizontal: 10,
-  paddingVertical: 5,
-  backgroundColor: "#111827",
-},
-rolePillText: {
-  fontSize: 11,
-  fontWeight: "700",
-  color: "#E5E7EB",
-  textTransform: "uppercase",
-  letterSpacing: 0.6,
-},
-
-// modal (simples e consistente com o estilo atual)
-modalOverlay: {
-  position: "absolute",
-  left: 0,
-  right: 0,
-  top: 0,
-  bottom: 0,
-  alignItems: "center",
-  justifyContent: "center",
-  padding: 16,
-  backgroundColor: "rgba(0,0,0,0.55)",
-},
-modalCard: {
-  width: "100%",
-  maxWidth: 520,
-  borderRadius: 20,
-  paddingHorizontal: 14,
-  paddingVertical: 12,
-},
-modalTitle: {
-  fontSize: 14,
-  fontWeight: "800",
-  color: "#F9FAFB",
-},
-modalClose: {
-  fontSize: 16,
-  fontWeight: "800",
-  color: "#E5E7EB",
-  paddingHorizontal: 6,
-  paddingVertical: 2,
-},
-modalSubtitle: {
-  marginTop: 6,
-  fontSize: 12,
-  color: "#9CA3AF",
-},
-modalInput: {
-  marginTop: 6,
-  borderRadius: 14,
-  paddingHorizontal: 12,
-  paddingVertical: 10,
-  fontSize: 14,
-  borderWidth: 1,
-  borderColor: "rgba(255,255,255,0.08)",
-},
-modalTypeRow: {
-  flexDirection: "row",
-  gap: 10,
-  marginTop: 12,
-},
-modalTypeOption: {
-  flex: 1,
-  borderRadius: 14,
-  paddingVertical: 10,
-  alignItems: "center",
-  justifyContent: "center",
-  borderWidth: 1,
-  borderColor: "rgba(255,255,255,0.08)",
-},
-modalTypeText: {
-  fontSize: 13,
-  fontWeight: "800",
-},
-modalAction: {
-  borderRadius: 16,
-  paddingHorizontal: 12,
-  paddingVertical: 10,
-  alignItems: "center",
-  justifyContent: "center",
-},
-modalActionText: {
-  fontSize: 13,
-  fontWeight: "700",
-  color: "#FFFFFF",
-},
-modalActionDanger: {
-  backgroundColor: "rgba(239, 68, 68, 0.18)",
-  borderWidth: 1,
-  borderColor: "rgba(239, 68, 68, 0.35)",
-},
-modalDanger: {
-  borderRadius: 16,
-  paddingHorizontal: 12,
-  paddingVertical: 10,
-  alignItems: "center",
-  justifyContent: "center",
-},
-modalDangerText: {
-  fontSize: 13,
-  fontWeight: "800",
-  color: "#FCA5A5",
-},
-modalCancel: {
-  borderRadius: 16,
-  paddingHorizontal: 12,
-  paddingVertical: 10,
-  alignItems: "center",
-  justifyContent: "center",
-},
-modalCancelText: {
-  fontSize: 13,
-  fontWeight: "700",
-  color: "#E5E7EB",
-},
-  bold: { fontWeight: "600", color: "#E5E7EB" },
-  reactionsRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
-    marginTop: 6,
-  },
-  reactionPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.08)",
-  },
-  reactionPillText: {
-    fontSize: 12,
-    color: "#e5e7eb",
-    fontWeight: "700",
-  },
-  replyPreview: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 16,
-    marginBottom: 10,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-  },
-  replyPreviewLeft: {
-    flex: 1,
-    paddingRight: 10,
-  },
-  replyPreviewLabel: {
-    fontSize: 12,
-    color: "#9ca3af",
-    fontWeight: "700",
-    marginBottom: 2,
-  },
-  replyPreviewText: {
-    fontSize: 13,
-    color: "#e5e7eb",
-    fontWeight: "600",
-  },
-  replyPreviewClose: {
-    width: 34,
-    height: 34,
-    borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.08)",
-  },
-  replyPreviewCloseText: {
-    color: "#e5e7eb",
-    fontWeight: "900",
-    fontSize: 14,
-  },
-  emojiGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-    marginTop: 16,
-  },
-  emojiBtn: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
-    backgroundColor: "rgba(255,255,255,0.08)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  emojiText: {
-    fontSize: 22,
-  },
-
+  // Channel type selector
+  channelTypeRow: { flexDirection: "row", gap: 8, marginTop: 12 },
+  channelTypeOption: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderRadius: 12, paddingVertical: 10 },
+  voiceInfoBox: { flexDirection: "row", alignItems: "flex-start", gap: 8, borderRadius: 12, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10, marginTop: 10 },
 });

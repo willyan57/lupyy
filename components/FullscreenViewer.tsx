@@ -86,7 +86,7 @@ const ViewerVideo: React.FC<{ uri: string; playing: boolean }> = React.memo(({
 }) => {
   const player = useVideoPlayer(uri, (p) => {
     p.loop = true;
-    p.muted = Platform.OS === "web";
+    p.muted = false;
     if (playing) p.play();
   });
 
