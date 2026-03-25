@@ -27,6 +27,7 @@ export type ViewerItem = {
   username?: string | null;
   caption?: string | null;
   user_id?: string | null;
+  avatar_url?: string | null;
 };
 
 export type Counts = {
@@ -71,18 +72,11 @@ const TextLite: React.FC<React.ComponentProps<typeof TextRaw>> = (props) => (
   <TextRaw allowFontScaling={false} {...props} />
 );
 
-const ViewerHeader: React.FC<{ title: string; onBack: () => void }> = ({
-  title,
-  onBack,
-}) => (
-  <View style={styles.header}>
-    <Pressable onPress={onBack} style={styles.headerBtn} hitSlop={10}>
-      <Ionicons name="arrow-back" size={22} color="#fff" />
-    </Pressable>
-    <TextLite style={styles.headerTitle}>{title}</TextLite>
-    <View style={styles.headerRightSpace} />
-  </View>
-);
+const formatCount = (n: number): string => {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")} mi`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, "")} mil`;
+  return String(n);
+};
 
 /* ─── Video with preload-ready player ─── */
 const ViewerVideo: React.FC<{ uri: string; playing: boolean }> = React.memo(({
@@ -167,6 +161,7 @@ const ViewerPage = React.memo(function ViewerPage({
   onShare,
   onToggleControls,
   onHideControls,
+  onPressUser,
 }: {
   item: ViewerItem;
   index: number;
@@ -179,12 +174,12 @@ const ViewerPage = React.memo(function ViewerPage({
   onShare?: () => void;
   onToggleControls: () => void;
   onHideControls: () => void;
+  onPressUser?: () => void;
 }) {
   const playing = index === current;
   const isVideo = item.media_type === "video";
   const likeColor = counts.liked ? "#ff4f7d" : "#ffffff";
 
-  // Only render video player for current ±1 items for performance
   const shouldRenderVideo = isVideo && Math.abs(index - current) <= 1;
 
   return (
@@ -194,13 +189,6 @@ const ViewerPage = React.memo(function ViewerPage({
       onLongPress={onHideControls}
       delayLongPress={250}
     >
-      {/* Bottom gradient for readability */}
-      <LinearGradient
-        colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.65)"]}
-        style={styles.pageBottomGradient}
-        pointerEvents="none"
-      />
-
       <View style={styles.mediaContainer}>
         {isVideo ? (
           shouldRenderVideo ? (
@@ -228,59 +216,79 @@ const ViewerPage = React.memo(function ViewerPage({
         <FilterOverlay filterId={item.filter} />
       </View>
 
+      {/* Bottom gradient for readability */}
+      <LinearGradient
+        colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.75)"]}
+        style={styles.pageBottomGradient}
+        pointerEvents="none"
+      />
+
+      {/* Top gradient */}
+      <LinearGradient
+        colors={["rgba(0,0,0,0.5)", "rgba(0,0,0,0)"]}
+        style={styles.pageTopGradient}
+        pointerEvents="none"
+      />
+
       {controlsVisible && (
-        <View style={styles.actionsWrapper}>
+        <>
+          {/* Side actions - Instagram/TikTok style */}
           <View style={styles.sideActions}>
             <Pressable onPress={onLike} style={styles.sideButton} hitSlop={10}>
               <Ionicons
                 name={counts.liked ? "heart" : "heart-outline"}
-                size={34}
+                size={30}
                 color={likeColor}
               />
               {counts.likes > 0 && (
-                <TextLite style={styles.sideCount}>{counts.likes}</TextLite>
+                <TextLite style={styles.sideCount}>{formatCount(counts.likes)}</TextLite>
               )}
             </Pressable>
 
             <Pressable onPress={onComment} style={styles.sideButton} hitSlop={10}>
-              <Ionicons name="chatbubble-outline" size={30} color="#ffffff" />
+              <Ionicons name="chatbubble-outline" size={26} color="#ffffff" />
               {counts.comments > 0 && (
-                <TextLite style={styles.sideCount}>{counts.comments}</TextLite>
+                <TextLite style={styles.sideCount}>{formatCount(counts.comments)}</TextLite>
               )}
             </Pressable>
 
             <Pressable onPress={onRepost} style={styles.sideButton} hitSlop={10}>
-              <Ionicons name="arrow-redo-outline" size={30} color="#ffffff" />
+              <Ionicons name="arrow-redo-outline" size={26} color="#ffffff" />
               {counts.reposts > 0 && (
-                <TextLite style={styles.sideCount}>{counts.reposts}</TextLite>
+                <TextLite style={styles.sideCount}>{formatCount(counts.reposts)}</TextLite>
               )}
             </Pressable>
 
             <Pressable onPress={onShare} style={styles.sideButton} hitSlop={10}>
-              <Feather name="send" size={28} color="#ffffff" />
+              <Feather name="send" size={24} color="#ffffff" />
             </Pressable>
           </View>
-        </View>
-      )}
 
-      {controlsVisible &&
-        (item.username || item.caption || counts.likes > 0) && (
+          {/* Footer - user info + caption */}
           <View style={styles.footer}>
-            {counts.likes > 0 && (
-              <TextLite style={styles.likes}>
-                {counts.likes} curtida{counts.likes === 1 ? "" : "s"}
-              </TextLite>
-            )}
-            {item.username && (
-              <TextLite style={styles.username}>{item.username}</TextLite>
-            )}
-            {item.caption && (
+            <Pressable style={styles.userRow} onPress={onPressUser}>
+              {item.avatar_url ? (
+                <Image
+                  source={{ uri: item.avatar_url }}
+                  style={styles.avatar}
+                  contentFit="cover"
+                  cachePolicy="disk"
+                />
+              ) : (
+                <View style={styles.avatarPlaceholder}>
+                  <Ionicons name="person" size={16} color="rgba(255,255,255,0.6)" />
+                </View>
+              )}
+              <TextLite style={styles.username}>{item.username ?? "Usuário"}</TextLite>
+            </Pressable>
+            {item.caption ? (
               <TextLite numberOfLines={2} style={styles.caption}>
                 {item.caption}
               </TextLite>
-            )}
+            ) : null}
           </View>
-        )}
+        </>
+      )}
     </Pressable>
   );
 });
@@ -296,6 +304,7 @@ export default function FullscreenViewer({
   onComment,
   onRepost,
   onShare,
+  onPressUser,
   currentUserId,
   onDeletePost,
 }: Props) {
@@ -415,7 +424,6 @@ export default function FullscreenViewer({
     }
   );
 
-  // VERTICAL layout — each page is full screen height
   const getItemLayout = useCallback(
     (_: ArrayLike<ViewerItem> | null | undefined, index: number) => ({
       length: SCREEN_H,
@@ -432,12 +440,21 @@ export default function FullscreenViewer({
       <View style={styles.container}>
         <StatusBar translucent backgroundColor="#000" barStyle="light-content" />
 
-        {controlsVisible && <ViewerHeader title="Reels" onBack={onClose} />}
-
-        {controlsVisible && itemCount > 0 && canManage && (
-          <Pressable onPress={openMenu} style={styles.moreBtn} hitSlop={12}>
-            <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
-          </Pressable>
+        {controlsVisible && (
+          <View style={styles.header}>
+            <Pressable onPress={onClose} style={styles.headerBtn} hitSlop={10}>
+              <Ionicons name="arrow-back" size={22} color="#fff" />
+            </Pressable>
+            <TextLite style={styles.headerTitle}>Reels</TextLite>
+            <View style={styles.headerRightGroup}>
+              {canManage && (
+                <Pressable onPress={openMenu} hitSlop={12} style={styles.headerBtn}>
+                  <Ionicons name="ellipsis-vertical" size={20} color="#fff" />
+                </Pressable>
+              )}
+              {!canManage && <View style={{ width: 40 }} />}
+            </View>
+          </View>
         )}
 
         {itemCount === 0 ? (
@@ -456,6 +473,8 @@ export default function FullscreenViewer({
             snapToInterval={SCREEN_H}
             snapToAlignment="start"
             decelerationRate="fast"
+            bounces={false}
+            overScrollMode="never"
             onViewableItemsChanged={onViewableItemsChanged.current}
             viewabilityConfig={{ itemVisiblePercentThreshold: 60 }}
             initialScrollIndex={Platform.OS === "web" ? initialIndex : undefined}
@@ -480,6 +499,7 @@ export default function FullscreenViewer({
                 onComment={() => onComment?.(item.id)}
                 onRepost={() => onRepost?.(item.id)}
                 onShare={() => onShare?.(item.id)}
+                onPressUser={() => item.user_id && onPressUser?.(item.user_id)}
                 onToggleControls={toggleControls}
                 onHideControls={onHideControls}
               />
@@ -557,16 +577,20 @@ export default function FullscreenViewer({
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#000" },
+  container: {
+    flex: 1,
+    backgroundColor: "#000",
+    overflow: "hidden" as any,
+  },
 
   header: {
     position: "absolute",
-    top: Platform.OS === "web" ? 18 : 44,
+    top: Platform.OS === "web" ? 12 : 44,
     left: 0,
     right: 0,
     zIndex: 10,
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 8,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -585,66 +609,109 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     letterSpacing: 0.3,
   },
-  headerRightSpace: { width: 40, height: 40 },
-
-  moreBtn: {
-    position: "absolute",
-    top: Platform.OS === "web" ? 20 : 52,
-    right: 16,
-    padding: 8,
-    borderRadius: 999,
-    backgroundColor: "rgba(0,0,0,0.35)",
-    zIndex: 11,
+  headerRightGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    width: 40,
   },
 
-  // Each page fills the entire screen vertically
   page: {
     width: SCREEN_W,
     height: SCREEN_H,
-    alignItems: "center",
-    justifyContent: "center",
+    overflow: "hidden" as any,
   },
   pageBottomGradient: {
     position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
-    height: 200,
+    height: 280,
+    zIndex: 2,
+  },
+  pageTopGradient: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 120,
     zIndex: 2,
   },
   mediaContainer: {
-    width: "100%",
-    height: "100%",
-    overflow: "hidden",
+    ...StyleSheet.absoluteFillObject,
+    overflow: "hidden" as any,
   },
   media: { width: "100%", height: "100%" },
 
-  actionsWrapper: {
+  /* Side actions – right column */
+  sideActions: {
     position: "absolute",
     right: 12,
-    bottom: Platform.select({ ios: 120, android: 100, default: 90 }),
+    bottom: Platform.select({ ios: 140, android: 120, default: 100 }),
     zIndex: 5,
     alignItems: "center",
   },
-  sideActions: { alignItems: "center" },
-  sideButton: { alignItems: "center", marginBottom: 18 },
+  sideButton: {
+    alignItems: "center",
+    marginBottom: 20,
+  },
   sideCount: {
-    marginTop: 2,
+    marginTop: 3,
     color: "#ffffff",
-    fontSize: 14,
-    fontWeight: "600",
+    fontSize: 12,
+    fontWeight: "700",
+    textShadowColor: "rgba(0,0,0,0.5)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
 
+  /* Footer – bottom-left user info */
   footer: {
     position: "absolute",
-    bottom: Platform.select({ ios: 120, android: 100, default: 90 }),
+    bottom: Platform.select({ ios: 100, android: 80, default: 60 }),
     left: 16,
     right: 80,
     zIndex: 5,
   },
-  likes: { color: "#ffffff", fontSize: 13, fontWeight: "600", marginBottom: 4 },
-  username: { color: "#fff", fontWeight: "bold", fontSize: 16 },
-  caption: { color: "#fff", marginTop: 6, fontSize: 14 },
+  userRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  avatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.6)",
+    marginRight: 10,
+  },
+  avatarPlaceholder: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.4)",
+    backgroundColor: "rgba(255,255,255,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  username: {
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 15,
+    textShadowColor: "rgba(0,0,0,0.5)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  caption: {
+    color: "rgba(255,255,255,0.9)",
+    fontSize: 14,
+    lineHeight: 19,
+    textShadowColor: "rgba(0,0,0,0.4)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
 
   emptyWrapper: { flex: 1, alignItems: "center", justifyContent: "center" },
   emptyText: { color: "#fff", fontSize: 16 },

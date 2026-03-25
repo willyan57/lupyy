@@ -552,6 +552,8 @@ export default function Feed() {
     thumb_url: p.thumb_url ?? undefined,
     username: p.username ?? undefined,
     caption: p.caption ?? undefined,
+    user_id: p.user_id ?? undefined,
+    avatar_url: p.avatar_url ?? undefined,
   }));
 
   const videoAutoplayEnabled = isFocused && !viewerOpen && !storyViewerVisible;
