@@ -211,8 +211,15 @@ export default function NewTribeScreen() {
             else if (mimeType.includes("webp")) extension = "webp";
           }
           const filePath = `${currentUserId}/${Date.now()}.${extension}`;
-          const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
-          const bytes = Buffer.from(base64, "base64");
+          let bytes: ArrayBuffer | Buffer;
+          if (Platform.OS === "web") {
+            const response = await fetch(uri);
+            const blob = await response.blob();
+            bytes = await blob.arrayBuffer();
+          } else {
+            const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+            bytes = Buffer.from(base64, "base64");
+          }
           const { error: uploadError } = await supabase.storage.from("tribes").upload(filePath, bytes, {
             cacheControl: "3600",
             upsert: true,
