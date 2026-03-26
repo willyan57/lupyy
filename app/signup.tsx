@@ -77,6 +77,7 @@ function isOldEnough(birthDate: Date): boolean {
 export default function Signup() {
   const router = useRouter();
   const { t } = useTranslation();
+  const isDesktopWeb = Platform.OS === "web";
   const [email, setEmail] = useState("");
   const [pass, setPass] = useState("");
   const [confirmPass, setConfirmPass] = useState("");
@@ -204,10 +205,13 @@ export default function Signup() {
       style={{ flex: 1, backgroundColor: Colors.background }}
     >
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          isDesktopWeb && styles.scrollContentDesktop,
+        ]}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={styles.card}>
+        <View style={[styles.card, isDesktopWeb && styles.cardDesktop]}>
           {/* Logo */}
           <View style={styles.logoHeader}>
             <View style={styles.logoCircle}>
@@ -290,7 +294,7 @@ export default function Signup() {
               maxLength={2}
               value={birthDay}
               onChangeText={(txt) => { setBirthDay(txt.replace(/\D/g, "")); setErrorMsg(null); }}
-              style={[styles.input, styles.dateInputCompact]}
+               style={[styles.input, styles.dateInput, styles.dateInputCompact]}
             />
             <Text style={styles.dateSeparator}>/</Text>
             <TextInput
@@ -300,7 +304,7 @@ export default function Signup() {
               maxLength={2}
               value={birthMonth}
               onChangeText={(txt) => { setBirthMonth(txt.replace(/\D/g, "")); setErrorMsg(null); }}
-              style={[styles.input, styles.dateInputCompact]}
+               style={[styles.input, styles.dateInput, styles.dateInputCompact]}
             />
             <Text style={styles.dateSeparator}>/</Text>
             <TextInput
@@ -310,7 +314,7 @@ export default function Signup() {
               maxLength={4}
               value={birthYear}
               onChangeText={(txt) => { setBirthYear(txt.replace(/\D/g, "")); setErrorMsg(null); }}
-              style={[styles.input, styles.dateInputCompactYear]}
+               style={[styles.input, styles.dateInput, styles.dateInputCompactYear]}
             />
           </View>
 
@@ -370,6 +374,11 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     minHeight: "100%",
   },
+  scrollContentDesktop: {
+    justifyContent: "flex-start",
+    paddingTop: 24,
+    paddingBottom: 32,
+  },
   card: {
     alignSelf: "center",
     width: "100%",
@@ -385,6 +394,9 @@ const styles = StyleSheet.create({
     shadowRadius: 20,
     shadowOffset: { width: 0, height: 8 },
     elevation: 12,
+  },
+  cardDesktop: {
+    marginVertical: 12,
   },
   logoHeader: {
     alignItems: "center",
@@ -475,31 +487,35 @@ const styles = StyleSheet.create({
   dateRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    width: "100%",
+    justifyContent: "space-between",
     marginBottom: 6,
   },
-  dateInputCompact: {
-    flex: 1,
+  dateInput: {
     textAlign: "center",
     paddingVertical: 10,
-    paddingHorizontal: 4,
+    paddingHorizontal: 6,
     marginBottom: 0,
     borderRadius: 10,
     fontSize: 14,
+    flexShrink: 1,
+  },
+  dateInputCompact: {
+    width: 64,
+    minWidth: 64,
+    maxWidth: 64,
   },
   dateInputCompactYear: {
-    flex: 1.2,
-    textAlign: "center",
-    paddingVertical: 10,
-    paddingHorizontal: 4,
-    marginBottom: 0,
-    borderRadius: 10,
-    fontSize: 14,
+    width: 88,
+    minWidth: 88,
+    maxWidth: 88,
   },
   dateSeparator: {
     color: "#6B7280",
     fontSize: 16,
     fontWeight: "600",
+    width: 10,
+    textAlign: "center",
   },
   termsRow: {
     flexDirection: "row",

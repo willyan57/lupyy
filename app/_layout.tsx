@@ -134,6 +134,17 @@ export default function RootLayout() {
   const showSidebar =
     Platform.OS === "web" && !isMobileWeb && !isPublicRoute;
 
+  const desktopPublicRouteStyle =
+    Platform.OS === "web" && !isMobileWeb && isPublicRoute
+      ? ({
+          minHeight: "100vh",
+          paddingTop: 16,
+          paddingBottom: 16,
+          overflowY: "auto",
+          overflowX: "hidden",
+        } as any)
+      : undefined;
+
   return (
     <GestureHandlerRootView
       style={{ flex: 1, backgroundColor: Colors.background }}
@@ -148,15 +159,16 @@ export default function RootLayout() {
         {showSidebar && <WebSidebar />}
 
         <View
-          style={
+          style={[
             showSidebar
               ? {
                   flex: 1,
                   marginLeft: WEB_SIDEBAR_WIDTH,
                   backgroundColor: Colors.background,
                 }
-              : { flex: 1, backgroundColor: Colors.background }
-          }
+              : { flex: 1, backgroundColor: Colors.background },
+            desktopPublicRouteStyle,
+          ]}
         >
           <Stack
             screenOptions={{
