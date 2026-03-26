@@ -134,16 +134,24 @@ export default function RootLayout() {
   const showSidebar =
     Platform.OS === "web" && !isMobileWeb && !isPublicRoute;
 
-  const desktopPublicRouteStyle =
-    Platform.OS === "web" && !isMobileWeb && isPublicRoute
-      ? ({
-          minHeight: "100vh",
-          paddingTop: 16,
-          paddingBottom: 16,
-          overflowY: "auto",
-          overflowX: "hidden",
-        } as any)
-      : undefined;
+  const isDesktopPublicRoute =
+    Platform.OS === "web" && !isMobileWeb && isPublicRoute;
+
+  const desktopPublicRouteStyle = isDesktopPublicRoute
+    ? ({
+        minHeight: "100vh",
+        overflowY: "auto",
+        overflowX: "hidden",
+      } as any)
+    : undefined;
+
+  const desktopPublicRouteContentStyle = isDesktopPublicRoute
+    ? ({
+        backgroundColor: Colors.background,
+        paddingTop: 72,
+        paddingBottom: 28,
+      } as const)
+    : ({ backgroundColor: Colors.background } as const);
 
   return (
     <GestureHandlerRootView
@@ -173,7 +181,7 @@ export default function RootLayout() {
           <Stack
             screenOptions={{
               headerShown: false,
-              contentStyle: { backgroundColor: Colors.background },
+              contentStyle: desktopPublicRouteContentStyle,
             }}
           >
             <Stack.Screen name="index" />
