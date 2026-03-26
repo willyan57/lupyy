@@ -55,6 +55,7 @@ type UiPost = DbPost & {
   thumb_url: string | null;
   username?: string | null;
   avatar_url?: string | null;
+  isBoosted?: boolean;
 };
 
 type Counter = {
@@ -94,6 +95,7 @@ export default function Feed() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [muted, setMuted] = useState(Platform.OS === "web");
   const [error, setError] = useState<string | null>(null);
+  const [boostedUserIds, setBoostedUserIds] = useState<Set<string>>(new Set());
 
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerPostId, setViewerPostId] = useState<string | number | null>(null);
@@ -246,6 +248,11 @@ export default function Feed() {
         const from = curPage * PAGE;
         const to = from + PAGE - 1;
 
+        // Fetch boosted user IDs in parallel with posts (only on first page)
+        const boostedPromise = reset || curPage === 0
+          ? supabase.from("active_boosted_profiles").select("user_id")
+          : Promise.resolve({ data: null });
+
         const { data: rows, error: qErr, count } = await supabase
           .from(POSTS_TABLE)
           .select(
@@ -258,8 +265,32 @@ export default function Feed() {
 
         if (qErr) throw qErr;
 
+        // Process boosted users
+        const boostedResult = await boostedPromise;
+        if (boostedResult.data) {
+          const ids = new Set((boostedResult.data as any[]).map((r: any) => String(r.user_id)));
+          setBoostedUserIds(ids);
+        }
+
         const mapped = await mapRows((rows ?? []) as DbPost[]);
         if (inflight.current.canceled) return;
+
+        // Mark boosted posts
+        const currentBoosted = boostedResult.data
+          ? new Set((boostedResult.data as any[]).map((r: any) => String(r.user_id)))
+          : boostedUserIds;
+        mapped.forEach((p) => {
+          p.isBoosted = currentBoosted.has(String(p.user_id));
+        });
+
+        // Sort: boosted posts first (only on first page)
+        if (reset || curPage === 0) {
+          mapped.sort((a, b) => {
+            if (a.isBoosted && !b.isBoosted) return -1;
+            if (!a.isBoosted && b.isBoosted) return 1;
+            return 0; // keep original order within groups
+          });
+        }
 
         setPosts((prev) => (reset ? mapped : [...prev, ...mapped]));
 
@@ -613,36 +644,43 @@ export default function Feed() {
           </View>
         }
         renderItem={({ item, index }) => (
-          <PostCard
-            id={item.id}
-            media_type={item.media_type}
-            media_url={item.media_url}
-            thumb_url={item.thumb_url ?? undefined}
-            username={item.username}
-            created_at={item.created_at}
-            caption={item.caption ?? undefined}
-            avatarUrl={item.avatar_url ?? null}
-            isVisible={videoAutoplayEnabled && index === currentIndex}
-            muted={muted}
-            likesCount={counts[item.id]?.likes ?? 0}
-            commentsCount={counts[item.id]?.comments ?? 0}
-            repostsCount={counts[item.id]?.reposts ?? 0}
-            liked={!!counts[item.id]?.liked}
-            onPressMedia={() => {
-              setViewerIndex(index);
-              setViewerPostId(item.id);
-              setViewerOpen(true);
-            }}
-            onPressUser={() => {
-              router.push({ pathname: "/profile", params: { userId: item.user_id } });
-            }}
-            onLike={() => toggleLike(item.id)}
-            onComment={() => openComments(item.id as number)}
-            onRepost={() => {}}
-            onShare={() => sharePost(item.id)}
-            onPressLikesCount={() => openLikesSheet(item.id)}
-            onToggleMute={() => setMuted((m) => !m)}
-          />
+          <View>
+            {item.isBoosted && (
+              <View style={styles.boostBadge}>
+                <Text style={styles.boostBadgeText}>🔥 Perfil em destaque</Text>
+              </View>
+            )}
+            <PostCard
+              id={item.id}
+              media_type={item.media_type}
+              media_url={item.media_url}
+              thumb_url={item.thumb_url ?? undefined}
+              username={item.username}
+              created_at={item.created_at}
+              caption={item.caption ?? undefined}
+              avatarUrl={item.avatar_url ?? null}
+              isVisible={videoAutoplayEnabled && index === currentIndex}
+              muted={muted}
+              likesCount={counts[item.id]?.likes ?? 0}
+              commentsCount={counts[item.id]?.comments ?? 0}
+              repostsCount={counts[item.id]?.reposts ?? 0}
+              liked={!!counts[item.id]?.liked}
+              onPressMedia={() => {
+                setViewerIndex(index);
+                setViewerPostId(item.id);
+                setViewerOpen(true);
+              }}
+              onPressUser={() => {
+                router.push({ pathname: "/profile", params: { userId: item.user_id } });
+              }}
+              onLike={() => toggleLike(item.id)}
+              onComment={() => openComments(item.id as number)}
+              onRepost={() => {}}
+              onShare={() => sharePost(item.id)}
+              onPressLikesCount={() => openLikesSheet(item.id)}
+              onToggleMute={() => setMuted((m) => !m)}
+            />
+          </View>
         )}
         ListEmptyComponent={
           initialLoading ? (
@@ -747,4 +785,22 @@ const styles = StyleSheet.create({
     padding: 8, zIndex: 10,
   },
   errorText: { color: "white", fontWeight: "700" },
+  boostBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    marginHorizontal: 16,
+    marginTop: 8,
+    borderRadius: 8,
+    backgroundColor: "rgba(255, 165, 0, 0.15)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 165, 0, 0.3)",
+  },
+  boostBadgeText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#FF8C00",
+  },
 });

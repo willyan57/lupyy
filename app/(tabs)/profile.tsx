@@ -148,23 +148,14 @@ function GradientButton({ title, onPress, disabled, style }: GradientButtonProps
 }
 
 async function pathToUsableUrl(path: string) {
-  // On web, prefer public URL for reliability (signed URLs can have CORS/caching issues)
-  if (Platform.OS === "web") {
-    const pub = supabase.storage.from("posts").getPublicUrl(path);
-    const url = pub.data.publicUrl;
-    ExpoImage.prefetch(url).catch(() => {});
-    return url;
-  }
+  // Always use signed URLs for reliability (bucket may be private)
   const signed = await supabase.storage.from("posts").createSignedUrl(path, 60 * 60);
   if (!signed.error && signed.data?.signedUrl) {
-    const url = signed.data.signedUrl;
-    ExpoImage.prefetch(url).catch(() => {});
-    return url;
+    return signed.data.signedUrl;
   }
+  // Fallback to public URL
   const pub = supabase.storage.from("posts").getPublicUrl(path);
-  const url = pub.data.publicUrl;
-  ExpoImage.prefetch(url).catch(() => {});
-  return url;
+  return pub.data.publicUrl;
 }
 
 function extractTagsFromBio(bio: string) {
@@ -441,7 +432,7 @@ export default function Profile() {
 
   const bioTags = extractTagsFromBio(bio);
 
-  // ── Boost countdown timer ──
+  // ── Boost countdown timer (updates every 15s to avoid excessive re-renders) ──
   useEffect(() => {
     if (!boostInfo) { setBoostCountdown(null); return; }
     const tick = () => {
@@ -452,7 +443,7 @@ export default function Profile() {
       setBoostCountdown(`${m}:${s.toString().padStart(2, "0")}`);
     };
     tick();
-    const interval = setInterval(tick, 1000);
+    const interval = setInterval(tick, 15000);
     return () => clearInterval(interval);
   }, [boostInfo]);
 
@@ -779,8 +770,8 @@ export default function Profile() {
           error,
           count,
         } = await supabase
-          .from("posts_view")
-          .select("*", { count: "exact" })
+          .from("posts")
+          .select("id, user_id, media_type, image_path, thumbnail_path, caption, width, height, duration, created_at", { count: "exact" })
           .eq("user_id", userId)
           .order("created_at", { ascending: false })
           .range(from, to);
@@ -789,15 +780,12 @@ export default function Profile() {
 
         const mapped = await Promise.all(
           (rows ?? []).map(async (p: DbPost) => {
-            // For video grid: use thumbnail if available, otherwise DON'T show video URL as image
             const gridUrl = await pathToUsableUrl(gridPath(p));
             const mediaUrl = await pathToUsableUrl(p.image_path);
-
             return {
               ...p,
               image_url: gridUrl,
               media_url: mediaUrl,
-              // Mark if thumbnail is missing for videos (to show fallback in grid)
               _hasThumb: p.media_type !== "video" || !!p.thumbnail_path,
             } as UiPost;
           }),
@@ -2605,12 +2593,6 @@ export default function Profile() {
               </TouchableOpacity>
             </>
           )}
-        </View>
-        <View style={[styles.panelCard, { backgroundColor: theme.colors.surface }]}>
-          <Text style={[styles.panelTitle, { color: theme.colors.text }]}>{t("profile.radar")}</Text>
-          <Text style={[styles.panelSubtitle, { color: theme.colors.textMuted }]}>
-            {t("profile.radarDesc")}
-          </Text>
         </View>
 
         {/* ── LEVEL, BADGES & BOOST ── */}
