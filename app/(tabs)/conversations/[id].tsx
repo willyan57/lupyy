@@ -58,6 +58,7 @@ type ProfileHeader = {
   full_name: string | null;
   avatar_url: string | null;
   relationship_status?: string | null;
+  partner_id?: string | null;
 };
 
 export default function ConversationScreen() {
@@ -83,8 +84,18 @@ export default function ConversationScreen() {
 
   // ── Crush lock state ──
   const [myRelationshipStatus, setMyRelationshipStatus] = useState<string | null>(null);
+  const [myPartnerId, setMyPartnerId] = useState<string | null>(null);
+
+  // Parceiros vinculados ignoram o bloqueio de crush
+  const areLinkedPartners = !!(
+    myPartnerId && otherProfile?.partner_id &&
+    myPartnerId === otherProfile?.id &&
+    otherProfile?.partner_id === authUserId
+  );
+
   const isCrushLocked =
     conversationType === "crush" &&
+    !areLinkedPartners &&
     (isCommittedStatus(myRelationshipStatus) ||
       isCommittedStatus(otherProfile?.relationship_status));
 
@@ -246,11 +257,12 @@ export default function ConversationScreen() {
 
     const { data: myProfile } = await supabase
       .from("profiles")
-      .select("relationship_status")
+      .select("relationship_status, partner_id")
       .eq("id", uid)
       .maybeSingle();
 
     setMyRelationshipStatus((myProfile as any)?.relationship_status ?? null);
+    setMyPartnerId((myProfile as any)?.partner_id ?? null);
 
     if (!conversationId) return;
 
@@ -277,7 +289,7 @@ export default function ConversationScreen() {
 
     const { data: profile } = await supabase
       .from("profiles")
-      .select("id, username, full_name, avatar_url, relationship_status")
+      .select("id, username, full_name, avatar_url, relationship_status, partner_id")
       .eq("id", other)
       .maybeSingle();
 
@@ -289,6 +301,7 @@ export default function ConversationScreen() {
   async function reactivateConversationForUser() {
     if (!authUserId || !conversationId) return;
 
+    // Tenta via RPC (só faz UPDATE deleted_at = NULL, preserva messages_hidden_before)
     const { error: rpcError } = await supabase.rpc("reactivate_conversation", {
       _conversation_id: conversationId,
       _user_id: authUserId,
@@ -296,13 +309,39 @@ export default function ConversationScreen() {
 
     if (!rpcError) return;
 
-    const { error: deleteError } = await supabase
+    // Fallback: UPDATE manual em vez de DELETE para preservar messages_hidden_before
+    const { error: updateError } = await supabase
       .from("conversation_deletions")
-      .delete()
+      .update({ deleted_at: null })
       .eq("conversation_id", conversationId)
       .eq("user_id", authUserId);
 
-    if (deleteError) throw deleteError;
+    if (updateError) console.warn("reactivate fallback error:", updateError);
+  }
+
+  async function syncConversationAfterSend(params: {
+    preview: string;
+    sentAt: string;
+  }) {
+    const { preview, sentAt } = params;
+
+    try {
+      await reactivateConversationForUser();
+    } catch (reactivateErr: any) {
+      console.warn("reactivate non-blocking:", reactivateErr);
+    }
+
+    const { error: conversationUpdateError } = await supabase
+      .from("conversations")
+      .update({
+        last_message: preview,
+        last_message_at: sentAt,
+      })
+      .eq("id", conversationId);
+
+    if (conversationUpdateError) {
+      console.warn("conversation sync error:", conversationUpdateError);
+    }
   }
 
   // ── Delete entire conversation (hide for current user) ──
@@ -380,10 +419,11 @@ export default function ConversationScreen() {
 
         const { data: myProfile } = await supabase
           .from("profiles")
-          .select("relationship_status")
+          .select("relationship_status, partner_id")
           .eq("id", uid)
           .maybeSingle();
         setMyRelationshipStatus((myProfile as any)?.relationship_status ?? null);
+        setMyPartnerId((myProfile as any)?.partner_id ?? null);
 
         const { data: conv, error: convErr } = await supabase
           .from("conversations")
@@ -405,7 +445,7 @@ export default function ConversationScreen() {
         if (other) {
           const { data: profile } = await supabase
             .from("profiles")
-            .select("id, username, full_name, avatar_url, relationship_status")
+            .select("id, username, full_name, avatar_url, relationship_status, partner_id")
             .eq("id", other)
             .maybeSingle();
 
@@ -586,15 +626,10 @@ export default function ConversationScreen() {
 
       const sentAt = real.created_at || new Date().toISOString();
 
-      await supabase
-        .from("conversations")
-        .update({
-          last_message: text,
-          last_message_at: sentAt,
-        })
-        .eq("id", conversationId);
-
-      await reactivateConversationForUser();
+      await syncConversationAfterSend({
+        preview: text,
+        sentAt,
+      });
 
     } catch (e: any) {
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
@@ -705,15 +740,10 @@ export default function ConversationScreen() {
 
       const mediaSentAt = real.created_at || new Date().toISOString();
 
-      await supabase
-        .from("conversations")
-        .update({
-          last_message: "[mídia]",
-          last_message_at: mediaSentAt,
-        })
-        .eq("id", conversationId);
-
-      await reactivateConversationForUser();
+      await syncConversationAfterSend({
+        preview: "[mídia]",
+        sentAt: mediaSentAt,
+      });
 
     } catch (e: any) {
       if ((e?.message ?? "").includes("CRUSH_CHAT_LOCKED")) {

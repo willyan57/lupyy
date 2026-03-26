@@ -42,6 +42,20 @@ import ThemeSelector from "@/components/ThemeSelector";
 import { useTheme } from "@/contexts/ThemeContext";
 import { ConversationType, getOrCreateConversation } from "@/lib/conversations";
 import {
+  BADGE_CONFIG,
+  type Badge,
+  type BoostInfo,
+  LEVEL_CONFIG,
+  type ProfileViewStats,
+  type UserLevelInfo,
+  activateBoost,
+  getActiveBoost,
+  getProfileViewStats,
+  getUserLevelAndBadges,
+  getXpProgress,
+  registerProfileView
+} from "@/lib/engagement";
+import {
   type Highlight,
   fetchHighlightItems,
   fetchPostViewCounts,
@@ -68,7 +82,7 @@ type UiPost = DbPost & {
   media_url: string;
 };
 
-type InterestType = "friend" | "crush" | "silent_crush";
+type InterestType = "friend" | "crush" | "silent_crush" | "super_crush";
 type RelationshipStatus = "single" | "committed" | "other";
 
 type ProfileRow = {
@@ -134,6 +148,13 @@ function GradientButton({ title, onPress, disabled, style }: GradientButtonProps
 }
 
 async function pathToUsableUrl(path: string) {
+  // On web, prefer public URL for reliability (signed URLs can have CORS/caching issues)
+  if (Platform.OS === "web") {
+    const pub = supabase.storage.from("posts").getPublicUrl(path);
+    const url = pub.data.publicUrl;
+    ExpoImage.prefetch(url).catch(() => {});
+    return url;
+  }
   const signed = await supabase.storage.from("posts").createSignedUrl(path, 60 * 60);
   if (!signed.error && signed.data?.signedUrl) {
     const url = signed.data.signedUrl;
@@ -408,10 +429,58 @@ export default function Profile() {
   const [peopleSheetVisible, setPeopleSheetVisible] = useState(false);
   const [peopleSheetMode, setPeopleSheetMode] = useState<"followers" | "following" | "interested">("followers");
 
+  // ── Engagement state ──
+  const [levelInfo, setLevelInfo] = useState<UserLevelInfo | null>(null);
+  const [boostInfo, setBoostInfo] = useState<BoostInfo | null>(null);
+  const [profileViewStats, setProfileViewStats] = useState<ProfileViewStats | null>(null);
+  const [boostLoading, setBoostLoading] = useState(false);
+  const [boostCountdown, setBoostCountdown] = useState<string | null>(null);
+
   const isOwnProfile = !!authUserId && userId === authUserId;
   const isViewingOther = !!routeUserId && routeUserId !== authUserId;
 
   const bioTags = extractTagsFromBio(bio);
+
+  // ── Boost countdown timer ──
+  useEffect(() => {
+    if (!boostInfo) { setBoostCountdown(null); return; }
+    const tick = () => {
+      const remaining = Math.max(0, Math.floor((new Date(boostInfo.expires_at).getTime() - Date.now()) / 1000));
+      if (remaining <= 0) { setBoostCountdown(null); setBoostInfo(null); return; }
+      const m = Math.floor(remaining / 60);
+      const s = remaining % 60;
+      setBoostCountdown(`${m}:${s.toString().padStart(2, "0")}`);
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [boostInfo]);
+
+  const handleActivateBoost = useCallback(async () => {
+    if (boostLoading || boostInfo) return;
+    try {
+      setBoostLoading(true);
+      const result = await activateBoost("standard", 60);
+      if (result) {
+        setBoostInfo({
+          user_id: authUserId || "",
+          boost_type: "standard",
+          started_at: new Date().toISOString(),
+          expires_at: result.expires_at,
+          seconds_remaining: 3600,
+        });
+        Alert.alert("🔥 Boost ativado!", "Seu perfil ficará em destaque por 1 hora.");
+      }
+    } catch (err: any) {
+      if (err?.message?.includes("BOOST_ALREADY_ACTIVE")) {
+        Alert.alert("Boost ativo", "Você já tem um boost rodando!");
+      } else {
+        Alert.alert("Erro", "Não foi possível ativar o boost.");
+      }
+    } finally {
+      setBoostLoading(false);
+    }
+  }, [boostLoading, boostInfo, authUserId]);
 
   useEffect(() => {
     setPosts([]);
@@ -643,6 +712,27 @@ export default function Profile() {
         const hl = await fetchUserHighlights(targetUserId);
         setHighlights(hl);
       } catch { setHighlights([]); }
+
+      // ── Load engagement data ──
+      try {
+        const [lvl, pvs, boost] = await Promise.all([
+          getUserLevelAndBadges(targetUserId),
+          getProfileViewStats(targetUserId),
+          getActiveBoost(targetUserId),
+        ]);
+        setLevelInfo(lvl);
+        setProfileViewStats(pvs);
+        setBoostInfo(boost);
+      } catch {
+        setLevelInfo(null);
+        setProfileViewStats(null);
+        setBoostInfo(null);
+      }
+
+      // Register profile view if viewing someone else's profile
+      if (u.id && targetUserId !== u.id) {
+        registerProfileView(targetUserId).catch(() => {});
+      }
     } finally {
       setLoadingHeader(false);
     }
@@ -930,10 +1020,7 @@ export default function Profile() {
         avatar_url: avatarUrl,
         relationship_status: draftRelationshipStatus || null,
         gender: draftGender.trim() || null,
-        partner_id:
-          draftRelationshipStatus === "committed" || draftRelationshipStatus === "other"
-            ? draftPartnerId || null
-            : null,
+        partner_id: draftPartnerId || null,
       };
 
       if (statusChanged) {
@@ -984,6 +1071,7 @@ export default function Profile() {
       setGender(nextGender);
       setDraftGender(nextGender);
       setDraftRelationshipStatus(nextStatus);
+      setDraftPartnerId(savedRow.partner_id ?? null);
       setEditing(false);
       Alert.alert(t("alert.profileUpdated"), t("alert.profileUpdatedMsg"));
     } catch (e: any) {
@@ -1007,6 +1095,7 @@ export default function Profile() {
     draftBio,
     draftRelationshipStatus,
     draftGender,
+    draftPartnerId,
     avatarUrl,
     relationshipStatus,
     relationshipStatusChangedAt,
@@ -2524,7 +2613,112 @@ export default function Profile() {
           </Text>
         </View>
 
-        {/* ── HIGHLIGHTS ROW ── */}
+        {/* ── LEVEL, BADGES & BOOST ── */}
+        {levelInfo && (
+          <View style={[styles.panelCard, { backgroundColor: theme.colors.surface }]}>
+            {/* Level + XP bar */}
+            <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
+              <Text style={{ fontSize: 22, marginRight: 6 }}>
+                {LEVEL_CONFIG[levelInfo.level]?.emoji || "🌱"}
+              </Text>
+              <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 16, marginRight: 8 }}>
+                Nível {levelInfo.level} — {levelInfo.level_name}
+              </Text>
+              <Text style={{ color: theme.colors.textMuted, fontSize: 13 }}>
+                {levelInfo.xp} XP
+              </Text>
+            </View>
+            {/* XP Progress bar */}
+            {(() => {
+              const prog = getXpProgress(levelInfo.xp, levelInfo.level);
+              return (
+                <View style={{ marginBottom: 10 }}>
+                  <View style={{
+                    height: 8, borderRadius: 4, backgroundColor: theme.colors.border,
+                    overflow: "hidden",
+                  }}>
+                    <LinearGradient
+                      colors={[Colors.brandStart, Colors.brandEnd]}
+                      start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                      style={{ height: "100%", width: `${prog.percent}%`, borderRadius: 4 }}
+                    />
+                  </View>
+                  <Text style={{ color: theme.colors.textMuted, fontSize: 11, marginTop: 3 }}>
+                    {prog.current}/{prog.needed} XP para o próximo nível
+                  </Text>
+                </View>
+              );
+            })()}
+            {/* Badges */}
+            {levelInfo.badges && levelInfo.badges.length > 0 && (
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
+                {levelInfo.badges.map((b: Badge, i: number) => {
+                  const cfg = BADGE_CONFIG[b.badge_type];
+                  if (!cfg) return null;
+                  return (
+                    <View key={i} style={{
+                      flexDirection: "row", alignItems: "center",
+                      paddingHorizontal: 10, paddingVertical: 4,
+                      borderRadius: 12, backgroundColor: cfg.color + "20",
+                      borderWidth: 1, borderColor: cfg.color + "40",
+                    }}>
+                      <Text style={{ fontSize: 14, marginRight: 4 }}>{cfg.emoji}</Text>
+                      <Text style={{ color: cfg.color, fontSize: 12, fontWeight: "600" }}>{cfg.label}</Text>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+            {/* Profile views mini stat */}
+            {profileViewStats && (
+              <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
+                <Text style={{ fontSize: 14, marginRight: 4 }}>👀</Text>
+                <Text style={{ color: theme.colors.textMuted, fontSize: 13 }}>
+                  {profileViewStats.views_24h} visitas hoje · {profileViewStats.views_7d} esta semana
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* ── BOOST BUTTON ── */}
+        {isOwnProfile && (
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={boostInfo ? undefined : handleActivateBoost}
+            disabled={boostLoading}
+            style={{
+              marginHorizontal: 16, marginBottom: 12, borderRadius: 12,
+              overflow: "hidden",
+            }}
+          >
+            <LinearGradient
+              colors={boostInfo ? ["#F59E0B", "#EF4444"] : ["#8B5CF6", "#EC4899"]}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+              style={{
+                paddingVertical: 12, paddingHorizontal: 16,
+                alignItems: "center", justifyContent: "center",
+                flexDirection: "row",
+              }}
+            >
+              {boostLoading ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : boostInfo ? (
+                <>
+                  <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>
+                    🔥 Boost ativo — {boostCountdown || "..."}
+                  </Text>
+                </>
+              ) : (
+                <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>
+                  🔥 Destacar meu perfil
+                </Text>
+              )}
+            </LinearGradient>
+          </TouchableOpacity>
+        )}
+
+
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -2925,8 +3119,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 6,
+    paddingTop: Platform.OS === "web" ? 4 : 14,
+    paddingBottom: 4,
     justifyContent: "space-between",
   },
   topCenter: {

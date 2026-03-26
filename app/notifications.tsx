@@ -6,14 +6,14 @@ import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { useCallback, useState } from "react";
 import {
-    ActivityIndicator,
-    FlatList,
-    Image,
-    RefreshControl,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  FlatList,
+  Image,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 
 // ─── Types ──────────────────────────────────────────────
@@ -90,6 +90,8 @@ function getNotificationMessage(n: Notification): string {
       return "marcou você como crush! 💘";
     case "silent_crush":
       return "tem interesse em você.";
+    case "super_crush":
+      return "usou um Super Crush em você! 🚀";
     case "story_like":
       return "curtiu seu story.";
     case "comment_like":
@@ -98,6 +100,18 @@ function getNotificationMessage(n: Notification): string {
       return "mencionou você.";
     case "status_change":
       return "ficou disponível! 👀";
+    case "profile_view":
+      return "👀 Alguém visitou seu perfil";
+    case "profile_trending":
+      return "🔥 Seu perfil está em alta hoje!";
+    case "mystery_interest":
+      return "💫 Alguém está interessado em você...";
+    case "level_up":
+      return "🎉 Você subiu de nível!";
+    case "new_badge":
+      return "🏆 Você ganhou uma nova conquista!";
+    case "match":
+      return "💘 É um match! O interesse é mútuo!";
     default:
       return "interagiu com você.";
   }
@@ -110,10 +124,17 @@ function getNotificationEmoji(type: string): string {
     case "follow": return "👤";
     case "crush": return "💘";
     case "silent_crush": return "🤫";
+    case "super_crush": return "🚀";
     case "story_like": return "🔥";
     case "comment_like": return "💜";
     case "mention": return "@";
     case "status_change": return "👀";
+    case "profile_view": return "👀";
+    case "profile_trending": return "🔥";
+    case "mystery_interest": return "💫";
+    case "level_up": return "⬆️";
+    case "new_badge": return "🏆";
+    case "match": return "💘";
     default: return "🔔";
   }
 }

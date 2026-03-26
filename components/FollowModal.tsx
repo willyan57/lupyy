@@ -11,7 +11,7 @@ import {
   View,
 } from "react-native";
 
-type InterestType = "friend" | "crush" | "silent_crush";
+import { type InterestType } from "@/lib/social";
 type RelationshipStatus = "single" | "committed" | "other";
 
 type Props = {
@@ -85,7 +85,7 @@ function FollowModalComponent({
 
   const handleSelect = (value: InterestType) => {
     if (loading) return;
-    if ((value === "crush" || value === "silent_crush") && isCrushBlocked) return;
+    if ((value === "crush" || value === "silent_crush" || value === "super_crush") && isCrushBlocked) return;
     onSelect(value);
   };
 
@@ -230,6 +230,53 @@ function FollowModalComponent({
                 {existingInterestType === "silent_crush" && !isCrushBlocked && (
                   <View style={styles.badge}>
                     <Text style={styles.badgeText}>Atual</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+
+              {/* ── Super Crush (rare/premium, also blocked if committed) ── */}
+              <TouchableOpacity
+                style={[
+                  styles.option,
+                  existingInterestType === "super_crush" && styles.optionActive,
+                  (isCrushBlocked || loading) && styles.optionDisabled,
+                  { borderWidth: 1, borderColor: isCrushBlocked ? 'transparent' : '#FFD700' },
+                ]}
+                activeOpacity={isCrushBlocked ? 1 : 0.8}
+                onPress={() => handleSelect("super_crush")}
+              >
+                <View style={styles.optionLeft}>
+                  <Text style={styles.emoji}>
+                    {isCrushBlocked ? "🔒" : "🚀"}
+                  </Text>
+                  <View>
+                    <Text
+                      style={[
+                        styles.optionLabel,
+                        isCrushBlocked && styles.optionLabelMuted,
+                        !isCrushBlocked && { color: '#FFD700' },
+                      ]}
+                    >
+                      Super Crush ⭐
+                    </Text>
+                    <Text
+                      style={[
+                        styles.optionDescription,
+                        isCrushBlocked && styles.optionDescriptionMuted,
+                      ]}
+                    >
+                      {isCrushBlocked
+                        ? "Bloqueado enquanto comprometido"
+                        : "A pessoa sabe que você está MUITO interessado. Raro e poderoso."}
+                    </Text>
+                    {isCrushBlocked && (
+                      <Text style={styles.blockedText}>{blockedMessage}</Text>
+                    )}
+                  </View>
+                </View>
+                {existingInterestType === "super_crush" && !isCrushBlocked && (
+                  <View style={[styles.badge, { backgroundColor: '#FFD700' }]}>
+                    <Text style={[styles.badgeText, { color: '#000' }]}>Atual</Text>
                   </View>
                 )}
               </TouchableOpacity>

@@ -44,8 +44,8 @@ export type PostCardProps = {
   onRepost?: () => void;
   onShare?: () => void;
   onPressUser?: () => void;
-  /** Callback quando clica na quantidade de curtidas */
   onPressLikesCount?: () => void;
+  onToggleMute?: () => void;
 };
 
 function timeAgo(ts?: string | null) {
@@ -80,6 +80,7 @@ function _PostCard(props: PostCardProps) {
     onShare,
     onPressUser,
     onPressLikesCount,
+    onToggleMute,
   } = props;
 
   const isWeb = Platform.OS === "web";
@@ -113,9 +114,9 @@ function _PostCard(props: PostCardProps) {
   }, [paused, isVisible, player, media_type]);
 
   useEffect(() => {
-    if (media_type !== "video" || isWeb) return;
-    player.muted = !!muted;
-  }, [muted, player, media_type, isWeb]);
+    if (media_type !== "video") return;
+    try { player.muted = !!muted; } catch {}
+  }, [muted, player, media_type]);
 
   useEffect(() => {
     return () => {
@@ -243,6 +244,15 @@ function _PostCard(props: PostCardProps) {
               {mediaContent}
             </View>
           </GestureDetector>
+        )}
+        {media_type === "video" && isVisible && onToggleMute && (
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={onToggleMute}
+            style={{ position: "absolute", bottom: 12, right: 12, backgroundColor: "rgba(0,0,0,0.6)", borderRadius: 20, width: 32, height: 32, alignItems: "center", justifyContent: "center" }}
+          >
+            <Ionicons name={muted ? "volume-mute" : "volume-high"} size={18} color="#fff" />
+          </TouchableOpacity>
         )}
       </View>
 

@@ -1,7 +1,7 @@
 // lib/social.ts
 import { supabase } from "@/lib/supabase";
 
-export type InterestType = "friend" | "crush" | "silent_crush";
+export type InterestType = "friend" | "crush" | "silent_crush" | "super_crush";
 
 export type SocialStats = {
   user_id: string;
@@ -104,7 +104,7 @@ export async function setFollowInterestType(
   }
 
   // ── Server-side crush validation ──
-  if (interestType === "crush" || interestType === "silent_crush") {
+  if (interestType === "crush" || interestType === "silent_crush" || interestType === "super_crush") {
     const [myStatus, targetStatus] = await Promise.all([
       fetchRelationshipStatus(followerId),
       fetchRelationshipStatus(followingId),
@@ -155,7 +155,7 @@ export async function setFollowInterestType(
   let crush = false;
   let isNewMatch = false;
 
-  if (interestType === "crush" || interestType === "silent_crush") {
+  if (interestType === "crush" || interestType === "silent_crush" || interestType === "super_crush") {
     const { data: reciprocal, error: reciprocalErr } = await supabase
       .from("follows")
       .select("id, interest_type")

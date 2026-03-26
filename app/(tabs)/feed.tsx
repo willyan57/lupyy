@@ -92,7 +92,7 @@ export default function Feed() {
   const [hasMore, setHasMore] = useState(true);
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
-  const [muted, setMuted] = useState(false);
+  const [muted, setMuted] = useState(Platform.OS === "web");
   const [error, setError] = useState<string | null>(null);
 
   const [viewerOpen, setViewerOpen] = useState(false);
@@ -592,27 +592,23 @@ export default function Feed() {
         keyExtractor={(it) => String(it.id)}
         ListHeaderComponent={
            <View>
-            <View style={styles.topBar}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-                {!isDesktopWeb && (
-                  <TouchableOpacity
-                    activeOpacity={0.8}
-                    onPress={() => router.push("/capture")}
-                  >
-                    <Ionicons name="add-circle-outline" size={26} color={theme.colors.primary} />
-                  </TouchableOpacity>
-                )}
+            {!isDesktopWeb && (
+              <View style={styles.topBar}>
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => router.push("/capture")}
+                >
+                  <Ionicons name="add-circle-outline" size={26} color={theme.colors.primary} />
+                </TouchableOpacity>
                 <Text style={[styles.logoText, { color: theme.colors.text }]}>Lupyy</Text>
-              </View>
-              {!isDesktopWeb && (
                 <TouchableOpacity
                   activeOpacity={0.8}
                   onPress={() => router.push("/notifications")}
                 >
                   <Ionicons name="heart-outline" size={26} color={theme.colors.text} />
                 </TouchableOpacity>
-              )}
-            </View>
+              </View>
+            )}
             <StoriesBar data={storyUsers} onPressStory={handlePressStory} />
           </View>
         }
@@ -645,6 +641,7 @@ export default function Feed() {
             onRepost={() => {}}
             onShare={() => sharePost(item.id)}
             onPressLikesCount={() => openLikesSheet(item.id)}
+            onToggleMute={() => setMuted((m) => !m)}
           />
         )}
         ListEmptyComponent={
