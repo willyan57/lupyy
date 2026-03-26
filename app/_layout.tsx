@@ -148,10 +148,14 @@ export default function RootLayout() {
   const desktopPublicRouteContentStyle = isDesktopPublicRoute
     ? ({
         backgroundColor: Colors.background,
-        paddingTop: 180,
-        paddingBottom: 40,
-      } as const)
-    : ({ backgroundColor: Colors.background } as const);
+        flex: 1,
+        width: "100%",
+        maxWidth: "100%",
+        alignSelf: "stretch",
+      } as any)
+    : ({
+        backgroundColor: Colors.background,
+      } as const);
 
   return (
     <GestureHandlerRootView

@@ -15,16 +15,14 @@ import {
 
 import LoginScreen from "./login";
 
-const APP_SCHEME = "lupyy"; // se seu scheme for outro, troque aqui (ex: "lupyyapp")
+const APP_SCHEME = "lupyy";
 const APP_DEEP_LINK = `${APP_SCHEME}://`;
 
 export default function Entry() {
-  // ✅ Mantém o APP (Android/iOS) exatamente como está hoje
   if (Platform.OS !== "web") {
     return <LoginScreen />;
   }
 
-  // ✅ Web: landing / login
   return <WebLanding />;
 }
 
@@ -38,11 +36,13 @@ function WebLanding() {
 
   useEffect(() => {
     let mounted = true;
+
     (async () => {
       try {
         const {
           data: { session },
         } = await supabase.auth.getSession();
+
         if (!mounted) return;
         setHasSession(!!session);
       } finally {
@@ -55,7 +55,6 @@ function WebLanding() {
     };
   }, []);
 
-  // Se já está logado no web, manda direto pro feed (igual “já autenticado”)
   useEffect(() => {
     if (!checking && hasSession) {
       router.replace("/(tabs)/feed");
@@ -70,21 +69,17 @@ function WebLanding() {
     );
   }
 
-  // Desktop web: login centralizado + rodapé (sem coluna esquerda)
   if (isDesktop) {
     return (
       <View style={styles.desktopRoot}>
-        <View style={styles.desktopCenter}>
-          <View style={styles.loginCard}>
-            <LoginScreen />
-          </View>
-          <WebFooter />
+        <View style={styles.desktopContent}>
+          <LoginScreen />
         </View>
+        <WebFooter />
       </View>
     );
   }
 
-  // Mobile web: tela tipo IG mobile (CTA “Abrir”, entrar/cadastrar)
   return (
     <View style={styles.mobileRoot}>
       <View style={styles.mobileTopSpacer} />
@@ -129,7 +124,6 @@ function WebLanding() {
 }
 
 function openAppDeepLink() {
-  // Web only — tenta abrir o app; se não estiver instalado, cai no /login
   try {
     // @ts-ignore
     window.location.href = APP_DEEP_LINK;
@@ -138,6 +132,7 @@ function openAppDeepLink() {
       if (window.location.href === APP_DEEP_LINK) return;
     }, 50);
   } catch {}
+
   setTimeout(() => {
     // @ts-ignore
     if (typeof window !== "undefined") window.location.href = "/login";
@@ -154,9 +149,7 @@ function WebFooter() {
         <Link href="/privacy" style={styles.webFooterLink}>
           Privacidade
         </Link>
-        <Text style={styles.webFooterMuted}>
-          © {new Date().getFullYear()} Lupyy
-        </Text>
+        <Text style={styles.webFooterMuted}>© {new Date().getFullYear()} Lupyy</Text>
       </View>
     </View>
   );
@@ -187,39 +180,27 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-
-  // Desktop web (centralizado)
   desktopRoot: {
     flex: 1,
     backgroundColor: Colors.background,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 28,
-    paddingHorizontal: 24,
   },
-  desktopCenter: {
+  desktopContent: {
+    flex: 1,
     width: "100%",
-    maxWidth: 520,
-    alignItems: "center",
-  },
-  loginCard: {
-    width: "100%",
-    borderRadius: 16,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: Colors.background,
   },
   webFooter: {
-    marginTop: 18,
+    width: "100%",
     alignItems: "center",
+    paddingHorizontal: 24,
+    paddingBottom: 18,
+    paddingTop: 10,
   },
   webFooterRow: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
     gap: 16,
     flexWrap: "wrap",
-    justifyContent: "center",
   },
   webFooterLink: {
     color: Colors.textMuted,
@@ -230,14 +211,14 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     fontSize: 12,
   },
-
-  // Mobile web
   mobileRoot: {
     flex: 1,
     backgroundColor: Colors.background,
     alignItems: "center",
   },
-  mobileTopSpacer: { height: 56 },
+  mobileTopSpacer: {
+    height: 56,
+  },
   mobileCenter: {
     width: "100%",
     maxWidth: 520,
@@ -255,7 +236,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: 10,
   },
-  mobileLogo: { width: 84, height: 84 },
+  mobileLogo: {
+    width: 84,
+    height: 84,
+  },
   mobileTitle: {
     fontSize: 44,
     fontWeight: "900",
@@ -306,9 +290,15 @@ const styles = StyleSheet.create({
     gap: 4,
     width: "100%",
   },
-  mobileFooterText: { color: Colors.textMuted, fontSize: 12 },
-  mobileFooterBrand: { color: Colors.text, fontSize: 14, fontWeight: "800" },
-
+  mobileFooterText: {
+    color: Colors.textMuted,
+    fontSize: 12,
+  },
+  mobileFooterBrand: {
+    color: Colors.text,
+    fontSize: 14,
+    fontWeight: "800",
+  },
   legalBar: {
     marginTop: 10,
     paddingHorizontal: 24,

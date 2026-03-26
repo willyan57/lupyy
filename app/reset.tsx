@@ -1,6 +1,7 @@
 import Colors from "@/constants/Colors";
 import { useTranslation } from "@/lib/i18n";
 import { supabase } from "@/lib/supabase";
+import { useIsMobileWeb } from "@/lib/useIsMobileWeb";
 import type { AuthChangeEvent } from "@supabase/supabase-js";
 import { Image } from "expo-image";
 import * as Linking from "expo-linking";
@@ -34,6 +35,8 @@ const RECOVERY_FLAG = "lupyy_password_recovery_pending";
 export default function ResetScreen() {
   const router = useRouter();
   const { t } = useTranslation();
+  const isMobileWeb = useIsMobileWeb(900);
+  const isDesktop = Platform.OS === "web" && !isMobileWeb;
 
   const [mode, setMode] = useState<Mode>("request");
   const [email, setEmail] = useState("");
@@ -62,7 +65,6 @@ export default function ResetScreen() {
     message: "",
   });
 
-  // Password strength indicators
   const hasMinLength = pass1.length >= 8;
   const hasLower = /[a-z]/.test(pass1);
   const hasUpper = /[A-Z]/.test(pass1);
@@ -401,177 +403,153 @@ export default function ResetScreen() {
     }
   }
 
-  return (
-    <View style={styles.screen}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        style={styles.flex}
-      >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-        >
-          <View style={styles.card}>
-            <View style={styles.logoWrap}>
-              <Image
-                source={require("../assets/branding/lupyy-logo.png")}
-                style={styles.logoImage}
-                contentFit="contain"
-              />
+  // ─── Form content (shared) ───
+  function renderFormContent() {
+    return (
+      <>
+        {banner.visible ? (
+          <View
+            style={[
+              styles.banner,
+              banner.type === "error"
+                ? styles.bannerError
+                : banner.type === "success"
+                ? styles.bannerSuccess
+                : styles.bannerInfo,
+            ]}
+          >
+            <Text
+              style={[
+                styles.bannerText,
+                banner.type === "error"
+                  ? styles.bannerTextError
+                  : banner.type === "success"
+                  ? styles.bannerTextSuccess
+                  : styles.bannerTextInfo,
+              ]}
+            >
+              {banner.message}
+            </Text>
+          </View>
+        ) : null}
+
+        {loadingRecovery ? (
+          <View style={styles.loadingBox}>
+            <ActivityIndicator color="#8B5CF6" />
+            <Text style={styles.loadingText}>{t("reset.validating")}</Text>
+          </View>
+        ) : mode === "request" ? (
+          <>
+            <Text style={styles.label}>{t("reset.emailLabel")}</Text>
+            <TextInput
+              placeholder={t("reset.emailPlaceholder")}
+              placeholderTextColor={Colors.textMuted}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              value={email}
+              onChangeText={(text) => {
+                setEmail(text);
+                setEmailError(false);
+                clearBanner();
+              }}
+              style={[styles.input, emailError && styles.inputError]}
+            />
+
+            <TouchableOpacity
+              onPress={handleSendEmail}
+              disabled={sending}
+              style={[styles.resetButton, sending && styles.buttonDisabled]}
+            >
+              {sending ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.resetButtonText}>{t("reset.sendLink")}</Text>
+              )}
+            </TouchableOpacity>
+
+            <Text style={styles.helper}>{t("reset.remembered")}</Text>
+            <Link href="/" style={styles.link}>
+              {t("reset.backToLogin")}
+            </Link>
+          </>
+        ) : (
+          <>
+            <Text style={styles.label}>{t("reset.newPasswordLabel")}</Text>
+            <TextInput
+              placeholder={t("reset.newPasswordPlaceholder")}
+              placeholderTextColor={Colors.textMuted}
+              secureTextEntry
+              value={pass1}
+              onChangeText={(text) => {
+                setPass1(text);
+                setPasswordError(false);
+                clearBanner();
+              }}
+              style={[styles.input, passwordError && styles.inputError]}
+            />
+
+            <View style={styles.requirementsContainer}>
+              <Text style={[styles.requirementText, hasMinLength && styles.requirementOk]}>
+                {hasMinLength ? "✓" : "○"} {t("password.minLength")}
+              </Text>
+              <Text style={[styles.requirementText, hasLower && styles.requirementOk]}>
+                {hasLower ? "✓" : "○"} {t("password.lowercase")}
+              </Text>
+              <Text style={[styles.requirementText, hasUpper && styles.requirementOk]}>
+                {hasUpper ? "✓" : "○"} {t("password.uppercase")}
+              </Text>
+              <Text style={[styles.requirementText, hasNumber && styles.requirementOk]}>
+                {hasNumber ? "✓" : "○"} {t("password.number")}
+              </Text>
+              <Text style={[styles.requirementText, hasSymbol && styles.requirementOk]}>
+                {hasSymbol ? "✓" : "○"} {t("password.symbol")}
+              </Text>
             </View>
 
-            <Text style={styles.brand}>{t("common.appName")}</Text>
-            <Text style={styles.title}>
-              {mode === "request" ? t("reset.titleRequest") : t("reset.titleReset")}
-            </Text>
-            <Text style={styles.subtitle}>
-              {mode === "request"
-                ? t("reset.subtitleRequest")
-                : t("reset.subtitleReset")}
-            </Text>
+            <Text style={styles.label}>{t("reset.confirmLabel")}</Text>
+            <TextInput
+              placeholder={t("reset.confirmPlaceholder")}
+              placeholderTextColor={Colors.textMuted}
+              secureTextEntry
+              value={pass2}
+              onChangeText={(text) => {
+                setPass2(text);
+                setPasswordError(false);
+                clearBanner();
+              }}
+              style={[styles.input, passwordError && styles.inputError]}
+            />
 
-            {banner.visible ? (
-              <View
-                style={[
-                  styles.banner,
-                  banner.type === "error"
-                    ? styles.bannerError
-                    : banner.type === "success"
-                    ? styles.bannerSuccess
-                    : styles.bannerInfo,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.bannerText,
-                    banner.type === "error"
-                      ? styles.bannerTextError
-                      : banner.type === "success"
-                      ? styles.bannerTextSuccess
-                      : styles.bannerTextInfo,
-                  ]}
-                >
-                  {banner.message}
-                </Text>
-              </View>
-            ) : null}
-
-            {loadingRecovery ? (
-              <View style={styles.loadingBox}>
-                <ActivityIndicator color="#8B5CF6" />
-                <Text style={styles.loadingText}>{t("reset.validating")}</Text>
-              </View>
-            ) : mode === "request" ? (
-              <>
-                <Text style={styles.label}>{t("reset.emailLabel")}</Text>
-                <TextInput
-                  placeholder={t("reset.emailPlaceholder")}
-                  placeholderTextColor={Colors.textMuted}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  value={email}
-                  onChangeText={(text) => {
-                    setEmail(text);
-                    setEmailError(false);
-                    clearBanner();
-                  }}
-                  style={[styles.input, emailError && styles.inputError]}
-                />
-
-                <TouchableOpacity
-                  onPress={handleSendEmail}
-                  disabled={sending}
-                  style={[styles.button, sending && styles.buttonDisabled]}
-                >
-                  {sending ? (
-                    <ActivityIndicator color="#fff" />
-                  ) : (
-                    <Text style={styles.buttonText}>{t("reset.sendLink")}</Text>
-                  )}
-                </TouchableOpacity>
-
-                <Text style={styles.helper}>{t("reset.remembered")}</Text>
-                <Link href="/" style={styles.link}>
-                  {t("reset.backToLogin")}
-                </Link>
-              </>
-            ) : (
-              <>
-                <Text style={styles.label}>{t("reset.newPasswordLabel")}</Text>
-                <TextInput
-                  placeholder={t("reset.newPasswordPlaceholder")}
-                  placeholderTextColor={Colors.textMuted}
-                  secureTextEntry
-                  value={pass1}
-                  onChangeText={(text) => {
-                    setPass1(text);
-                    setPasswordError(false);
-                    clearBanner();
-                  }}
-                  style={[styles.input, passwordError && styles.inputError]}
-                />
-
-                {/* Password strength indicators */}
-                <View style={styles.requirementsContainer}>
-                  <Text style={[styles.requirementText, hasMinLength && styles.requirementOk]}>
-                    {hasMinLength ? "✓" : "○"} {t("password.minLength")}
-                  </Text>
-                  <Text style={[styles.requirementText, hasLower && styles.requirementOk]}>
-                    {hasLower ? "✓" : "○"} {t("password.lowercase")}
-                  </Text>
-                  <Text style={[styles.requirementText, hasUpper && styles.requirementOk]}>
-                    {hasUpper ? "✓" : "○"} {t("password.uppercase")}
-                  </Text>
-                  <Text style={[styles.requirementText, hasNumber && styles.requirementOk]}>
-                    {hasNumber ? "✓" : "○"} {t("password.number")}
-                  </Text>
-                  <Text style={[styles.requirementText, hasSymbol && styles.requirementOk]}>
-                    {hasSymbol ? "✓" : "○"} {t("password.symbol")}
-                  </Text>
-                </View>
-
-                <Text style={styles.label}>{t("reset.confirmLabel")}</Text>
-                <TextInput
-                  placeholder={t("reset.confirmPlaceholder")}
-                  placeholderTextColor={Colors.textMuted}
-                  secureTextEntry
-                  value={pass2}
-                  onChangeText={(text) => {
-                    setPass2(text);
-                    setPasswordError(false);
-                    clearBanner();
-                  }}
-                  style={[styles.input, passwordError && styles.inputError]}
-                />
-
-                {pass2.length > 0 && (
-                  <Text style={[styles.requirementText, passwordsMatch ? styles.requirementOk : styles.requirementFail]}>
-                    {passwordsMatch ? `✓ ${t("password.match")}` : `✗ ${t("password.noMatch")}`}
-                  </Text>
-                )}
-
-                <TouchableOpacity
-                  onPress={handleChangePassword}
-                  disabled={changing}
-                  style={[styles.button, changing && styles.buttonDisabled]}
-                >
-                  {changing ? (
-                    <ActivityIndicator color="#fff" />
-                  ) : (
-                    <Text style={styles.buttonText}>{t("reset.saveButton")}</Text>
-                  )}
-                </TouchableOpacity>
-
-                <Link href="/" style={styles.link}>
-                  {t("common.cancel")}
-                </Link>
-              </>
+            {pass2.length > 0 && (
+              <Text style={[styles.requirementText, passwordsMatch ? styles.requirementOk : styles.requirementFail]}>
+                {passwordsMatch ? `✓ ${t("password.match")}` : `✗ ${t("password.noMatch")}`}
+              </Text>
             )}
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
 
+            <TouchableOpacity
+              onPress={handleChangePassword}
+              disabled={changing}
+              style={[styles.resetButton, changing && styles.buttonDisabled]}
+            >
+              {changing ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.resetButtonText}>{t("reset.saveButton")}</Text>
+              )}
+            </TouchableOpacity>
+
+            <Link href="/" style={styles.link}>
+              {t("common.cancel")}
+            </Link>
+          </>
+        )}
+      </>
+    );
+  }
+
+  function renderNoticeModal() {
+    return (
       <Modal
         transparent
         visible={notice.visible}
@@ -591,10 +569,203 @@ export default function ResetScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+    );
+  }
+
+  // ─── DESKTOP: Clean centered card ───
+  if (isDesktop) {
+    return (
+      <View style={dStyles.root}>
+        <ScrollView
+          contentContainerStyle={dStyles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={dStyles.card}>
+            <TouchableOpacity onPress={() => router.back()} style={dStyles.backBtn}>
+              <Text style={dStyles.backArrow}>‹</Text>
+            </TouchableOpacity>
+
+            <View style={dStyles.logoWrap}>
+              <Image
+                source={require("../assets/branding/lupyy-logo.png")}
+                style={dStyles.logoImage}
+                contentFit="contain"
+              />
+            </View>
+
+            <Text style={dStyles.brand}>{t("common.appName")}</Text>
+            <Text style={dStyles.title}>
+              {mode === "request" ? t("reset.titleRequest") : t("reset.titleReset")}
+            </Text>
+            <Text style={dStyles.subtitle}>
+              {mode === "request"
+                ? t("reset.subtitleRequest")
+                : t("reset.subtitleReset")}
+            </Text>
+
+            {renderFormContent()}
+          </View>
+
+          <View style={dStyles.footer}>
+            <View style={dStyles.footerRow}>
+              <Link href="/terms" style={dStyles.footerLink}>{t("common.termsOfUse")}</Link>
+              <Text style={dStyles.footerSep}>·</Text>
+              <Link href="/privacy" style={dStyles.footerLink}>{t("common.privacyPolicy")}</Link>
+            </View>
+            <Text style={dStyles.copyright}>{t("common.copyright")}</Text>
+          </View>
+        </ScrollView>
+
+        {renderNoticeModal()}
+      </View>
+    );
+  }
+
+  // ─── MOBILE: Original layout (unchanged) ───
+  return (
+    <View style={styles.screen}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={styles.flex}
+      >
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={styles.card}>
+            <View style={styles.logoWrap}>
+              <Image
+                source={require("../assets/branding/lupyy-logo.png")}
+                style={styles.logoImageMobile}
+                contentFit="contain"
+              />
+            </View>
+
+            <Text style={styles.brandMobile}>{t("common.appName")}</Text>
+            <Text style={styles.titleMobile}>
+              {mode === "request" ? t("reset.titleRequest") : t("reset.titleReset")}
+            </Text>
+            <Text style={styles.subtitleMobile}>
+              {mode === "request"
+                ? t("reset.subtitleRequest")
+                : t("reset.subtitleReset")}
+            </Text>
+
+            {renderFormContent()}
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      {renderNoticeModal()}
     </View>
   );
 }
 
+// ─── Desktop-only styles ───
+const dStyles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: Colors.background,
+    minHeight: "100%" as any,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingVertical: 40,
+    paddingHorizontal: 24,
+  },
+  card: {
+    width: "100%",
+    maxWidth: 480,
+    backgroundColor: "#090B14",
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    paddingHorizontal: 32,
+    paddingVertical: 32,
+    shadowColor: "#000",
+    shadowOpacity: 0.35,
+    shadowRadius: 30,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 16,
+  },
+  backBtn: {
+    position: "absolute",
+    top: 18,
+    left: 20,
+    zIndex: 10,
+    padding: 4,
+  },
+  backArrow: {
+    color: Colors.text,
+    fontSize: 28,
+    fontWeight: "300",
+  },
+  logoWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignSelf: "center",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(124,58,237,0.08)",
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: "rgba(124,58,237,0.2)",
+  },
+  logoImage: {
+    width: 36,
+    height: 36,
+  },
+  brand: {
+    color: "#F5F7FF",
+    fontSize: 22,
+    fontWeight: "900",
+    textAlign: "center",
+    marginBottom: 4,
+  },
+  title: {
+    color: "#FFFFFF",
+    fontSize: 18,
+    fontWeight: "800",
+    textAlign: "center",
+    marginBottom: 6,
+  },
+  subtitle: {
+    color: "#98A2B3",
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  footer: {
+    marginTop: 24,
+    alignItems: "center",
+    gap: 4,
+  },
+  footerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  footerLink: {
+    color: Colors.textMuted,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  footerSep: {
+    color: Colors.textMuted,
+    fontSize: 12,
+  },
+  copyright: {
+    color: "rgba(255,255,255,0.2)",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+});
+
+// ─── Shared + Mobile styles ───
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   screen: {
@@ -640,11 +811,11 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 8,
   },
-  logoImage: {
+  logoImageMobile: {
     width: 76,
     height: 76,
   },
-  brand: {
+  brandMobile: {
     color: "#F5F7FF",
     fontSize: 34,
     lineHeight: 40,
@@ -652,7 +823,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 10,
   },
-  title: {
+  titleMobile: {
     color: "#FFFFFF",
     fontSize: 24,
     lineHeight: 30,
@@ -660,7 +831,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 10,
   },
-  subtitle: {
+  subtitleMobile: {
     color: "#98A2B3",
     fontSize: 15,
     lineHeight: 22,
@@ -733,7 +904,7 @@ const styles = StyleSheet.create({
   requirementFail: {
     color: "#f87171",
   },
-  button: {
+  resetButton: {
     marginTop: 10,
     borderRadius: 16,
     paddingVertical: 17,
@@ -744,7 +915,7 @@ const styles = StyleSheet.create({
   buttonDisabled: {
     opacity: 0.7,
   },
-  buttonText: {
+  resetButtonText: {
     color: "#FFFFFF",
     fontSize: 17,
     fontWeight: "800",

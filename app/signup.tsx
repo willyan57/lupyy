@@ -19,6 +19,7 @@ import {
 import Colors from "@/constants/Colors";
 import { useTranslation } from "@/lib/i18n";
 import { supabase } from "@/lib/supabase";
+import { useIsMobileWeb } from "@/lib/useIsMobileWeb";
 
 type BtnProps = {
   title: string;
@@ -77,12 +78,13 @@ function isOldEnough(birthDate: Date): boolean {
 export default function Signup() {
   const router = useRouter();
   const { t } = useTranslation();
-  const isDesktopWeb = Platform.OS === "web";
+  const isMobileWeb = useIsMobileWeb(900);
+  const isDesktop = Platform.OS === "web" && !isMobileWeb;
+
   const [email, setEmail] = useState("");
   const [pass, setPass] = useState("");
   const [confirmPass, setConfirmPass] = useState("");
   const [loading, setLoading] = useState(false);
-
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
 
@@ -199,20 +201,198 @@ export default function Signup() {
     }
   }
 
+  // ─── Form content (shared) ───
+  function renderFormContent() {
+    return (
+      <>
+        <Text style={styles.label}>{t("signup.emailLabel")}</Text>
+        <TextInput
+          placeholder={t("signup.emailPlaceholder")}
+          placeholderTextColor={Colors.textMuted}
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoCorrect={false}
+          value={email}
+          onChangeText={(txt) => { setEmail(txt); setErrorMsg(null); }}
+          style={styles.input}
+        />
+
+        <Text style={styles.label}>{t("signup.passwordLabel")}</Text>
+        <TextInput
+          placeholder={t("signup.passwordPlaceholder")}
+          placeholderTextColor={Colors.textMuted}
+          secureTextEntry
+          value={pass}
+          onChangeText={(txt) => { setPass(txt); setErrorMsg(null); }}
+          style={styles.input}
+        />
+
+        <View style={styles.requirementsContainer}>
+          <Text style={[styles.requirementText, hasMinLength && styles.requirementOk]}>
+            {hasMinLength ? "✓" : "○"} {t("password.minLength")}
+          </Text>
+          <Text style={[styles.requirementText, hasLower && styles.requirementOk]}>
+            {hasLower ? "✓" : "○"} {t("password.lowercase")}
+          </Text>
+          <Text style={[styles.requirementText, hasUpper && styles.requirementOk]}>
+            {hasUpper ? "✓" : "○"} {t("password.uppercase")}
+          </Text>
+          <Text style={[styles.requirementText, hasNumber && styles.requirementOk]}>
+            {hasNumber ? "✓" : "○"} {t("password.number")}
+          </Text>
+          <Text style={[styles.requirementText, hasSymbol && styles.requirementOk]}>
+            {hasSymbol ? "✓" : "○"} {t("password.symbol")}
+          </Text>
+        </View>
+
+        <Text style={styles.label}>{t("signup.confirmPasswordLabel")}</Text>
+        <TextInput
+          placeholder={t("signup.confirmPasswordPlaceholder")}
+          placeholderTextColor={Colors.textMuted}
+          secureTextEntry
+          value={confirmPass}
+          onChangeText={(txt) => { setConfirmPass(txt); setErrorMsg(null); }}
+          style={styles.input}
+        />
+        {confirmPass.length > 0 && (
+          <Text style={[styles.requirementText, passwordsMatch ? styles.requirementOk : styles.requirementFail]}>
+            {passwordsMatch ? `✓ ${t("password.match")}` : `✗ ${t("password.noMatch")}`}
+          </Text>
+        )}
+
+        <Text style={styles.label}>{t("signup.birthDateLabel")}</Text>
+        <Text style={styles.ageNote}>{t("signup.birthDateNote")}</Text>
+        <View style={styles.dateRow}>
+          <TextInput
+            placeholder={t("signup.dayPlaceholder")}
+            placeholderTextColor={Colors.textMuted}
+            keyboardType="number-pad"
+            maxLength={2}
+            value={birthDay}
+            onChangeText={(txt) => { setBirthDay(txt.replace(/\D/g, "")); setErrorMsg(null); }}
+            style={[styles.input, styles.dateInput, styles.dateInputCompact]}
+          />
+          <Text style={styles.dateSeparator}>/</Text>
+          <TextInput
+            placeholder={t("signup.monthPlaceholder")}
+            placeholderTextColor={Colors.textMuted}
+            keyboardType="number-pad"
+            maxLength={2}
+            value={birthMonth}
+            onChangeText={(txt) => { setBirthMonth(txt.replace(/\D/g, "")); setErrorMsg(null); }}
+            style={[styles.input, styles.dateInput, styles.dateInputCompact]}
+          />
+          <Text style={styles.dateSeparator}>/</Text>
+          <TextInput
+            placeholder={t("signup.yearPlaceholder")}
+            placeholderTextColor={Colors.textMuted}
+            keyboardType="number-pad"
+            maxLength={4}
+            value={birthYear}
+            onChangeText={(txt) => { setBirthYear(txt.replace(/\D/g, "")); setErrorMsg(null); }}
+            style={[styles.input, styles.dateInput, styles.dateInputCompactYear]}
+          />
+        </View>
+
+        <TouchableOpacity
+          onPress={() => setAcceptedTerms(!acceptedTerms)}
+          activeOpacity={0.8}
+          style={styles.termsRow}
+        >
+          <View style={[styles.checkbox, acceptedTerms && styles.checkboxChecked]}>
+            {acceptedTerms && <Text style={styles.checkmark}>✓</Text>}
+          </View>
+          <Text style={styles.termsText}>
+            {t("signup.termsAccept")}{" "}
+            <Text style={styles.termsLink} onPress={() => router.push("/terms" as any)}>
+              {t("common.termsOfUse")}
+            </Text>{" "}
+            {t("signup.termsAnd")}{" "}
+            <Text style={styles.termsLink} onPress={() => router.push("/privacy" as any)}>
+              {t("common.privacyPolicy")}
+            </Text>
+          </Text>
+        </TouchableOpacity>
+
+        {errorMsg && <Text style={styles.errorText}>{errorMsg}</Text>}
+        {infoMsg && !errorMsg && <Text style={styles.infoText}>{infoMsg}</Text>}
+
+        {loading ? (
+          <View style={{ paddingVertical: 16 }}>
+            <ActivityIndicator color={Colors.brandStart} />
+            <Text style={styles.loadingText}>{t("signup.creating")}</Text>
+          </View>
+        ) : (
+          <GradientButton
+            title={t("signup.createButton")}
+            onPress={handleSignup}
+            style={{ marginTop: 12 }}
+          />
+        )}
+
+        <View style={styles.footerLinks}>
+          <Link href="/" style={styles.link}>
+            {t("signup.hasAccount")}
+          </Link>
+        </View>
+      </>
+    );
+  }
+
+  // ─── DESKTOP: Clean centered card ───
+  if (isDesktop) {
+    return (
+      <View style={dStyles.root}>
+        <ScrollView
+          contentContainerStyle={dStyles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={dStyles.card}>
+            <TouchableOpacity onPress={() => router.back()} style={dStyles.backBtn}>
+              <Text style={dStyles.backArrow}>‹</Text>
+            </TouchableOpacity>
+
+            <View style={styles.logoHeader}>
+              <View style={dStyles.logoCircle}>
+                <Image
+                  source={require("../assets/branding/lupyy-logo.png")}
+                  style={dStyles.logoImage}
+                  contentFit="contain"
+                />
+              </View>
+            </View>
+
+            <Text style={dStyles.brand}>{t("common.appName")}</Text>
+            <Text style={dStyles.title}>{t("signup.title")}</Text>
+            <Text style={dStyles.subtitle}>{t("signup.subtitle")}</Text>
+
+            {renderFormContent()}
+          </View>
+
+          <View style={dStyles.footer}>
+            <View style={dStyles.footerRow}>
+              <Link href="/terms" style={dStyles.footerLink}>{t("common.termsOfUse")}</Link>
+              <Text style={dStyles.footerSep}>·</Text>
+              <Link href="/privacy" style={dStyles.footerLink}>{t("common.privacyPolicy")}</Link>
+            </View>
+            <Text style={dStyles.copyright}>{t("common.copyright")}</Text>
+          </View>
+        </ScrollView>
+      </View>
+    );
+  }
+
+  // ─── MOBILE: Original card layout (unchanged) ───
   return (
     <KeyboardAvoidingView
       behavior={Platform.select({ ios: "padding", android: undefined })}
       style={{ flex: 1, backgroundColor: Colors.background }}
     >
       <ScrollView
-        contentContainerStyle={[
-          styles.scrollContent,
-          isDesktopWeb && styles.scrollContentDesktop,
-        ]}
+        contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={[styles.card, isDesktopWeb && styles.cardDesktop]}>
-          {/* Logo */}
+        <View style={styles.card}>
           <View style={styles.logoHeader}>
             <View style={styles.logoCircle}>
               <Image
@@ -227,157 +407,122 @@ export default function Signup() {
           <Text style={styles.title}>{t("signup.title")}</Text>
           <Text style={styles.subtitle}>{t("signup.subtitle")}</Text>
 
-          <Text style={styles.label}>{t("signup.emailLabel")}</Text>
-          <TextInput
-            placeholder={t("signup.emailPlaceholder")}
-            placeholderTextColor={Colors.textMuted}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoCorrect={false}
-            value={email}
-            onChangeText={(txt) => { setEmail(txt); setErrorMsg(null); }}
-            style={styles.input}
-          />
-
-          <Text style={styles.label}>{t("signup.passwordLabel")}</Text>
-          <TextInput
-            placeholder={t("signup.passwordPlaceholder")}
-            placeholderTextColor={Colors.textMuted}
-            secureTextEntry
-            value={pass}
-            onChangeText={(txt) => { setPass(txt); setErrorMsg(null); }}
-            style={styles.input}
-          />
-
-          {/* Password requirements visual feedback */}
-          <View style={styles.requirementsContainer}>
-            <Text style={[styles.requirementText, hasMinLength && styles.requirementOk]}>
-              {hasMinLength ? "✓" : "○"} {t("password.minLength")}
-            </Text>
-            <Text style={[styles.requirementText, hasLower && styles.requirementOk]}>
-              {hasLower ? "✓" : "○"} {t("password.lowercase")}
-            </Text>
-            <Text style={[styles.requirementText, hasUpper && styles.requirementOk]}>
-              {hasUpper ? "✓" : "○"} {t("password.uppercase")}
-            </Text>
-            <Text style={[styles.requirementText, hasNumber && styles.requirementOk]}>
-              {hasNumber ? "✓" : "○"} {t("password.number")}
-            </Text>
-            <Text style={[styles.requirementText, hasSymbol && styles.requirementOk]}>
-              {hasSymbol ? "✓" : "○"} {t("password.symbol")}
-            </Text>
-          </View>
-
-          <Text style={styles.label}>{t("signup.confirmPasswordLabel")}</Text>
-          <TextInput
-            placeholder={t("signup.confirmPasswordPlaceholder")}
-            placeholderTextColor={Colors.textMuted}
-            secureTextEntry
-            value={confirmPass}
-            onChangeText={(txt) => { setConfirmPass(txt); setErrorMsg(null); }}
-            style={styles.input}
-          />
-          {confirmPass.length > 0 && (
-            <Text style={[styles.requirementText, passwordsMatch ? styles.requirementOk : styles.requirementFail]}>
-              {passwordsMatch ? `✓ ${t("password.match")}` : `✗ ${t("password.noMatch")}`}
-            </Text>
-          )}
-
-          {/* Age gate - Lei 15.211/2025 */}
-          <Text style={styles.label}>{t("signup.birthDateLabel")}</Text>
-          <Text style={styles.ageNote}>{t("signup.birthDateNote")}</Text>
-          <View style={styles.dateRow}>
-            <TextInput
-              placeholder={t("signup.dayPlaceholder")}
-              placeholderTextColor={Colors.textMuted}
-              keyboardType="number-pad"
-              maxLength={2}
-              value={birthDay}
-              onChangeText={(txt) => { setBirthDay(txt.replace(/\D/g, "")); setErrorMsg(null); }}
-               style={[styles.input, styles.dateInput, styles.dateInputCompact]}
-            />
-            <Text style={styles.dateSeparator}>/</Text>
-            <TextInput
-              placeholder={t("signup.monthPlaceholder")}
-              placeholderTextColor={Colors.textMuted}
-              keyboardType="number-pad"
-              maxLength={2}
-              value={birthMonth}
-              onChangeText={(txt) => { setBirthMonth(txt.replace(/\D/g, "")); setErrorMsg(null); }}
-               style={[styles.input, styles.dateInput, styles.dateInputCompact]}
-            />
-            <Text style={styles.dateSeparator}>/</Text>
-            <TextInput
-              placeholder={t("signup.yearPlaceholder")}
-              placeholderTextColor={Colors.textMuted}
-              keyboardType="number-pad"
-              maxLength={4}
-              value={birthYear}
-              onChangeText={(txt) => { setBirthYear(txt.replace(/\D/g, "")); setErrorMsg(null); }}
-               style={[styles.input, styles.dateInput, styles.dateInputCompactYear]}
-            />
-          </View>
-
-          {/* Terms acceptance */}
-          <TouchableOpacity
-            onPress={() => setAcceptedTerms(!acceptedTerms)}
-            activeOpacity={0.8}
-            style={styles.termsRow}
-          >
-            <View style={[styles.checkbox, acceptedTerms && styles.checkboxChecked]}>
-              {acceptedTerms && <Text style={styles.checkmark}>✓</Text>}
-            </View>
-            <Text style={styles.termsText}>
-              {t("signup.termsAccept")}{" "}
-              <Text style={styles.termsLink} onPress={() => router.push("/terms" as any)}>
-                {t("common.termsOfUse")}
-              </Text>{" "}
-              {t("signup.termsAnd")}{" "}
-              <Text style={styles.termsLink} onPress={() => router.push("/privacy" as any)}>
-                {t("common.privacyPolicy")}
-              </Text>
-            </Text>
-          </TouchableOpacity>
-
-          {errorMsg && <Text style={styles.errorText}>{errorMsg}</Text>}
-          {infoMsg && !errorMsg && <Text style={styles.infoText}>{infoMsg}</Text>}
-
-          {loading ? (
-            <View style={{ paddingVertical: 16 }}>
-              <ActivityIndicator color={Colors.brandStart} />
-              <Text style={styles.loadingText}>{t("signup.creating")}</Text>
-            </View>
-          ) : (
-            <GradientButton
-              title={t("signup.createButton")}
-              onPress={handleSignup}
-              style={{ marginTop: 12 }}
-            />
-          )}
-
-          <View style={styles.footerLinks}>
-            <Link href="/" style={styles.link}>
-              {t("signup.hasAccount")}
-            </Link>
-          </View>
+          {renderFormContent()}
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
+// ─── Desktop-only styles ───
+const dStyles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: Colors.background,
+    minHeight: "100%" as any,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingVertical: 40,
+    paddingHorizontal: 24,
+  },
+  card: {
+    width: "100%",
+    maxWidth: 480,
+    backgroundColor: "#090B14",
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    paddingHorizontal: 32,
+    paddingVertical: 32,
+    shadowColor: "#000",
+    shadowOpacity: 0.35,
+    shadowRadius: 30,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 16,
+  },
+  backBtn: {
+    position: "absolute",
+    top: 18,
+    left: 20,
+    zIndex: 10,
+    padding: 4,
+  },
+  backArrow: {
+    color: Colors.text,
+    fontSize: 28,
+    fontWeight: "300",
+  },
+  logoCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "rgba(124,58,237,0.08)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(124,58,237,0.2)",
+  },
+  logoImage: {
+    width: 36,
+    height: 36,
+  },
+  brand: {
+    color: "#F5F7FF",
+    fontSize: 22,
+    fontWeight: "900",
+    textAlign: "center",
+    marginBottom: 2,
+  },
+  title: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "800",
+    textAlign: "center",
+    marginBottom: 2,
+  },
+  subtitle: {
+    color: "#98A2B3",
+    fontSize: 13,
+    textAlign: "center",
+    marginBottom: 16,
+  },
+  footer: {
+    marginTop: 24,
+    alignItems: "center",
+    gap: 4,
+  },
+  footerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  footerLink: {
+    color: Colors.textMuted,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  footerSep: {
+    color: Colors.textMuted,
+    fontSize: 12,
+  },
+  copyright: {
+    color: "rgba(255,255,255,0.2)",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+});
+
+// ─── Mobile styles ───
 const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     justifyContent: "center",
     paddingHorizontal: 16,
     paddingVertical: 16,
-    minHeight: "100%",
-  },
-  scrollContentDesktop: {
-    justifyContent: "flex-start",
-    paddingTop: 24,
-    paddingBottom: 32,
+    minHeight: "100%" as any,
   },
   card: {
     alignSelf: "center",
@@ -394,9 +539,6 @@ const styles = StyleSheet.create({
     shadowRadius: 20,
     shadowOffset: { width: 0, height: 8 },
     elevation: 12,
-  },
-  cardDesktop: {
-    marginVertical: 12,
   },
   logoHeader: {
     alignItems: "center",
