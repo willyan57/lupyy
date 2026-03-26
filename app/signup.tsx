@@ -290,8 +290,9 @@ export default function Signup() {
               maxLength={2}
               value={birthDay}
               onChangeText={(txt) => { setBirthDay(txt.replace(/\D/g, "")); setErrorMsg(null); }}
-              style={[styles.input, styles.dateInput]}
+              style={[styles.input, styles.dateInputCompact]}
             />
+            <Text style={styles.dateSeparator}>/</Text>
             <TextInput
               placeholder={t("signup.monthPlaceholder")}
               placeholderTextColor={Colors.textMuted}
@@ -299,8 +300,9 @@ export default function Signup() {
               maxLength={2}
               value={birthMonth}
               onChangeText={(txt) => { setBirthMonth(txt.replace(/\D/g, "")); setErrorMsg(null); }}
-              style={[styles.input, styles.dateInput]}
+              style={[styles.input, styles.dateInputCompact]}
             />
+            <Text style={styles.dateSeparator}>/</Text>
             <TextInput
               placeholder={t("signup.yearPlaceholder")}
               placeholderTextColor={Colors.textMuted}
@@ -308,7 +310,7 @@ export default function Signup() {
               maxLength={4}
               value={birthYear}
               onChangeText={(txt) => { setBirthYear(txt.replace(/\D/g, "")); setErrorMsg(null); }}
-              style={[styles.input, styles.dateInputYear]}
+              style={[styles.input, styles.dateInputCompactYear]}
             />
           </View>
 
@@ -365,18 +367,18 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     justifyContent: "center",
     paddingHorizontal: 20,
-    paddingVertical: 28,
+    paddingVertical: 20,
   },
   card: {
     alignSelf: "center",
     width: "100%",
-    maxWidth: 540,
+    maxWidth: 480,
     backgroundColor: "#090B14",
     borderRadius: 28,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.08)",
     paddingHorizontal: 22,
-    paddingVertical: 28,
+    paddingVertical: 22,
     shadowColor: "#000",
     shadowOpacity: 0.35,
     shadowRadius: 20,
@@ -388,9 +390,9 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   logoCircle: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+    width: 80,
+    height: 80,
+    borderRadius: 40,
     backgroundColor: "rgba(255,255,255,0.03)",
     alignItems: "center",
     justifyContent: "center",
@@ -403,31 +405,31 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   logoImage: {
-    width: 64,
-    height: 64,
+    width: 52,
+    height: 52,
   },
   brand: {
     color: "#F5F7FF",
-    fontSize: 34,
-    lineHeight: 40,
+    fontSize: 28,
+    lineHeight: 34,
     fontWeight: "900",
     textAlign: "center",
-    marginBottom: 6,
+    marginBottom: 4,
   },
   title: {
     color: "#FFFFFF",
-    fontSize: 24,
-    lineHeight: 30,
+    fontSize: 20,
+    lineHeight: 26,
     fontWeight: "800",
     textAlign: "center",
-    marginBottom: 8,
+    marginBottom: 4,
   },
   subtitle: {
     color: "#98A2B3",
-    fontSize: 15,
-    lineHeight: 22,
+    fontSize: 14,
+    lineHeight: 20,
     textAlign: "center",
-    marginBottom: 24,
+    marginBottom: 16,
   },
   label: {
     color: "#E5E7EB",
@@ -471,18 +473,28 @@ const styles = StyleSheet.create({
   },
   dateRow: {
     flexDirection: "row",
-    gap: 10,
+    alignItems: "center",
+    gap: 6,
     marginBottom: 8,
   },
-  dateInput: {
+  dateInputCompact: {
     flex: 1,
     textAlign: "center",
-    paddingVertical: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    marginBottom: 0,
   },
-  dateInputYear: {
-    flex: 1.4,
+  dateInputCompactYear: {
+    flex: 1.3,
     textAlign: "center",
-    paddingVertical: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    marginBottom: 0,
+  },
+  dateSeparator: {
+    color: "#6B7280",
+    fontSize: 18,
+    fontWeight: "600",
   },
   termsRow: {
     flexDirection: "row",
