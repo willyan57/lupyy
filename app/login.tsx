@@ -1,4 +1,6 @@
+import LanguageSelector from "@/components/LanguageSelector";
 import Colors from "@/constants/Colors";
+import { useTranslation } from "@/lib/i18n";
 import { supabase } from "@/lib/supabase";
 import { Image } from "expo-image";
 import { Link } from "expo-router";
@@ -8,6 +10,7 @@ import {
   Animated,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -16,6 +19,7 @@ import {
 } from "react-native";
 
 export default function LoginScreen() {
+  const { t } = useTranslation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -43,7 +47,7 @@ export default function LoginScreen() {
     if (loading) return;
 
     if (!email || !password) {
-      setErrorMessage("Preencha e-mail e senha para continuar.");
+      setErrorMessage(t("login.errorEmpty"));
       runShake();
       return;
     }
@@ -60,15 +64,15 @@ export default function LoginScreen() {
       if (error) {
         const message =
           error.message?.toLowerCase().includes("invalid login credentials")
-            ? "E-mail ou senha incorretos. Verifique seus dados e tente novamente."
-            : "Não foi possível entrar agora. Tente novamente.";
+            ? t("login.errorInvalid")
+            : t("login.errorGeneric");
 
         setErrorMessage(message);
         runShake();
         return;
       }
     } catch (err) {
-      setErrorMessage("Erro inesperado ao entrar. Tente novamente em instantes.");
+      setErrorMessage(t("login.errorUnexpected"));
       runShake();
     } finally {
       setLoading(false);
@@ -82,7 +86,15 @@ export default function LoginScreen() {
       style={styles.root}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
       <View style={styles.content}>
+        {/* Language Selector */}
+        <LanguageSelector />
+
         <View style={styles.logoHeader}>
           <View style={styles.logoCircle}>
             <Image
@@ -91,8 +103,8 @@ export default function LoginScreen() {
               contentFit="contain"
             />
           </View>
-          <Text style={styles.appName}>Lupyy</Text>
-          <Text style={styles.tagline}>Compartilhe momentos. Conecte pessoas.</Text>
+          <Text style={styles.appName}>{t("common.appName")}</Text>
+          <Text style={styles.tagline}>{t("common.tagline")}</Text>
         </View>
 
         <Animated.View
@@ -102,7 +114,7 @@ export default function LoginScreen() {
           ]}
         >
           <TextInput
-            placeholder="Email"
+            placeholder={t("login.email")}
             placeholderTextColor={Colors.textMuted}
             style={[styles.input, hasError && styles.inputError]}
             autoCapitalize="none"
@@ -112,7 +124,7 @@ export default function LoginScreen() {
           />
 
           <TextInput
-            placeholder="Senha"
+            placeholder={t("login.password")}
             placeholderTextColor={Colors.textMuted}
             style={[styles.input, hasError && styles.inputError]}
             secureTextEntry
@@ -131,19 +143,19 @@ export default function LoginScreen() {
             {loading ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.buttonText}>ENTRAR</Text>
+              <Text style={styles.buttonText}>{t("login.enter")}</Text>
             )}
           </TouchableOpacity>
 
           <Link href="/reset" asChild>
             <TouchableOpacity style={styles.linkButton}>
-              <Text style={styles.linkText}>Esqueci minha senha</Text>
+              <Text style={styles.linkText}>{t("login.forgotPassword")}</Text>
             </TouchableOpacity>
           </Link>
 
           <Link href="/signup" asChild>
             <TouchableOpacity style={styles.linkButton}>
-              <Text style={styles.linkTextBold}>Criar conta</Text>
+              <Text style={styles.linkTextBold}>{t("login.createAccount")}</Text>
             </TouchableOpacity>
           </Link>
         </Animated.View>
@@ -152,16 +164,17 @@ export default function LoginScreen() {
         <View style={styles.legalFooter}>
           <View style={styles.legalRow}>
             <Link href="/terms" style={styles.legalLink}>
-              Termos de Uso
+              {t("common.termsOfUse")}
             </Link>
             <Text style={styles.legalSep}>·</Text>
             <Link href="/privacy" style={styles.legalLink}>
-              Privacidade
+              {t("common.privacyPolicy")}
             </Link>
           </View>
-          <Text style={styles.copyright}>© 2026 Lupyy</Text>
+          <Text style={styles.copyright}>{t("common.copyright")}</Text>
         </View>
       </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
@@ -170,12 +183,16 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: Colors.background,
+  },
+  scrollContent: {
+    flexGrow: 1,
     alignItems: "center",
     justifyContent: "center",
+    paddingVertical: 40,
   },
   content: {
     width: "100%",
-    maxWidth: 900,
+    maxWidth: 460,
     paddingHorizontal: 32,
   },
   logoHeader: {
@@ -183,19 +200,24 @@ const styles = StyleSheet.create({
     marginBottom: 40,
   },
   logoCircle: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+    width: 140,
+    height: 140,
+    borderRadius: 70,
     backgroundColor: Colors.surface,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 16,
+    marginBottom: 20,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
+    borderColor: "rgba(255,255,255,0.08)",
+    shadowColor: "#7C3AED",
+    shadowOpacity: 0.15,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
   },
   logoImage: {
-    width: 80,
-    height: 80,
+    width: 90,
+    height: 90,
   },
   appName: {
     fontSize: 40,

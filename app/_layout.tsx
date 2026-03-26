@@ -1,6 +1,7 @@
 import WebSidebar, { WEB_SIDEBAR_WIDTH } from "@/components/WebSidebar";
 import Colors from "@/constants/Colors";
 import { ThemeProvider } from "@/contexts/ThemeContext";
+import { LanguageProvider } from "@/lib/i18n";
 import { supabase } from "@/lib/supabase";
 import { useIsMobileWeb } from "@/lib/useIsMobileWeb";
 import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
@@ -137,6 +138,7 @@ export default function RootLayout() {
     <GestureHandlerRootView
       style={{ flex: 1, backgroundColor: Colors.background }}
     >
+      <LanguageProvider>
       <ThemeProvider>
         <StatusBar
           barStyle="light-content"
@@ -172,6 +174,7 @@ export default function RootLayout() {
           </Stack>
         </View>
       </ThemeProvider>
+      </LanguageProvider>
     </GestureHandlerRootView>
   );
 }

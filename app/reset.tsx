@@ -1,6 +1,8 @@
 import Colors from "@/constants/Colors";
+import { useTranslation } from "@/lib/i18n";
 import { supabase } from "@/lib/supabase";
 import type { AuthChangeEvent } from "@supabase/supabase-js";
+import { Image } from "expo-image";
 import * as Linking from "expo-linking";
 import { Link, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
@@ -29,27 +31,9 @@ type NoticeState = {
 
 const RECOVERY_FLAG = "lupyy_password_recovery_pending";
 
-function getPasswordError(pass: string): string | null {
-  if (!pass || pass.length < 8) {
-    return "A senha precisa ter pelo menos 8 caracteres.";
-  }
-  if (!/[a-z]/.test(pass)) {
-    return "A senha precisa ter pelo menos uma letra minúscula.";
-  }
-  if (!/[A-Z]/.test(pass)) {
-    return "A senha precisa ter pelo menos uma letra maiúscula.";
-  }
-  if (!/[0-9]/.test(pass)) {
-    return "A senha precisa ter pelo menos um número.";
-  }
-  if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?`~]/.test(pass)) {
-    return "A senha precisa ter pelo menos um símbolo especial (!@#$%&*...).";
-  }
-  return null;
-}
-
 export default function ResetScreen() {
   const router = useRouter();
+  const { t } = useTranslation();
 
   const [mode, setMode] = useState<Mode>("request");
   const [email, setEmail] = useState("");
@@ -175,7 +159,7 @@ export default function ResetScreen() {
 
       if (!normalizedEmail) {
         setEmailError(true);
-        showBanner("error", "Digite o e-mail vinculado à sua conta Lupyy.");
+        showBanner("error", t("reset.errorEmptyEmail"));
         return;
       }
 
@@ -188,17 +172,11 @@ export default function ResetScreen() {
       if (error) throw error;
 
       setEmail(normalizedEmail);
-      showBanner(
-        "success",
-        `Enviamos um link de recuperação para ${normalizedEmail}. Use somente o e-mail mais recente.`
-      );
-      showNotice(
-        "E-mail enviado",
-        `Enviamos um link de recuperação para ${normalizedEmail}. Abra o e-mail mais recente e toque no link para continuar.`
-      );
+      showBanner("success", t("reset.successEmail", { email: normalizedEmail }));
+      showNotice(t("reset.noticeTitle"), t("reset.noticeMessage", { email: normalizedEmail }));
     } catch (e: any) {
       setEmailError(true);
-      showBanner("error", e?.message ?? "Não foi possível enviar o e-mail de recuperação.");
+      showBanner("error", e?.message ?? t("reset.errorSend"));
     } finally {
       setSending(false);
     }
@@ -227,13 +205,13 @@ export default function ResetScreen() {
 
       if (error || errorCode) {
         const decodedMessage = decodeURIComponent(
-          (errorDescription || "Este link de recuperação é inválido ou expirou.")
+          (errorDescription || t("reset.linkInvalid"))
             .replace(/\+/g, " ")
         );
 
         returnToRequestMode(
           errorCode === "otp_expired"
-            ? "Este link expirou ou já foi usado. Solicite um novo e-mail de recuperação."
+            ? t("reset.linkExpired")
             : decodedMessage
         );
         cleanResetUrl();
@@ -251,21 +229,21 @@ export default function ResetScreen() {
         return;
       }
 
-      enterResetMode("Validando seu link de recuperação...");
+      enterResetMode(t("reset.validating"));
 
       if (code) {
         const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(rawUrl);
         if (exchangeError) throw exchangeError;
-        enterResetMode("Link validado. Agora defina sua nova senha.");
+        enterResetMode(t("reset.linkValidated"));
       } else if (type === "recovery" && accessToken && refreshToken) {
         const { error: sessionError } = await supabase.auth.setSession({
           access_token: accessToken,
           refresh_token: refreshToken,
         });
         if (sessionError) throw sessionError;
-        enterResetMode("Link validado. Agora defina sua nova senha.");
+        enterResetMode(t("reset.linkValidated"));
       } else {
-        enterResetMode("Link validado. Agora defina sua nova senha.");
+        enterResetMode(t("reset.linkValidated"));
       }
 
       cleanResetUrl();
@@ -278,8 +256,8 @@ export default function ResetScreen() {
 
       returnToRequestMode(
         expired
-          ? "Este link expirou ou já foi usado. Solicite um novo e-mail de recuperação."
-          : "Não foi possível validar o link de recuperação."
+          ? t("reset.linkExpired")
+          : t("reset.linkError")
       );
       cleanResetUrl();
     } finally {
@@ -302,13 +280,13 @@ export default function ResetScreen() {
             window.location.hash.includes("access_token="));
 
         if (hasRecoveryParams) {
-          enterResetMode("Validando seu link de recuperação...");
+          enterResetMode(t("reset.validating"));
         } else if (hasPersistedRecoveryFlag()) {
           const hasSession = await hasValidRecoverySession();
           if (cancelled) return;
 
           if (hasSession) {
-            enterResetMode("Continue definindo sua nova senha.");
+            enterResetMode(t("reset.continueReset"));
           } else {
             returnToRequestMode();
             clearRecoveryFlow();
@@ -323,7 +301,7 @@ export default function ResetScreen() {
       if (cancelled) return;
 
       if (event === "PASSWORD_RECOVERY") {
-        enterResetMode("Link validado. Agora defina sua nova senha.");
+        enterResetMode(t("reset.linkValidated"));
       }
 
       if (event === "SIGNED_OUT") {
@@ -359,16 +337,35 @@ export default function ResetScreen() {
       clearBanner();
       setPasswordError(false);
 
-      const passError = getPasswordError(pass1);
-      if (passError) {
+      if (!pass1 || pass1.length < 8) {
         setPasswordError(true);
-        showBanner("error", passError);
+        showBanner("error", t("password.errorMinLength"));
+        return;
+      }
+      if (!/[a-z]/.test(pass1)) {
+        setPasswordError(true);
+        showBanner("error", t("password.errorLowercase"));
+        return;
+      }
+      if (!/[A-Z]/.test(pass1)) {
+        setPasswordError(true);
+        showBanner("error", t("password.errorUppercase"));
+        return;
+      }
+      if (!/[0-9]/.test(pass1)) {
+        setPasswordError(true);
+        showBanner("error", t("password.errorNumber"));
+        return;
+      }
+      if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?`~]/.test(pass1)) {
+        setPasswordError(true);
+        showBanner("error", t("password.errorSymbol"));
         return;
       }
 
       if (pass1 !== pass2) {
         setPasswordError(true);
-        showBanner("error", "As senhas não coincidem. Digite a mesma senha nos dois campos.");
+        showBanner("error", t("reset.errorMismatch"));
         return;
       }
 
@@ -378,7 +375,7 @@ export default function ResetScreen() {
 
       if (!session) {
         setPasswordError(true);
-        returnToRequestMode("Sessão de recuperação não encontrada. Solicite um novo e-mail.");
+        returnToRequestMode(t("reset.sessionExpired"));
         return;
       }
 
@@ -390,18 +387,15 @@ export default function ResetScreen() {
       clearRecoveryFlow();
       await supabase.auth.signOut();
 
-      showBanner("success", "Senha alterada com sucesso. Faça login com a nova senha.");
-      showNotice(
-        "Senha atualizada",
-        "Sua senha foi alterada com sucesso. Faça login novamente com a nova senha."
-      );
+      showBanner("success", t("reset.successBanner"));
+      showNotice(t("reset.successTitle"), t("reset.successMessage"));
 
       setTimeout(() => {
         router.replace("/");
       }, 1200);
     } catch (e: any) {
       setPasswordError(true);
-      showBanner("error", e?.message ?? "Erro ao atualizar a senha.");
+      showBanner("error", e?.message ?? t("reset.errorUpdate"));
     } finally {
       setChanging(false);
     }
@@ -419,18 +413,21 @@ export default function ResetScreen() {
         >
           <View style={styles.card}>
             <View style={styles.logoWrap}>
-              <View style={styles.logoGlow} />
-              <Text style={styles.logoMark}>∞◁</Text>
+              <Image
+                source={require("../assets/branding/lupyy-logo.png")}
+                style={styles.logoImage}
+                contentFit="contain"
+              />
             </View>
 
-            <Text style={styles.brand}>Lupyy</Text>
+            <Text style={styles.brand}>{t("common.appName")}</Text>
             <Text style={styles.title}>
-              {mode === "request" ? "Recuperar senha" : "Crie uma nova senha"}
+              {mode === "request" ? t("reset.titleRequest") : t("reset.titleReset")}
             </Text>
             <Text style={styles.subtitle}>
               {mode === "request"
-                ? "Informe seu e-mail e enviaremos um link seguro para recuperar o acesso à sua conta."
-                : "Defina uma nova senha forte para proteger sua conta e entrar novamente no Lupyy."}
+                ? t("reset.subtitleRequest")
+                : t("reset.subtitleReset")}
             </Text>
 
             {banner.visible ? (
@@ -462,13 +459,13 @@ export default function ResetScreen() {
             {loadingRecovery ? (
               <View style={styles.loadingBox}>
                 <ActivityIndicator color="#8B5CF6" />
-                <Text style={styles.loadingText}>Validando seu link de recuperação…</Text>
+                <Text style={styles.loadingText}>{t("reset.validating")}</Text>
               </View>
             ) : mode === "request" ? (
               <>
-                <Text style={styles.label}>Email</Text>
+                <Text style={styles.label}>{t("reset.emailLabel")}</Text>
                 <TextInput
-                  placeholder="seuemail@exemplo.com"
+                  placeholder={t("reset.emailPlaceholder")}
                   placeholderTextColor={Colors.textMuted}
                   keyboardType="email-address"
                   autoCapitalize="none"
@@ -490,20 +487,20 @@ export default function ResetScreen() {
                   {sending ? (
                     <ActivityIndicator color="#fff" />
                   ) : (
-                    <Text style={styles.buttonText}>Enviar link de recuperação</Text>
+                    <Text style={styles.buttonText}>{t("reset.sendLink")}</Text>
                   )}
                 </TouchableOpacity>
 
-                <Text style={styles.helper}>Lembrou sua senha?</Text>
+                <Text style={styles.helper}>{t("reset.remembered")}</Text>
                 <Link href="/" style={styles.link}>
-                  Voltar para o login
+                  {t("reset.backToLogin")}
                 </Link>
               </>
             ) : (
               <>
-                <Text style={styles.label}>Nova senha</Text>
+                <Text style={styles.label}>{t("reset.newPasswordLabel")}</Text>
                 <TextInput
-                  placeholder="Crie uma senha forte"
+                  placeholder={t("reset.newPasswordPlaceholder")}
                   placeholderTextColor={Colors.textMuted}
                   secureTextEntry
                   value={pass1}
@@ -518,25 +515,25 @@ export default function ResetScreen() {
                 {/* Password strength indicators */}
                 <View style={styles.requirementsContainer}>
                   <Text style={[styles.requirementText, hasMinLength && styles.requirementOk]}>
-                    {hasMinLength ? "✓" : "○"} Pelo menos 8 caracteres
+                    {hasMinLength ? "✓" : "○"} {t("password.minLength")}
                   </Text>
                   <Text style={[styles.requirementText, hasLower && styles.requirementOk]}>
-                    {hasLower ? "✓" : "○"} Pelo menos uma letra minúscula
+                    {hasLower ? "✓" : "○"} {t("password.lowercase")}
                   </Text>
                   <Text style={[styles.requirementText, hasUpper && styles.requirementOk]}>
-                    {hasUpper ? "✓" : "○"} Pelo menos uma letra maiúscula
+                    {hasUpper ? "✓" : "○"} {t("password.uppercase")}
                   </Text>
                   <Text style={[styles.requirementText, hasNumber && styles.requirementOk]}>
-                    {hasNumber ? "✓" : "○"} Pelo menos um número
+                    {hasNumber ? "✓" : "○"} {t("password.number")}
                   </Text>
                   <Text style={[styles.requirementText, hasSymbol && styles.requirementOk]}>
-                    {hasSymbol ? "✓" : "○"} Pelo menos um símbolo (!@#$%&*...)
+                    {hasSymbol ? "✓" : "○"} {t("password.symbol")}
                   </Text>
                 </View>
 
-                <Text style={styles.label}>Confirmar senha</Text>
+                <Text style={styles.label}>{t("reset.confirmLabel")}</Text>
                 <TextInput
-                  placeholder="Digite novamente"
+                  placeholder={t("reset.confirmPlaceholder")}
                   placeholderTextColor={Colors.textMuted}
                   secureTextEntry
                   value={pass2}
@@ -550,7 +547,7 @@ export default function ResetScreen() {
 
                 {pass2.length > 0 && (
                   <Text style={[styles.requirementText, passwordsMatch ? styles.requirementOk : styles.requirementFail]}>
-                    {passwordsMatch ? "✓ Senhas coincidem" : "✗ Senhas não coincidem"}
+                    {passwordsMatch ? `✓ ${t("password.match")}` : `✗ ${t("password.noMatch")}`}
                   </Text>
                 )}
 
@@ -562,12 +559,12 @@ export default function ResetScreen() {
                   {changing ? (
                     <ActivityIndicator color="#fff" />
                   ) : (
-                    <Text style={styles.buttonText}>Salvar nova senha</Text>
+                    <Text style={styles.buttonText}>{t("reset.saveButton")}</Text>
                   )}
                 </TouchableOpacity>
 
                 <Link href="/" style={styles.link}>
-                  Cancelar
+                  {t("common.cancel")}
                 </Link>
               </>
             )}
@@ -589,7 +586,7 @@ export default function ResetScreen() {
             <Text style={styles.modalTitle}>{notice.title}</Text>
             <Text style={styles.modalMessage}>{notice.message}</Text>
             <TouchableOpacity style={styles.modalButton} onPress={closeNotice}>
-              <Text style={styles.modalButtonText}>OK</Text>
+              <Text style={styles.modalButtonText}>{t("common.ok")}</Text>
             </TouchableOpacity>
           </Pressable>
         </Pressable>
@@ -627,27 +624,25 @@ const styles = StyleSheet.create({
     elevation: 12,
   },
   logoWrap: {
-    width: 108,
-    height: 108,
-    borderRadius: 54,
+    width: 120,
+    height: 120,
+    borderRadius: 60,
     alignSelf: "center",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.02)",
+    backgroundColor: "rgba(255,255,255,0.03)",
     marginBottom: 18,
-    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    shadowColor: "#7C3AED",
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
   },
-  logoGlow: {
-    position: "absolute",
-    width: 108,
-    height: 108,
-    borderRadius: 54,
-    backgroundColor: "rgba(127, 86, 217, 0.08)",
-  },
-  logoMark: {
-    color: "#7C3AED",
-    fontSize: 32,
-    fontWeight: "900",
+  logoImage: {
+    width: 76,
+    height: 76,
   },
   brand: {
     color: "#F5F7FF",

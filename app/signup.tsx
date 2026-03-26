@@ -1,4 +1,5 @@
 // app/signup.tsx
+import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { Link, useRouter } from "expo-router";
 import { useState } from "react";
@@ -16,6 +17,7 @@ import {
 } from "react-native";
 
 import Colors from "@/constants/Colors";
+import { useTranslation } from "@/lib/i18n";
 import { supabase } from "@/lib/supabase";
 
 type BtnProps = {
@@ -51,22 +53,12 @@ function isValidEmail(email: string) {
   return regex.test(trimmed);
 }
 
-function getPasswordError(pass: string): string | null {
-  if (!pass || pass.length < 8) {
-    return "A senha precisa ter pelo menos 8 caracteres.";
-  }
-  if (!/[a-z]/.test(pass)) {
-    return "A senha precisa ter pelo menos uma letra minúscula.";
-  }
-  if (!/[A-Z]/.test(pass)) {
-    return "A senha precisa ter pelo menos uma letra maiúscula.";
-  }
-  if (!/[0-9]/.test(pass)) {
-    return "A senha precisa ter pelo menos um número.";
-  }
-  if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?`~]/.test(pass)) {
-    return "A senha precisa ter pelo menos um símbolo especial (!@#$%&*...).";
-  }
+function getPasswordError(pass: string, t: (key: any) => string): string | null {
+  if (!pass || pass.length < 8) return t("password.errorMinLength");
+  if (!/[a-z]/.test(pass)) return t("password.errorLowercase");
+  if (!/[A-Z]/.test(pass)) return t("password.errorUppercase");
+  if (!/[0-9]/.test(pass)) return t("password.errorNumber");
+  if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?`~]/.test(pass)) return t("password.errorSymbol");
   return null;
 }
 
@@ -84,6 +76,7 @@ function isOldEnough(birthDate: Date): boolean {
 
 export default function Signup() {
   const router = useRouter();
+  const { t } = useTranslation();
   const [email, setEmail] = useState("");
   const [pass, setPass] = useState("");
   const [confirmPass, setConfirmPass] = useState("");
@@ -116,23 +109,23 @@ export default function Signup() {
     const trimmedEmail = email.trim().toLowerCase();
 
     if (!trimmedEmail || !pass) {
-      setErrorMsg("Preencha o e-mail e a senha.");
+      setErrorMsg(t("signup.errorEmptyFields"));
       return;
     }
 
     if (!isValidEmail(trimmedEmail)) {
-      setErrorMsg("Digite um e-mail válido.");
+      setErrorMsg(t("signup.errorInvalidEmail"));
       return;
     }
 
-    const passError = getPasswordError(pass);
+    const passError = getPasswordError(pass, t);
     if (passError) {
       setErrorMsg(passError);
       return;
     }
 
     if (pass !== confirmPass) {
-      setErrorMsg("As senhas não coincidem.");
+      setErrorMsg(t("signup.errorPasswordMismatch"));
       return;
     }
 
@@ -142,20 +135,18 @@ export default function Signup() {
     const year = parseInt(birthYear, 10);
 
     if (!day || !month || !year || day < 1 || day > 31 || month < 1 || month > 12 || year < 1900 || year > new Date().getFullYear()) {
-      setErrorMsg("Informe uma data de nascimento válida.");
+      setErrorMsg(t("signup.errorInvalidDate"));
       return;
     }
 
     const birthDate = new Date(year, month - 1, day);
     if (!isOldEnough(birthDate)) {
-      setErrorMsg(
-        `De acordo com a legislação brasileira (Lei nº 15.211/2025), é necessário ter pelo menos ${MIN_AGE} anos para criar uma conta. Menores de ${MIN_AGE} anos precisam de autorização e supervisão de um responsável legal.`
-      );
+      setErrorMsg(t("signup.errorUnderage", { age: MIN_AGE }));
       return;
     }
 
     if (!acceptedTerms) {
-      setErrorMsg("Você precisa aceitar os Termos de Uso e a Política de Privacidade para continuar.");
+      setErrorMsg(t("signup.errorTerms"));
       return;
     }
 
@@ -177,24 +168,23 @@ export default function Signup() {
       });
 
       if (error) {
-        let friendly = "Não foi possível criar sua conta.";
+        let friendly = t("signup.errorGeneric");
         const msg = error.message.toLowerCase();
         if (msg.includes("user already registered") || msg.includes("already exists")) {
-          friendly = "Já existe uma conta com este e-mail.";
+          friendly = t("signup.errorAlreadyExists");
         } else if (msg.includes("password")) {
-          friendly = "Sua senha não atende aos requisitos de segurança. Tente uma senha mais forte.";
+          friendly = t("signup.errorWeakPassword");
         }
         setErrorMsg(friendly);
         return;
       }
 
-      const successText =
-        "Conta criada! Enviamos um e-mail de confirmação. Toque no link recebido para ativar sua conta e depois faça login.";
+      const successText = t("signup.successMessage");
       setInfoMsg(successText);
 
       if (Platform.OS !== "web") {
-        Alert.alert("Conta criada", successText, [
-          { text: "OK", onPress: () => router.replace("/") },
+        Alert.alert(t("signup.successTitle"), successText, [
+          { text: t("common.ok"), onPress: () => router.replace("/") },
         ]);
       } else {
         setTimeout(() => {
@@ -202,7 +192,7 @@ export default function Signup() {
         }, 1200);
       }
     } catch (e: any) {
-      setErrorMsg("Erro inesperado ao criar conta. Tente novamente.");
+      setErrorMsg(t("signup.errorUnexpected"));
     } finally {
       setLoading(false);
     }
@@ -218,99 +208,106 @@ export default function Signup() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.card}>
-          <Text style={styles.brand}>Lupyy</Text>
-          <Text style={styles.title}>Criar conta</Text>
-          <Text style={styles.subtitle}>
-            Crie sua conta e comece a compartilhar momentos com o mundo.
-          </Text>
+          {/* Logo */}
+          <View style={styles.logoHeader}>
+            <View style={styles.logoCircle}>
+              <Image
+                source={require("../assets/branding/lupyy-logo.png")}
+                style={styles.logoImage}
+                contentFit="contain"
+              />
+            </View>
+          </View>
 
-          <Text style={styles.label}>E-mail</Text>
+          <Text style={styles.brand}>{t("common.appName")}</Text>
+          <Text style={styles.title}>{t("signup.title")}</Text>
+          <Text style={styles.subtitle}>{t("signup.subtitle")}</Text>
+
+          <Text style={styles.label}>{t("signup.emailLabel")}</Text>
           <TextInput
-            placeholder="seuemail@exemplo.com"
+            placeholder={t("signup.emailPlaceholder")}
             placeholderTextColor={Colors.textMuted}
             keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
             value={email}
-            onChangeText={(t) => { setEmail(t); setErrorMsg(null); }}
+            onChangeText={(txt) => { setEmail(txt); setErrorMsg(null); }}
             style={styles.input}
           />
 
-          <Text style={styles.label}>Senha</Text>
+          <Text style={styles.label}>{t("signup.passwordLabel")}</Text>
           <TextInput
-            placeholder="Crie uma senha forte"
+            placeholder={t("signup.passwordPlaceholder")}
             placeholderTextColor={Colors.textMuted}
             secureTextEntry
             value={pass}
-            onChangeText={(t) => { setPass(t); setErrorMsg(null); }}
+            onChangeText={(txt) => { setPass(txt); setErrorMsg(null); }}
             style={styles.input}
           />
 
           {/* Password requirements visual feedback */}
           <View style={styles.requirementsContainer}>
             <Text style={[styles.requirementText, hasMinLength && styles.requirementOk]}>
-              {hasMinLength ? "✓" : "○"} Pelo menos 8 caracteres
+              {hasMinLength ? "✓" : "○"} {t("password.minLength")}
             </Text>
             <Text style={[styles.requirementText, hasLower && styles.requirementOk]}>
-              {hasLower ? "✓" : "○"} Pelo menos uma letra minúscula
+              {hasLower ? "✓" : "○"} {t("password.lowercase")}
             </Text>
             <Text style={[styles.requirementText, hasUpper && styles.requirementOk]}>
-              {hasUpper ? "✓" : "○"} Pelo menos uma letra maiúscula
+              {hasUpper ? "✓" : "○"} {t("password.uppercase")}
             </Text>
             <Text style={[styles.requirementText, hasNumber && styles.requirementOk]}>
-              {hasNumber ? "✓" : "○"} Pelo menos um número
+              {hasNumber ? "✓" : "○"} {t("password.number")}
             </Text>
             <Text style={[styles.requirementText, hasSymbol && styles.requirementOk]}>
-              {hasSymbol ? "✓" : "○"} Pelo menos um símbolo (!@#$%&*...)
+              {hasSymbol ? "✓" : "○"} {t("password.symbol")}
             </Text>
           </View>
 
-          <Text style={styles.label}>Confirmar senha</Text>
+          <Text style={styles.label}>{t("signup.confirmPasswordLabel")}</Text>
           <TextInput
-            placeholder="Digite a senha novamente"
+            placeholder={t("signup.confirmPasswordPlaceholder")}
             placeholderTextColor={Colors.textMuted}
             secureTextEntry
             value={confirmPass}
-            onChangeText={(t) => { setConfirmPass(t); setErrorMsg(null); }}
+            onChangeText={(txt) => { setConfirmPass(txt); setErrorMsg(null); }}
             style={styles.input}
           />
           {confirmPass.length > 0 && (
             <Text style={[styles.requirementText, passwordsMatch ? styles.requirementOk : styles.requirementFail]}>
-              {passwordsMatch ? "✓ Senhas coincidem" : "✗ Senhas não coincidem"}
+              {passwordsMatch ? `✓ ${t("password.match")}` : `✗ ${t("password.noMatch")}`}
             </Text>
           )}
 
           {/* Age gate - Lei 15.211/2025 */}
-          <Text style={styles.label}>Data de nascimento</Text>
-          <Text style={styles.ageNote}>
-            Conforme a Lei nº 15.211/2025, precisamos verificar sua idade para proteger crianças e adolescentes no ambiente digital.
-          </Text>
+          <Text style={styles.label}>{t("signup.birthDateLabel")}</Text>
+          <Text style={styles.ageNote}>{t("signup.birthDateNote")}</Text>
           <View style={styles.dateRow}>
             <TextInput
-              placeholder="DD"
+              placeholder={t("signup.dayPlaceholder")}
               placeholderTextColor={Colors.textMuted}
               keyboardType="number-pad"
               maxLength={2}
               value={birthDay}
-              onChangeText={(t) => { setBirthDay(t.replace(/\D/g, "")); setErrorMsg(null); }}
+              onChangeText={(txt) => { setBirthDay(txt.replace(/\D/g, "")); setErrorMsg(null); }}
               style={[styles.input, styles.dateInput]}
             />
             <TextInput
-              placeholder="MM"
+              placeholder={t("signup.monthPlaceholder")}
               placeholderTextColor={Colors.textMuted}
               keyboardType="number-pad"
               maxLength={2}
               value={birthMonth}
-              onChangeText={(t) => { setBirthMonth(t.replace(/\D/g, "")); setErrorMsg(null); }}
+              onChangeText={(txt) => { setBirthMonth(txt.replace(/\D/g, "")); setErrorMsg(null); }}
               style={[styles.input, styles.dateInput]}
             />
             <TextInput
-              placeholder="AAAA"
+              placeholder={t("signup.yearPlaceholder")}
               placeholderTextColor={Colors.textMuted}
               keyboardType="number-pad"
               maxLength={4}
               value={birthYear}
-              onChangeText={(t) => { setBirthYear(t.replace(/\D/g, "")); setErrorMsg(null); }}
+              onChangeText={(txt) => { setBirthYear(txt.replace(/\D/g, "")); setErrorMsg(null); }}
               style={[styles.input, styles.dateInputYear]}
             />
           </View>
@@ -325,13 +322,13 @@ export default function Signup() {
               {acceptedTerms && <Text style={styles.checkmark}>✓</Text>}
             </View>
             <Text style={styles.termsText}>
-              Li e aceito os{" "}
+              {t("signup.termsAccept")}{" "}
               <Text style={styles.termsLink} onPress={() => router.push("/terms" as any)}>
-                Termos de Uso
+                {t("common.termsOfUse")}
               </Text>{" "}
-              e a{" "}
+              {t("signup.termsAnd")}{" "}
               <Text style={styles.termsLink} onPress={() => router.push("/privacy" as any)}>
-                Política de Privacidade
+                {t("common.privacyPolicy")}
               </Text>
             </Text>
           </TouchableOpacity>
@@ -342,11 +339,11 @@ export default function Signup() {
           {loading ? (
             <View style={{ paddingVertical: 16 }}>
               <ActivityIndicator color={Colors.brandStart} />
-              <Text style={styles.loadingText}>Criando sua conta…</Text>
+              <Text style={styles.loadingText}>{t("signup.creating")}</Text>
             </View>
           ) : (
             <GradientButton
-              title="Criar conta"
+              title={t("signup.createButton")}
               onPress={handleSignup}
               style={{ marginTop: 12 }}
             />
@@ -354,7 +351,7 @@ export default function Signup() {
 
           <View style={styles.footerLinks}>
             <Link href="/" style={styles.link}>
-              Já tem conta? Entrar
+              {t("signup.hasAccount")}
             </Link>
           </View>
         </View>
@@ -385,6 +382,29 @@ const styles = StyleSheet.create({
     shadowRadius: 20,
     shadowOffset: { width: 0, height: 8 },
     elevation: 12,
+  },
+  logoHeader: {
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  logoCircle: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: "rgba(255,255,255,0.03)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    shadowColor: "#7C3AED",
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+  },
+  logoImage: {
+    width: 64,
+    height: 64,
   },
   brand: {
     color: "#F5F7FF",
@@ -445,22 +465,24 @@ const styles = StyleSheet.create({
   },
   ageNote: {
     color: "#6B7280",
-    fontSize: 11,
-    lineHeight: 16,
-    marginBottom: 8,
+    fontSize: 12,
+    lineHeight: 17,
+    marginBottom: 10,
   },
   dateRow: {
     flexDirection: "row",
     gap: 10,
-    marginBottom: 6,
+    marginBottom: 8,
   },
   dateInput: {
     flex: 1,
     textAlign: "center",
+    paddingVertical: 14,
   },
   dateInputYear: {
-    flex: 1.5,
+    flex: 1.4,
     textAlign: "center",
+    paddingVertical: 14,
   },
   termsRow: {
     flexDirection: "row",

@@ -1,6 +1,7 @@
 // app/(tabs)/profile.tsx
 import StoryViewer, { type StoryItem } from "@/components/StoryViewer";
 import Colors from "@/constants/Colors";
+import { useTranslation } from "@/lib/i18n";
 import { uploadStory } from "@/lib/storage";
 import { supabase } from "@/lib/supabase";
 import { useFocusEffect } from "@react-navigation/native";
@@ -170,6 +171,7 @@ export default function Profile() {
   const router = useRouter();
   const params = useLocalSearchParams<{ userId?: string }>();
   const { theme } = useTheme();
+  const { t } = useTranslation();
 
   const swipeThreshold = 60;
 
@@ -312,19 +314,19 @@ export default function Profile() {
 
     if (!cleaned || cleaned.length < 3) {
       setUsernameStatus(cleaned.length > 0 ? "invalid" : "idle");
-      setUsernameMessage(cleaned.length > 0 ? "Mínimo 3 caracteres" : "");
+      setUsernameMessage(cleaned.length > 0 ? t("profile.usernameMinChars") : "");
       return;
     }
 
     // Same as current username — no check needed
     if (cleaned === username?.toLowerCase()) {
       setUsernameStatus("available");
-      setUsernameMessage("Seu username atual ✔");
+      setUsernameMessage(t("profile.usernameCurrentOk"));
       return;
     }
 
     setUsernameStatus("checking");
-    setUsernameMessage("Verificando...");
+    setUsernameMessage(t("profile.usernameChecking"));
 
     usernameCheckTimer.current = setTimeout(async () => {
       try {
@@ -335,10 +337,10 @@ export default function Profile() {
         if (error) throw error;
         if (data === true) {
           setUsernameStatus("available");
-          setUsernameMessage("Nome disponível ✔");
+          setUsernameMessage(t("profile.usernameAvailable"));
         } else {
           setUsernameStatus("taken");
-          setUsernameMessage("Nome de usuário já está em uso");
+          setUsernameMessage(t("profile.usernameTaken"));
           triggerUsernameShake();
         }
       } catch {
@@ -352,11 +354,11 @@ export default function Profile() {
             .limit(1);
           if (rows && rows.length > 0) {
             setUsernameStatus("taken");
-            setUsernameMessage("Nome de usuário já está em uso");
+            setUsernameMessage(t("profile.usernameTaken"));
             triggerUsernameShake();
           } else {
             setUsernameStatus("available");
-            setUsernameMessage("Nome disponível ✔");
+            setUsernameMessage(t("profile.usernameAvailable"));
           }
         } catch {
           setUsernameStatus("idle");
@@ -750,7 +752,7 @@ export default function Profile() {
           pageRef.current = nextPage;
         }
       } catch (e: any) {
-        Alert.alert("Erro ao carregar posts", e?.message ?? "Tente novamente.");
+        Alert.alert(t("alert.errorLoadPosts"), e?.message ?? t("alert.tryAgain"));
       } finally {
         loadingRef.current = false;
         setLoadingPosts(false);
@@ -765,7 +767,7 @@ export default function Profile() {
 
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
-      Alert.alert("Permissão necessária", "Precisamos de acesso às suas fotos para alterar o avatar.");
+      Alert.alert(t("alert.permissionRequired"), t("alert.photoAccessNeeded"));
       return;
     }
 
@@ -836,7 +838,7 @@ export default function Profile() {
       if (profileError) throw profileError;
     } catch (e: any) {
       console.error("Erro ao atualizar avatar:", e);
-      Alert.alert("Erro ao atualizar foto", e?.message ?? String(e));
+      Alert.alert(t("alert.errorUpdatePhoto"), e?.message ?? String(e));
     }
   }, [userId, isOwnProfile]);
 
@@ -850,7 +852,7 @@ export default function Profile() {
     // Fetch highlight items and open the story viewer
     const items = await fetchHighlightItems(hl.id);
     if (items.length === 0) {
-      Alert.alert("Destaque vazio", "Este destaque não tem stories.");
+      Alert.alert(t("alert.highlightEmpty"), t("alert.highlightEmptyMsg"));
       return;
     }
     const storyItems: StoryItem[] = items.map((i) => {
@@ -886,7 +888,7 @@ export default function Profile() {
   const handleSaveProfile = useCallback(async () => {
     if (!userId || !isOwnProfile) return;
     if (!draftUsername.trim()) {
-      Alert.alert("Username obrigatório", "Defina um username.");
+      Alert.alert(t("alert.usernameRequired"), t("alert.usernameRequiredMsg"));
       return;
     }
     if (isUsernameSaveBlocked) {
@@ -906,7 +908,7 @@ export default function Profile() {
         const minutesLeft = Math.ceil((24 - hoursSince) * 60);
         const timeLabel = hoursLeft >= 1 ? `${hoursLeft}h` : `${minutesLeft} minuto${minutesLeft !== 1 ? "s" : ""}`;
         Alert.alert(
-          "Aguarde um pouco ⏳",
+          t("alert.waitMoment"),
           `Você alterou seu status de relacionamento recentemente. Aguarde mais ${timeLabel} para poder alterar novamente.`,
         );
         return;
@@ -983,16 +985,16 @@ export default function Profile() {
       setDraftGender(nextGender);
       setDraftRelationshipStatus(nextStatus);
       setEditing(false);
-      Alert.alert("Perfil atualizado", "Seu perfil foi salvo com sucesso.");
+      Alert.alert(t("alert.profileUpdated"), t("alert.profileUpdatedMsg"));
     } catch (e: any) {
       const msg = e?.message ?? String(e);
       if (msg.includes("profiles_username_lower_unique") || msg.includes("duplicate key") || msg.includes("unique")) {
         setUsernameStatus("taken");
-        setUsernameMessage("Nome de usuário já está em uso");
+        setUsernameMessage(t("profile.usernameTaken"));
         triggerUsernameShake();
-        Alert.alert("Username indisponível", "Esse nome de usuário já está sendo usado por outra pessoa.");
+        Alert.alert(t("alert.usernameUnavailable"), t("alert.usernameUnavailableMsg"));
       } else {
-        Alert.alert("Erro ao atualizar perfil", msg);
+        Alert.alert(t("alert.errorUpdateProfile"), msg);
       }
     } finally {
       setSavingProfile(false);
@@ -1157,9 +1159,9 @@ export default function Profile() {
       let ok = true;
       if (!skipConfirm) {
         ok = await new Promise<boolean>((resolve) => {
-          Alert.alert("Apagar postagem", "Essa ação é permanente. Quer apagar esta postagem?", [
-            { text: "Cancelar", style: "cancel", onPress: () => resolve(false) },
-            { text: "Apagar", style: "destructive", onPress: () => resolve(true) },
+          Alert.alert(t("alert.deletePost"), t("alert.deletePostMsg"), [
+            { text: t("common.cancel"), style: "cancel", onPress: () => resolve(false) },
+            { text: t("common.delete"), style: "destructive", onPress: () => resolve(true) },
           ]);
         });
       }
@@ -1180,7 +1182,7 @@ export default function Profile() {
         const { error } = await supabase.from("posts").delete().eq("id", postId).eq("user_id", authUserId);
 
         if (error) {
-          Alert.alert("Erro", error.message || "Não foi possível apagar a postagem.");
+          Alert.alert(t("common.error"), error.message || t("alert.errorDeletePost"));
           return;
         }
       }
@@ -1235,7 +1237,7 @@ export default function Profile() {
       if (error) throw error;
       setStories((prev) => [data as StoryRow, ...prev]);
     } catch (e: any) {
-      Alert.alert("Erro ao enviar story", e?.message ?? e?.message ?? String(e));
+      Alert.alert(t("alert.errorSendStory"), e?.message ?? String(e));
     }
   }, [authUserId]);
 
@@ -1275,7 +1277,7 @@ export default function Profile() {
         }
       } catch {}
     } catch (e: any) {
-      Alert.alert("Erro ao deixar de seguir", e?.message ?? "Não foi possível deixar de seguir.");
+      Alert.alert(t("alert.errorUnfollow"), e?.message ?? t("alert.errorUnfollowMsg"));
     } finally {
       setLoadingFollow(false);
     }
@@ -1317,28 +1319,28 @@ export default function Profile() {
 
         // Non-match silent crush — show subtle confirmation
         if (interestType === "silent_crush") {
-          setSilentModalTitle("Shhh…");
-          setSilentModalMessage("Crush silencioso enviado. Se for recíproco, a faísca aparece 😉");
+          setSilentModalTitle(t("alert.silentCrushTitle"));
+          setSilentModalMessage(t("alert.silentCrushMsg"));
           setSilentModalVisible(true);
         }
 
         // Non-match crush — show confirmation
         if (interestType === "crush") {
           setSilentModalTitle("💘 Crush enviado!");
-          setSilentModalMessage("Agora é esperar… Se a pessoa curtir de volta, vocês vão se conectar!");
+          setSilentModalMessage(t("alert.silentCrushWaitMsg"));
           setSilentModalVisible(true);
         }
       } catch (e: any) {
         const msg = e?.message ?? "";
         if (msg === "CRUSH_BLOCKED_SELF_COMMITTED") {
-          Alert.alert("Coração ocupado 💍", "Você está em um relacionamento. Mude seu status para usar crushes.");
+          Alert.alert(t("alert.crushBlockedSelf"), t("alert.crushBlockedSelfMsg"));
         } else if (msg === "CRUSH_BLOCKED_TARGET_COMMITTED") {
           Alert.alert(
-            "Essa pessoa está comprometida 💔",
-            "Não é possível enviar crush para alguém em um relacionamento.",
+            t("alert.crushBlockedTarget"),
+            t("alert.crushBlockedTargetMsg"),
           );
         } else {
-          Alert.alert("Erro ao seguir", msg || "Não foi possível salvar sua escolha.");
+          Alert.alert(t("alert.errorFollow"), msg || t("alert.errorFollowMsg"));
         }
       } finally {
         setLoadingFollow(false);
@@ -1352,7 +1354,7 @@ export default function Profile() {
       if (!userId) return;
 
       if (mode === "interested" && !isOwnProfile) {
-        Alert.alert("Área reservada", "Só o dono do perfil pode ver quem está interessado 😉");
+        Alert.alert(t("alert.reservedArea"), t("alert.reservedAreaMsg"));
         return;
       }
 
@@ -1402,8 +1404,8 @@ export default function Profile() {
       if (!authUserId || !userId) return;
       if (conversationType === "crush" && (viewerIsCommitted || targetIsCommitted)) {
         Alert.alert(
-          "🔒 Conversa bloqueada",
-          "Conversas de crush ficam indisponíveis quando um dos dois está namorando ou casado(a).",
+          t("alert.conversationBlocked"),
+          t("alert.conversationBlockedMsg"),
         );
         return;
       }
@@ -1423,7 +1425,7 @@ export default function Profile() {
           },
         });
       } catch (e: any) {
-        Alert.alert("Erro ao abrir conversa", e?.message ?? "Não foi possível abrir a conversa.");
+        Alert.alert(t("alert.errorOpenConversation"), e?.message ?? t("alert.errorOpenConversationMsg"));
       }
     },
     [authUserId, userId, router, viewerIsCommitted, targetIsCommitted],
@@ -1583,9 +1585,9 @@ export default function Profile() {
 
   // ── RELATIONSHIP STATUS OPTIONS ──
   const relationshipOptions: { value: RelationshipStatus; label: string; icon: string }[] = [
-    { value: "single", label: "Solteiro(a)", icon: "💚" },
-    { value: "committed", label: "Namorando", icon: "💜" },
-    { value: "other", label: "Casado(a)", icon: "💍" },
+    { value: "single", label: t("profile.statusSingle"), icon: "💚" },
+    { value: "committed", label: t("profile.statusCommitted"), icon: "💜" },
+    { value: "other", label: t("profile.statusMarried"), icon: "💍" },
   ];
 
   const committedJokes = [
@@ -1599,7 +1601,7 @@ export default function Profile() {
   const isCommitted = relationshipStatus === "committed" || relationshipStatus === "other";
 
   // ── GENDER OPTIONS ──
-  const genderOptions = ["Masculino", "Feminino", "Não-binário", "Prefiro não dizer"];
+  const genderOptions = [t("profile.genderMale"), t("profile.genderFemale"), t("profile.genderNonBinary"), t("profile.genderPreferNotSay")];
 
   // ── SETTINGS SCREEN ──
   if (settingsVisible) {
@@ -1608,105 +1610,105 @@ export default function Profile() {
       const subScreenInfo: Record<string, { emoji: string; title: string; desc: string }> = {
         privacy: {
           emoji: "🔒",
-          title: "Privacidade da conta",
-          desc: "Controle quem pode ver seu perfil, posts e stories. Configure a visibilidade da sua conta e gerencie permissões de acesso.",
+          title: t("settings.accountPrivacy"),
+          desc: t("settings.privacyDesc"),
         },
         notifications: {
           emoji: "🔔",
-          title: "Notificações",
-          desc: "Gerencie suas preferências de notificações. Escolha quais alertas receber sobre curtidas, comentários, seguidores e mensagens.",
+          title: t("settings.notifications"),
+          desc: t("settings.notificationsDesc"),
         },
         security: {
           emoji: "🛡️",
-          title: "Segurança",
-          desc: "Proteja sua conta com verificação em duas etapas, gerencie dispositivos conectados e revise atividades recentes.",
+          title: t("settings.security"),
+          desc: t("settings.securityDesc"),
         },
         messages_settings: {
           emoji: "💬",
-          title: "Mensagens e respostas",
-          desc: "Configure quem pode enviar mensagens e respostas a stories. Gerencie filtros de mensagens e solicitações.",
+          title: t("settings.messagesReplies"),
+          desc: t("settings.messagesDesc"),
         },
         tags: {
           emoji: "🏷️",
-          title: "Marcações e menções",
-          desc: "Controle quem pode marcar ou mencionar você em posts, stories e comentários.",
+          title: t("settings.tagsMentions"),
+          desc: t("settings.tagsDesc"),
         },
         comments: {
           emoji: "💭",
-          title: "Comentários",
-          desc: "Gerencie quem pode comentar nos seus posts. Configure filtros de palavras e moderação automática.",
+          title: t("settings.comments"),
+          desc: t("settings.commentsDesc"),
         },
         blocked: {
           emoji: "🚫",
-          title: "Bloqueados",
-          desc: "Veja e gerencie a lista de contas que você bloqueou. Contas bloqueadas não podem interagir com você.",
+          title: t("settings.blocked"),
+          desc: t("settings.blockedDesc"),
         },
         restricted: {
           emoji: "⚠️",
-          title: "Contas restritas",
-          desc: "Contas restritas podem ver seus posts, mas não interagem diretamente. Útil para limitar contato sem bloquear.",
+          title: t("settings.restricted"),
+          desc: t("settings.restrictedDesc"),
         },
         close_friends: {
           emoji: "⭐",
-          title: "Amigos próximos",
-          desc: "Crie sua lista de amigos próximos para compartilhar stories e conteúdos exclusivos com quem mais importa.",
+          title: t("settings.closeFriends"),
+          desc: t("settings.closeFriendsDesc"),
         },
         tribes: {
           emoji: "👥",
-          title: "Tribos",
-          desc: "Crie ou participe de tribos — grupos de interesse que conectam pessoas com afinidades em comum.",
+          title: t("settings.tribes"),
+          desc: t("settings.tribesDesc"),
         },
         discovery: {
           emoji: "🎯",
-          title: "Preferências de descoberta",
-          desc: "Configure como o Lupyy sugere perfis para você. Ajuste seus interesses e preferências de descoberta.",
+          title: t("settings.discoveryPrefs"),
+          desc: t("settings.discoveryDesc"),
         },
         saved: {
           emoji: "🔖",
-          title: "Itens salvos",
-          desc: "Acesse todos os posts, vídeos e conteúdos que você salvou para ver depois.",
+          title: t("settings.savedItems"),
+          desc: t("settings.savedDesc"),
         },
         archived: {
           emoji: "📦",
-          title: "Itens arquivados",
-          desc: "Posts e stories que você arquivou ficam aqui. Você pode restaurá-los a qualquer momento.",
+          title: t("settings.archivedItems"),
+          desc: t("settings.archivedDesc"),
         },
         activity: {
           emoji: "📊",
-          title: "Sua atividade",
-          desc: "Veja o resumo da sua atividade no Lupyy: tempo de uso, interações, curtidas e muito mais.",
+          title: t("settings.yourActivity"),
+          desc: t("settings.activityDesc"),
         },
         appearance: {
           emoji: "🎨",
-          title: "Aparência / tema",
-          desc: "Personalize a aparência do Lupyy. Escolha entre temas escuros, coloridos e personalizados.",
+          title: t("settings.appearance"),
+          desc: t("settings.appearanceDesc"),
         },
         time_mgmt: {
           emoji: "⏱️",
-          title: "Gerenciamento de tempo",
-          desc: "Configure lembretes de tempo de uso e pausas para manter um uso saudável do app.",
+          title: t("settings.timeManagement"),
+          desc: t("settings.timeDesc"),
         },
         help: {
           emoji: "❓",
-          title: "Ajuda / suporte",
-          desc: "Precisa de ajuda? Acesse perguntas frequentes, entre em contato com o suporte ou reporte problemas.",
+          title: t("settings.helpSupport"),
+          desc: t("settings.helpDesc"),
         },
         privacy_policy: {
           emoji: "📋",
-          title: "Política de privacidade",
-          desc: "Leia nossa política de privacidade para entender como protegemos seus dados e informações pessoais.",
+          title: t("settings.privacyPolicy"),
+          desc: t("settings.privacyPolicyDesc"),
         },
         terms: {
           emoji: "📜",
-          title: "Termos de uso",
-          desc: "Conheça os termos e condições de uso do Lupyy. Saiba seus direitos e responsabilidades na plataforma.",
+          title: t("settings.termsOfUse"),
+          desc: t("settings.termsDesc"),
         },
       };
 
       const info = subScreenInfo[settingsSubScreen] || {
         emoji: "⚙️",
-        title: "Em breve",
-        desc: "Esta funcionalidade estará disponível em breve.",
+        title: t("settings.comingSoon"),
+        desc: t("settings.comingSoonDesc"),
       };
 
       return (
@@ -1733,11 +1735,11 @@ export default function Profile() {
 
     const settingsSections = [
       {
-        title: "Sua conta",
+        title: t("settings.yourAccount"),
         items: [
           {
             icon: "👤",
-            label: "Editar perfil",
+            label: t("settings.editProfile"),
             onPress: () => {
               setSettingsVisible(false);
               setUsernameStatus("idle");
@@ -1745,56 +1747,56 @@ export default function Profile() {
               setEditing(true);
             },
           },
-          { icon: "🔒", label: "Privacidade da conta", onPress: () => setSettingsSubScreen("privacy") },
-          { icon: "🔔", label: "Notificações", onPress: () => setSettingsSubScreen("notifications") },
-          { icon: "🛡️", label: "Segurança", onPress: () => setSettingsSubScreen("security") },
+          { icon: "🔒", label: t("settings.accountPrivacy"), onPress: () => setSettingsSubScreen("privacy") },
+          { icon: "🔔", label: t("settings.notifications"), onPress: () => setSettingsSubScreen("notifications") },
+          { icon: "🛡️", label: t("settings.security"), onPress: () => setSettingsSubScreen("security") },
         ],
       },
       {
-        title: "Como as pessoas interagem com você",
+        title: t("settings.howPeopleInteract"),
         items: [
-          { icon: "💬", label: "Mensagens e respostas", onPress: () => setSettingsSubScreen("messages_settings") },
-          { icon: "🏷️", label: "Marcações e menções", onPress: () => setSettingsSubScreen("tags") },
-          { icon: "💭", label: "Comentários", onPress: () => setSettingsSubScreen("comments") },
-          { icon: "🚫", label: "Bloqueados", onPress: () => setSettingsSubScreen("blocked") },
-          { icon: "⚠️", label: "Restritas", onPress: () => setSettingsSubScreen("restricted") },
+          { icon: "💬", label: t("settings.messagesReplies"), onPress: () => setSettingsSubScreen("messages_settings") },
+          { icon: "🏷️", label: t("settings.tagsMentions"), onPress: () => setSettingsSubScreen("tags") },
+          { icon: "💭", label: t("settings.comments"), onPress: () => setSettingsSubScreen("comments") },
+          { icon: "🚫", label: t("settings.blocked"), onPress: () => setSettingsSubScreen("blocked") },
+          { icon: "⚠️", label: t("settings.restricted"), onPress: () => setSettingsSubScreen("restricted") },
         ],
       },
       {
-        title: "Social / Lupyy",
+        title: t("settings.socialLupyy"),
         items: [
           {
             icon: "💘",
-            label: "Crushes",
+            label: t("settings.crushes"),
             onPress: () => {
               if (isCommitted && isOwnProfile) {
-                Alert.alert("🔒 Crushes bloqueados", "Seu status de relacionamento bloqueia o acesso aos crushes.");
+                Alert.alert(t("alert.crushesBlocked"), t("alert.crushesBlockedMsg"));
                 return;
               }
               openPeopleSheet("interested");
             },
           },
-          { icon: "⭐", label: "Amigos próximos", onPress: () => setSettingsSubScreen("close_friends") },
-          { icon: "👥", label: "Tribos", onPress: () => setSettingsSubScreen("tribes") },
-          { icon: "🎯", label: "Preferências de descoberta", onPress: () => setSettingsSubScreen("discovery") },
+          { icon: "⭐", label: t("settings.closeFriends"), onPress: () => setSettingsSubScreen("close_friends") },
+          { icon: "👥", label: t("settings.tribes"), onPress: () => setSettingsSubScreen("tribes") },
+          { icon: "🎯", label: t("settings.discoveryPrefs"), onPress: () => setSettingsSubScreen("discovery") },
         ],
       },
       {
-        title: "Conteúdo",
+        title: t("settings.content"),
         items: [
-          { icon: "🔖", label: "Itens salvos", onPress: () => setSettingsSubScreen("saved") },
-          { icon: "📦", label: "Itens arquivados", onPress: () => setSettingsSubScreen("archived") },
-          { icon: "📊", label: "Sua atividade", onPress: () => setSettingsSubScreen("activity") },
+          { icon: "🔖", label: t("settings.savedItems"), onPress: () => setSettingsSubScreen("saved") },
+          { icon: "📦", label: t("settings.archivedItems"), onPress: () => setSettingsSubScreen("archived") },
+          { icon: "📊", label: t("settings.yourActivity"), onPress: () => setSettingsSubScreen("activity") },
         ],
       },
       {
-        title: "App",
+        title: t("settings.app"),
         items: [
-          { icon: "🎨", label: "Aparência / tema", onPress: () => setSettingsSubScreen("appearance") },
-          { icon: "⏱️", label: "Gerenciamento de tempo", onPress: () => setSettingsSubScreen("time_mgmt") },
-          { icon: "❓", label: "Ajuda / suporte", onPress: () => setSettingsSubScreen("help") },
-          { icon: "📋", label: "Política de privacidade", onPress: () => setSettingsSubScreen("privacy_policy") },
-          { icon: "📜", label: "Termos de uso", onPress: () => setSettingsSubScreen("terms") },
+          { icon: "🎨", label: t("settings.appearance"), onPress: () => setSettingsSubScreen("appearance") },
+          { icon: "⏱️", label: t("settings.timeManagement"), onPress: () => setSettingsSubScreen("time_mgmt") },
+          { icon: "❓", label: t("settings.helpSupport"), onPress: () => setSettingsSubScreen("help") },
+          { icon: "📋", label: t("settings.privacyPolicy"), onPress: () => setSettingsSubScreen("privacy_policy") },
+          { icon: "📜", label: t("settings.termsOfUse"), onPress: () => setSettingsSubScreen("terms") },
         ],
       },
     ];
@@ -1810,7 +1812,7 @@ export default function Profile() {
           >
             <Text style={[styles.settingsBackIcon, { color: theme.colors.text }]}>←</Text>
           </TouchableOpacity>
-          <Text style={[styles.settingsTitle, { color: theme.colors.text }]}>Configurações e atividade</Text>
+          <Text style={[styles.settingsTitle, { color: theme.colors.text }]}>{t("settings.title")}</Text>
           <View style={{ width: 40 }} />
         </View>
 
@@ -1818,7 +1820,7 @@ export default function Profile() {
         <View style={styles.settingsSearchWrap}>
           <View style={[styles.settingsSearchBox, { backgroundColor: theme.colors.surface }]}>
             <Text style={[styles.settingsSearchIcon, { color: theme.colors.textMuted }]}>🔍</Text>
-            <Text style={[styles.settingsSearchPlaceholder, { color: theme.colors.textMuted }]}>Pesquisar</Text>
+            <Text style={[styles.settingsSearchPlaceholder, { color: theme.colors.textMuted }]}>{t("settings.search")}</Text>
           </View>
         </View>
 
@@ -1854,7 +1856,7 @@ export default function Profile() {
               }}
             >
               <Text style={styles.settingsRowIcon}>🚪</Text>
-              <Text style={[styles.settingsRowLabel, { color: "#ff6b6b" }]}>Sair da conta</Text>
+              <Text style={[styles.settingsRowLabel, { color: "#ff6b6b" }]}>{t("settings.logout")}</Text>
               <Text style={[styles.settingsRowChevron, { color: "#ff6b6b" }]}>›</Text>
             </TouchableOpacity>
           </View>
@@ -1885,7 +1887,7 @@ export default function Profile() {
           >
             <Text style={[styles.settingsBackIcon, { color: theme.colors.text }]}>←</Text>
           </TouchableOpacity>
-          <Text style={[styles.settingsTitle, { color: theme.colors.text }]}>Editar perfil</Text>
+          <Text style={[styles.settingsTitle, { color: theme.colors.text }]}>{t("profile.editProfile")}</Text>
           <TouchableOpacity
             onPress={handleSaveProfile}
             disabled={savingProfile || isUsernameSaveBlocked}
@@ -1895,7 +1897,7 @@ export default function Profile() {
             {savingProfile ? (
               <ActivityIndicator size="small" color={theme.colors.primary || "#a855f7"} />
             ) : (
-              <Text style={[styles.editSaveHeaderText, { color: theme.colors.primary || "#a855f7" }]}>Salvar</Text>
+              <Text style={[styles.editSaveHeaderText, { color: theme.colors.primary || "#a855f7" }]}>{t("common.save")}</Text>
             )}
           </TouchableOpacity>
         </View>
@@ -1924,7 +1926,7 @@ export default function Profile() {
             </TouchableOpacity>
             <TouchableOpacity onPress={handleChangeAvatar} activeOpacity={0.7}>
               <Text style={[styles.editAvatarLabel, { color: theme.colors.primary || "#a855f7" }]}>
-                Editar foto ou avatar
+                {t("profile.editPhotoAvatar")}
               </Text>
             </TouchableOpacity>
           </View>
@@ -1935,11 +1937,11 @@ export default function Profile() {
             <View
               style={[styles.editFieldBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
             >
-              <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>Nome</Text>
+              <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>{t("profile.name")}</Text>
               <TextInput
                 value={draftFullName}
                 onChangeText={setDraftFullName}
-                placeholder="Seu nome"
+                placeholder={t("profile.namePlaceholder")}
                 placeholderTextColor={theme.colors.textMuted}
                 style={[styles.editFieldInput, { color: theme.colors.text }]}
               />
@@ -1962,7 +1964,7 @@ export default function Profile() {
                 },
               ]}
             >
-              <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>Nome de usuário</Text>
+              <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>{t("profile.username")}</Text>
               <View style={{ flexDirection: "row", alignItems: "center" }}>
                 <Text style={{ color: theme.colors.textMuted, fontSize: 15, fontWeight: "500", marginRight: 2 }}>@</Text>
                 <TextInput
@@ -2005,11 +2007,11 @@ export default function Profile() {
                 { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, minHeight: 100 },
               ]}
             >
-              <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>Bio</Text>
+              <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>{t("profile.bio")}</Text>
               <TextInput
                 value={draftBio}
                 onChangeText={setDraftBio}
-                placeholder="Fale um pouco sobre você"
+                placeholder={t("profile.bioPlaceholder")}
                 placeholderTextColor={theme.colors.textMuted}
                 multiline
                 style={[styles.editFieldInput, { color: theme.colors.text, minHeight: 60, textAlignVertical: "top" }]}
@@ -2020,7 +2022,7 @@ export default function Profile() {
             <View
               style={[styles.editFieldBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
             >
-              <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>Gênero</Text>
+              <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>{t("profile.gender")}</Text>
               <View style={styles.editGenderRow}>
                 {genderOptions.map((g) => (
                   <TouchableOpacity
@@ -2052,7 +2054,7 @@ export default function Profile() {
             <View
               style={[styles.editFieldBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
             >
-              <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>Status de relacionamento</Text>
+              <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>{t("profile.relationshipStatus")}</Text>
               <Animated.View style={[styles.editGenderRow, { transform: [{ translateX: shakeAnim }] }]}>
                 {relationshipOptions.map((opt) => (
                   <TouchableOpacity
@@ -2090,9 +2092,7 @@ export default function Profile() {
               {cooldownWarning && <Text style={[styles.editFieldHint, { color: "#f59e0b" }]}>{cooldownWarning}</Text>}
               {(draftRelationshipStatus === "committed" || draftRelationshipStatus === "other") && (
                 <Text style={[styles.editFieldHint, { color: theme.colors.textMuted }]}>
-                  🔒 Crushes e mensagens de crush serão bloqueados enquanto esse status estiver ativo. Após ativar, só
-                  poderá alterar novamente depois de 24 horas.
-                  {"\n"}💑 Vincule seu parceiro(a) abaixo para manter a conversa de crush entre vocês liberada.
+                  {t("profile.relationshipWarning")}
                 </Text>
               )}
             </View>
@@ -2105,9 +2105,9 @@ export default function Profile() {
                   { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
                 ]}
               >
-                <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>💑 Com quem você está?</Text>
+                <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>{t("profile.partnerLabel")}</Text>
                 <Text style={[styles.editFieldHint, { color: theme.colors.textMuted, marginBottom: 8 }]}>
-                  Vincule seu parceiro(a) para liberar o chat de crush entre vocês.
+                  {t("profile.partnerHint")}
                 </Text>
 
                 {partnerProfile ? (
@@ -2128,7 +2128,7 @@ export default function Profile() {
                     />
                     <View style={{ flex: 1 }}>
                       <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 14 }}>
-                        {partnerProfile.full_name || partnerProfile.username || "Parceiro(a)"}
+                        {partnerProfile.full_name || partnerProfile.username || t("profile.partnerDefault")}
                       </Text>
                       {partnerProfile.username && (
                         <Text style={{ color: theme.colors.textMuted, fontSize: 12 }}>@{partnerProfile.username}</Text>
@@ -2142,13 +2142,13 @@ export default function Profile() {
                       }}
                       style={{ padding: 6 }}
                     >
-                      <Text style={{ color: "#ef4444", fontSize: 13, fontWeight: "600" }}>Remover</Text>
+                      <Text style={{ color: "#ef4444", fontSize: 13, fontWeight: "600" }}>{t("profile.partnerRemove")}</Text>
                     </TouchableOpacity>
                   </View>
                 ) : (
                   <>
                     <TextInput
-                      placeholder="Buscar por username..."
+                      placeholder={t("profile.partnerSearch")}
                       placeholderTextColor={theme.colors.textMuted}
                       value={partnerSearchQuery}
                       onChangeText={async (text) => {
@@ -2202,7 +2202,7 @@ export default function Profile() {
             <View
               style={[styles.editFieldBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
             >
-              <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>Estilo visual</Text>
+              <Text style={[styles.editFieldLabel, { color: theme.colors.textMuted }]}>{t("profile.visualStyle")}</Text>
               <View style={styles.editThemeBox}>
                 <ThemeSelector />
               </View>
@@ -2218,12 +2218,12 @@ export default function Profile() {
   const ListHeader = () => {
     const followLabel =
       currentInterestType === "friend"
-        ? "Amigos"
+        ? t("profile.friends")
         : currentInterestType === "crush"
           ? "Crush"
           : currentInterestType === "silent_crush"
-            ? "Crush silencioso"
-            : "Conectar";
+            ? t("profile.silentCrush")
+            : t("profile.connect");
 
     const hasCrushConversation = isCrushMatch;
     const hasFriendConversation = isMutualFriend;
@@ -2361,15 +2361,15 @@ export default function Profile() {
           <View style={styles.statsRow}>
             <View style={styles.statItem}>
               <Text style={[styles.statNumber, { color: theme.colors.text }]}>{postsCount}</Text>
-              <Text style={[styles.statLabel, { color: theme.colors.textMuted }]}>Posts</Text>
+              <Text style={[styles.statLabel, { color: theme.colors.textMuted }]}>{t("profile.posts")}</Text>
             </View>
             <TouchableOpacity style={styles.statItem} activeOpacity={0.8} onPress={() => openPeopleSheet("followers")}>
               <Text style={[styles.statNumber, { color: theme.colors.text }]}>{followersCount}</Text>
-              <Text style={[styles.statLabel, { color: theme.colors.textMuted }]}>Seguidores</Text>
+              <Text style={[styles.statLabel, { color: theme.colors.textMuted }]}>{t("profile.followers")}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.statItem} activeOpacity={0.8} onPress={() => openPeopleSheet("following")}>
               <Text style={[styles.statNumber, { color: theme.colors.text }]}>{followingCount}</Text>
-              <Text style={[styles.statLabel, { color: theme.colors.textMuted }]}>Seguindo</Text>
+              <Text style={[styles.statLabel, { color: theme.colors.textMuted }]}>{t("profile.following")}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.statItem}
@@ -2377,8 +2377,8 @@ export default function Profile() {
               onPress={() => {
                 if (isCommitted && isOwnProfile) {
                   Alert.alert(
-                    "🔒 Crushes bloqueados",
-                    "Seu status de relacionamento bloqueia o acesso aos crushes. Mude para Solteiro(a) para desbloquear.",
+                    t("alert.crushesBlocked"),
+                    t("alert.crushesBlockedFullMsg"),
                   );
                   return;
                 }
@@ -2388,7 +2388,7 @@ export default function Profile() {
               <Text style={[styles.statNumber, { color: theme.colors.text }]}>
                 {isCommitted && isOwnProfile ? "🔒" : interestedCount}
               </Text>
-              <Text style={[styles.statLabel, { color: theme.colors.textMuted }]}>Crush</Text>
+              <Text style={[styles.statLabel, { color: theme.colors.textMuted }]}>{t("profile.crush")}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -2403,7 +2403,7 @@ export default function Profile() {
               ]}
             >
               <Text style={styles.committedBadgeText}>
-                {relationshipStatus === "other" ? "💍 Casado(a)" : "💜 Comprometido(a)"}
+                {relationshipStatus === "other" ? `💍 ${t("profile.statusMarried")}` : `💜 ${t("profile.committedBadge")}`}
               </Text>
             </View>
           </View>
@@ -2429,11 +2429,11 @@ export default function Profile() {
                 }}
                 disabled={!isOwnProfile}
               >
-                <Text style={[styles.actionButtonText, { color: theme.colors.text }]}>Ajustar vibe</Text>
+                <Text style={[styles.actionButtonText, { color: theme.colors.text }]}>{t("profile.adjustVibe")}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={[styles.actionButton, { borderColor: theme.colors.border }]} activeOpacity={0.8}>
-                <Text style={[styles.actionButtonText, { color: theme.colors.text }]}>Mostrar meu ID</Text>
+                <Text style={[styles.actionButtonText, { color: theme.colors.text }]}>{t("profile.showMyId")}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -2453,7 +2453,7 @@ export default function Profile() {
                 disabled={loadingFollow}
               >
                 <Text style={[styles.actionButtonText, { color: theme.colors.text }]}>
-                  {loadingFollow ? "Carregando..." : followLabel}
+                  {loadingFollow ? t("profile.loading") : followLabel}
                 </Text>
               </TouchableOpacity>
 
@@ -2464,21 +2464,21 @@ export default function Profile() {
                   onPress={() => openConversation(hasCrushConversation ? "crush" : "friend" as ConversationType)}
                 >
                   <Text style={[styles.actionButtonText, { color: theme.colors.text }]}>
-                    {hasCrushConversation ? "Mensagem" : "Mensagem"}
+                    {t("profile.message")}
                   </Text>
                 </TouchableOpacity>
               )}
 
               <TouchableOpacity style={[styles.actionButton, { borderColor: theme.colors.border }]} activeOpacity={0.8}>
-                <Text style={[styles.actionButtonText, { color: theme.colors.text }]}>Mostrar meu ID</Text>
+                <Text style={[styles.actionButtonText, { color: theme.colors.text }]}>{t("profile.showMyId")}</Text>
               </TouchableOpacity>
             </>
           )}
         </View>
         <View style={[styles.panelCard, { backgroundColor: theme.colors.surface }]}>
-          <Text style={[styles.panelTitle, { color: theme.colors.text }]}>"Radar"</Text>
+          <Text style={[styles.panelTitle, { color: theme.colors.text }]}>{t("profile.radar")}</Text>
           <Text style={[styles.panelSubtitle, { color: theme.colors.textMuted }]}>
-            Insights e desempenho em breve aqui.
+            {t("profile.radarDesc")}
           </Text>
         </View>
 
@@ -2494,7 +2494,7 @@ export default function Profile() {
               <View style={[styles.highlightCircle, { borderColor: theme.colors.border }]}>
                 <Text style={[styles.highlightPlus, { color: theme.colors.text }]}>＋</Text>
               </View>
-              <Text style={[styles.highlightLabel, { color: theme.colors.textMuted }]}>Novo</Text>
+              <Text style={[styles.highlightLabel, { color: theme.colors.textMuted }]}>{t("profile.new")}</Text>
             </TouchableOpacity>
           )}
 
@@ -2603,7 +2603,7 @@ export default function Profile() {
       {isLoadingInitial ? (
         <View style={[styles.center, { backgroundColor: theme.colors.background }]}>
           <ActivityIndicator />
-          <Text style={[styles.loadingText, { color: theme.colors.textMuted }]}>Carregando perfil…</Text>
+          <Text style={[styles.loadingText, { color: theme.colors.textMuted }]}>{t("profile.loadingProfile")}</Text>
         </View>
       ) : (
         <>
@@ -2645,9 +2645,9 @@ export default function Profile() {
                   >
                     {isOwnProfile
                       ? activeTab === "reels"
-                        ? "Você ainda não publicou nenhum vídeo."
-                        : "Você ainda não publicou nada."
-                      : "Nenhuma publicação ainda."}
+                        ? t("profile.noReelsOwn")
+                        : t("profile.noPostsOwn")
+                      : t("profile.noPostsOther")}
                   </Text>
                 </View>
               ) : null
@@ -2704,15 +2704,15 @@ export default function Profile() {
 
                 <ScrollView style={styles.webCardBody} contentContainerStyle={styles.webCardBodyContent}>
                   {webCommentsLoading ? (
-                    <Text style={[styles.webHint, { color: theme.colors.textMuted }]}>Carregando...</Text>
+                    <Text style={[styles.webHint, { color: theme.colors.textMuted }]}>{t("comments.loading")}</Text>
                   ) : webComments.length === 0 ? (
-                    <Text style={[styles.webHint, { color: theme.colors.textMuted }]}>Seja o primeiro a comentar.</Text>
+                    <Text style={[styles.webHint, { color: theme.colors.textMuted }]}>{t("comments.beFirst")}</Text>
                   ) : (
                     webComments.map((c: any) => (
                       <View key={String(c.id)} style={[styles.webCommentRow, { borderColor: theme.colors.border }]}>
                         <View style={{ flex: 1 }}>
                           <Text style={[styles.webCommentUser, { color: theme.colors.text }]}>
-                            {c?.profiles?.username || c?.profiles?.full_name || "usuário"}
+                            {c?.profiles?.username || c?.profiles?.full_name || t("comments.user")}
                           </Text>
                           <Text style={[styles.webCommentText, { color: theme.colors.text }]}>{c.content}</Text>
                         </View>
@@ -2738,7 +2738,7 @@ export default function Profile() {
                   <TextInput
                     value={webCommentText}
                     onChangeText={setWebCommentText}
-                    placeholder="Adicionar comentário..."
+                    placeholder={t("comments.addPlaceholder")}
                     placeholderTextColor={theme.colors.textMuted}
                     style={[styles.webInput, { color: theme.colors.text, borderColor: theme.colors.border }]}
                   />
@@ -2758,7 +2758,7 @@ export default function Profile() {
                     }}
                     style={styles.webSendBtn}
                   >
-                    <Text style={styles.webSendText}>Enviar</Text>
+                    <Text style={styles.webSendText}>{t("comments.send")}</Text>
                   </TouchableOpacity>
                 </View>
               </View>
