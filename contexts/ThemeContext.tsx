@@ -20,7 +20,7 @@ function sanitizeThemeId(id: ThemeId): ThemeId {
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [themeId, setThemeIdState] = useState<ThemeId>("midnight");
+  const [themeId, setThemeIdState] = useState<ThemeId>("neon");
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {

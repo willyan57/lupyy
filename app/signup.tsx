@@ -2,10 +2,11 @@
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { Link, useRouter } from "expo-router";
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -81,12 +82,20 @@ export default function Signup() {
   const isMobileWeb = useIsMobileWeb(900);
   const isDesktop = Platform.OS === "web" && !isMobileWeb;
 
+  const [fullName, setFullName] = useState("");
+  const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [pass, setPass] = useState("");
   const [confirmPass, setConfirmPass] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
+
+  // Username availability
+  const [usernameStatus, setUsernameStatus] = useState<"idle" | "checking" | "available" | "taken" | "invalid">("idle");
+  const [usernameMessage, setUsernameMessage] = useState("");
+  const usernameCheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const usernameShakeAnim = useRef(new Animated.Value(0)).current;
 
   // Age gate
   const [birthDay, setBirthDay] = useState("");
@@ -103,13 +112,97 @@ export default function Signup() {
   const hasSymbol = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?`~]/.test(pass);
   const passwordsMatch = pass.length > 0 && confirmPass.length > 0 && pass === confirmPass;
 
+  const triggerUsernameShake = useCallback(() => {
+    usernameShakeAnim.setValue(0);
+    Animated.sequence([
+      Animated.timing(usernameShakeAnim, { toValue: 8, duration: 40, useNativeDriver: true }),
+      Animated.timing(usernameShakeAnim, { toValue: -8, duration: 40, useNativeDriver: true }),
+      Animated.timing(usernameShakeAnim, { toValue: 6, duration: 40, useNativeDriver: true }),
+      Animated.timing(usernameShakeAnim, { toValue: -6, duration: 40, useNativeDriver: true }),
+      Animated.timing(usernameShakeAnim, { toValue: 0, duration: 40, useNativeDriver: true }),
+    ]).start();
+  }, [usernameShakeAnim]);
+
+  const handleUsernameChange = useCallback((text: string) => {
+    const cleaned = text.toLowerCase().replace(/\s/g, "").replace(/[^a-z0-9._]/g, "");
+    setUsername(cleaned);
+    setErrorMsg(null);
+
+    if (usernameCheckTimer.current) clearTimeout(usernameCheckTimer.current);
+
+    if (!cleaned || cleaned.length < 3) {
+      setUsernameStatus(cleaned.length > 0 ? "invalid" : "idle");
+      setUsernameMessage(cleaned.length > 0 ? t("profile.usernameMinChars") : "");
+      return;
+    }
+
+    setUsernameStatus("checking");
+    setUsernameMessage(t("profile.usernameChecking"));
+
+    usernameCheckTimer.current = setTimeout(async () => {
+      try {
+        const { data, error } = await supabase.rpc("check_username_available", {
+          _username: cleaned,
+          _user_id: "00000000-0000-0000-0000-000000000000",
+        });
+        if (error) throw error;
+        if (data === true) {
+          setUsernameStatus("available");
+          setUsernameMessage(t("profile.usernameAvailable"));
+        } else {
+          setUsernameStatus("taken");
+          setUsernameMessage(t("profile.usernameTaken"));
+          triggerUsernameShake();
+        }
+      } catch {
+        try {
+          const { data: rows } = await supabase
+            .from("profiles")
+            .select("id")
+            .ilike("username", cleaned)
+            .limit(1);
+          if (rows && rows.length > 0) {
+            setUsernameStatus("taken");
+            setUsernameMessage(t("profile.usernameTaken"));
+            triggerUsernameShake();
+          } else {
+            setUsernameStatus("available");
+            setUsernameMessage(t("profile.usernameAvailable"));
+          }
+        } catch {
+          setUsernameStatus("idle");
+          setUsernameMessage("");
+        }
+      }
+    }, 450);
+  }, [triggerUsernameShake, t]);
+
+  const isUsernameSaveBlocked = usernameStatus === "taken" || usernameStatus === "invalid" || usernameStatus === "checking";
+
   async function handleSignup() {
     if (loading) return;
 
     setErrorMsg(null);
     setInfoMsg(null);
 
+    const trimmedName = fullName.trim();
+    const trimmedUsername = username.trim().toLowerCase();
     const trimmedEmail = email.trim().toLowerCase();
+
+    if (!trimmedName) {
+      setErrorMsg(t("signup.errorEmptyName"));
+      return;
+    }
+
+    if (!trimmedUsername || trimmedUsername.length < 3) {
+      setErrorMsg(t("signup.errorUsernameInvalid"));
+      return;
+    }
+
+    if (isUsernameSaveBlocked) {
+      setErrorMsg(t("signup.errorUsernameTaken"));
+      return;
+    }
 
     if (!trimmedEmail || !pass) {
       setErrorMsg(t("signup.errorEmptyFields"));
@@ -164,6 +257,8 @@ export default function Signup() {
               ? "https://lupyy.com/auth/callback"
               : "lupyy://auth-callback",
           data: {
+            full_name: trimmedName,
+            username: trimmedUsername,
             birth_date: `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
             accepted_terms_at: new Date().toISOString(),
           },
@@ -180,6 +275,14 @@ export default function Signup() {
         }
         setErrorMsg(friendly);
         return;
+      }
+
+      // Save full_name and username to profiles table
+      if (data?.user?.id) {
+        await supabase
+          .from("profiles")
+          .update({ full_name: trimmedName, username: trimmedUsername })
+          .eq("id", data.user.id);
       }
 
       const successText = t("signup.successMessage");
@@ -205,6 +308,44 @@ export default function Signup() {
   function renderFormContent() {
     return (
       <>
+        <Text style={styles.label}>{t("signup.nameLabel")}</Text>
+        <TextInput
+          placeholder={t("signup.namePlaceholder")}
+          placeholderTextColor={Colors.textMuted}
+          autoCapitalize="words"
+          autoCorrect={false}
+          value={fullName}
+          onChangeText={(txt) => { setFullName(txt); setErrorMsg(null); }}
+          style={styles.input}
+        />
+
+        <Text style={styles.label}>{t("signup.usernameLabel")}</Text>
+        <Animated.View style={{ transform: [{ translateX: usernameShakeAnim }] }}>
+          <View style={[styles.input, styles.usernameInputRow]}>
+            <Text style={styles.usernameAt}>@</Text>
+            <TextInput
+              placeholder={t("signup.usernamePlaceholder")}
+              placeholderTextColor={Colors.textMuted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              value={username}
+              onChangeText={handleUsernameChange}
+              style={styles.usernameTextInput}
+            />
+          </View>
+        </Animated.View>
+        {usernameMessage.length > 0 && (
+          <Text
+            style={[
+              styles.requirementText,
+              usernameStatus === "available" && styles.requirementOk,
+              (usernameStatus === "taken" || usernameStatus === "invalid") && styles.requirementFail,
+            ]}
+          >
+            {usernameStatus === "checking" ? "⏳ " : ""}{usernameMessage}
+          </Text>
+        )}
+
         <Text style={styles.label}>{t("signup.emailLabel")}</Text>
         <TextInput
           placeholder={t("signup.emailPlaceholder")}
@@ -603,6 +744,25 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.08)",
     fontSize: 15,
     marginBottom: 4,
+  },
+  usernameInputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 0,
+  },
+  usernameAt: {
+    color: "#6B7280",
+    fontSize: 15,
+    fontWeight: "700",
+    paddingLeft: 14,
+    paddingRight: 2,
+  },
+  usernameTextInput: {
+    flex: 1,
+    color: "#FFFFFF",
+    fontSize: 15,
+    paddingVertical: 11,
+    paddingRight: 14,
   },
   requirementsContainer: {
     marginTop: 1,
