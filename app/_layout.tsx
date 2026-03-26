@@ -148,8 +148,8 @@ export default function RootLayout() {
   const desktopPublicRouteContentStyle = isDesktopPublicRoute
     ? ({
         backgroundColor: Colors.background,
-        paddingTop: 72,
-        paddingBottom: 28,
+        paddingTop: 120,
+        paddingBottom: 40,
       } as const)
     : ({ backgroundColor: Colors.background } as const);
 
