@@ -1,6 +1,10 @@
-import Colors from "@/constants/Colors";
-import { Link, LinkProps, usePathname } from "expo-router";
-import React from "react";
+// components/WebSidebar.tsx
+import { useTheme } from "@/contexts/ThemeContext";
+import { useTranslation } from "@/lib/i18n";
+import { supabase } from "@/lib/supabase";
+import { Ionicons } from "@expo/vector-icons";
+import { usePathname, useRouter } from "expo-router";
+import { useCallback, useEffect, useState } from "react";
 import {
   Platform,
   StyleSheet,
@@ -9,152 +13,230 @@ import {
   View,
 } from "react-native";
 
-type ItemProps = {
-  href: string;
+export const WEB_SIDEBAR_WIDTH = 260;
+
+type SidebarItem = {
+  key: string;
   label: string;
-  icon: React.ReactNode;
-  active: boolean;
+  icon: keyof typeof Ionicons.glyphMap;
+  iconActive: keyof typeof Ionicons.glyphMap;
+  route: string;
 };
 
-function SidebarItem({ href, label, icon, active }: ItemProps) {
-  const itemStyle = StyleSheet.flatten([
-    styles.item,
-    active ? styles.itemActive : null,
-  ]);
-
-  const labelStyle = StyleSheet.flatten([
-    styles.label,
-    active ? styles.labelActive : null,
-  ]);
-
-  return (
-    <Link href={href as LinkProps["href"]} asChild>
-      <TouchableOpacity style={itemStyle} activeOpacity={0.8}>
-        <View style={styles.icon}>{icon}</View>
-        <Text style={labelStyle}>{label}</Text>
-      </TouchableOpacity>
-    </Link>
-  );
-}
-
-export const WEB_SIDEBAR_WIDTH = 240;
-
 export default function WebSidebar() {
-  if (Platform.OS !== "web") return null;
-
+  const router = useRouter();
   const pathname = usePathname();
+  const { theme } = useTheme();
+  const { t } = useTranslation();
+  const [unreadCount, setUnreadCount] = useState(0);
 
-  const items: ItemProps[] = [
+  const items: SidebarItem[] = [
     {
-      href: "/feed",
-      label: "Página inicial",
-      icon: <Text style={styles.iconText}>🏠</Text>,
-      active: pathname?.startsWith("/feed") ?? false,
+      key: "feed",
+      label: t("sidebar_home") || "Página inicial",
+      icon: "home-outline",
+      iconActive: "home",
+      route: "/(tabs)/feed",
     },
     {
-      href: "/search",
-      label: "Pesquisa",
-      icon: <Text style={styles.iconText}>🔍</Text>,
-      active: pathname?.startsWith("/search") ?? false,
+      key: "search",
+      label: t("sidebar_search") || "Pesquisa",
+      icon: "search-outline",
+      iconActive: "search",
+      route: "/(tabs)/search",
     },
     {
-      href: "/tribes",
-      label: "Tribos",
-      icon: <Text style={styles.iconText}>👥</Text>,
-      active: pathname?.startsWith("/tribes") ?? false,
+      key: "tribes",
+      label: t("sidebar_tribes") || "Tribos",
+      icon: "people-outline",
+      iconActive: "people",
+      route: "/(tabs)/tribes",
     },
     {
-      href: "/new",
-      label: "Criar",
-      icon: <Text style={styles.iconText}>➕</Text>,
-      active: pathname?.startsWith("/new") ?? false,
+      key: "create",
+      label: t("sidebar_create") || "Criar",
+      icon: "add-circle-outline",
+      iconActive: "add-circle",
+      route: "/capture",
     },
     {
-      href: "/conversations",
-      label: "Conversas",
-      icon: <Text style={styles.iconText}>💬</Text>,
-      active: pathname?.startsWith("/conversations") ?? false,
+      key: "notifications",
+      label: t("sidebar_notifications") || "Notificações",
+      icon: "heart-outline",
+      iconActive: "heart",
+      route: "/notifications",
     },
     {
-      href: "/profile",
-      label: "Perfil",
-      icon: <Text style={styles.iconText}>👤</Text>,
-      active: pathname?.startsWith("/profile") ?? false,
+      key: "conversations",
+      label: t("sidebar_conversations") || "Conversas",
+      icon: "chatbubble-ellipses-outline",
+      iconActive: "chatbubble-ellipses",
+      route: "/(tabs)/conversations",
+    },
+    {
+      key: "profile",
+      label: t("sidebar_profile") || "Perfil",
+      icon: "person-outline",
+      iconActive: "person",
+      route: "/(tabs)/profile",
     },
   ];
 
-  return (
-    <View style={styles.wrapper}>
-      <View style={styles.sidebar}>
-        <Text style={styles.logo}>Lupyy</Text>
+  const fetchUnread = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.rpc("get_unread_notifications_count");
+      if (!error && typeof data === "number") setUnreadCount(data);
+    } catch {}
+  }, []);
 
-        <View style={styles.items}>
-          {items.map((item) => (
-            <SidebarItem
-              key={item.href}
-              href={item.href}
-              label={item.label}
-              icon={item.icon}
-              active={item.active}
-            />
-          ))}
-        </View>
+  useEffect(() => {
+    fetchUnread();
+    const interval = setInterval(fetchUnread, 30000);
+    return () => clearInterval(interval);
+  }, [fetchUnread]);
+
+  const isActive = (item: SidebarItem) => {
+    if (item.key === "feed") return pathname.includes("/feed");
+    if (item.key === "search") return pathname.includes("/search");
+    if (item.key === "tribes") return pathname.includes("/tribes");
+    if (item.key === "conversations") return pathname.includes("/conversations");
+    if (item.key === "profile") return pathname.includes("/profile");
+    if (item.key === "notifications") return pathname.includes("/notifications");
+    if (item.key === "create") return pathname.includes("/capture");
+    return false;
+  };
+
+  return (
+    <View
+      style={[
+        styles.container,
+        {
+          backgroundColor: theme.colors.background,
+          borderRightColor: theme.colors.border,
+        },
+      ]}
+    >
+      {/* Logo */}
+      <TouchableOpacity
+        style={styles.logoContainer}
+        onPress={() => router.push("/(tabs)/feed")}
+        activeOpacity={0.8}
+      >
+        <Text style={[styles.logo, { color: theme.colors.primary }]}>
+          Lupyy
+        </Text>
+      </TouchableOpacity>
+
+      {/* Nav items */}
+      <View style={styles.navList}>
+        {items.map((item) => {
+          const active = isActive(item);
+          return (
+            <TouchableOpacity
+              key={item.key}
+              style={[
+                styles.navItem,
+                active && {
+                  backgroundColor: theme.colors.surface + "20",
+                },
+              ]}
+              onPress={() => {
+                if (item.key === "notifications") {
+                  setUnreadCount(0);
+                }
+                router.push(item.route as any);
+              }}
+              activeOpacity={0.7}
+            >
+              <View style={styles.iconWrapper}>
+                <Ionicons
+                  name={active ? item.iconActive : item.icon}
+                  size={24}
+                  color={active ? theme.colors.primary : theme.colors.text}
+                />
+                {item.key === "notifications" && unreadCount > 0 && (
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>
+                      {unreadCount > 99 ? "99+" : unreadCount}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <Text
+                style={[
+                  styles.navLabel,
+                  {
+                    color: active ? theme.colors.primary : theme.colors.text,
+                    fontWeight: active ? "700" : "400",
+                  },
+                ]}
+              >
+                {item.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  wrapper: {
-    position: "fixed" as any,
+  container: {
+    width: WEB_SIDEBAR_WIDTH,
+    position: Platform.OS === "web" ? ("fixed" as any) : "absolute",
     left: 0,
     top: 0,
     bottom: 0,
-    width: WEB_SIDEBAR_WIDTH,
-    backgroundColor: Colors.surface,
     borderRightWidth: 1,
-    borderRightColor: Colors.border,
-    paddingTop: 16,
-    paddingBottom: 16,
+    paddingTop: 24,
     paddingHorizontal: 12,
     zIndex: 100,
   },
-  sidebar: {
-    flex: 1,
+  logoContainer: {
+    paddingHorizontal: 12,
+    paddingBottom: 28,
   },
   logo: {
-    color: Colors.text,
-    fontSize: 24,
+    fontSize: 26,
     fontWeight: "800",
-    marginBottom: 24,
+    letterSpacing: -0.5,
   },
-  items: {
-    // sem gap para evitar bug no web; usamos margin nos itens
+  navList: {
+    gap: 2,
   },
-  item: {
+  navItem: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 10,
-    paddingHorizontal: 10,
-    borderRadius: 999,
-    marginBottom: 4,
+    gap: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 10,
   },
-  itemActive: {
-    backgroundColor: Colors.background,
+  iconWrapper: {
+    position: "relative",
+    width: 24,
+    height: 24,
   },
-  icon: {
-    width: 26,
+  badge: {
+    position: "absolute",
+    top: -6,
+    right: -10,
+    backgroundColor: "#FF3B30",
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4,
   },
-  iconText: {
-    fontSize: 18,
-  },
-  label: {
-    color: Colors.text,
-    fontSize: 14,
-    marginLeft: 8,
-    fontWeight: "500",
-  },
-  labelActive: {
+  badgeText: {
+    color: "#fff",
+    fontSize: 10,
     fontWeight: "700",
+  },
+  navLabel: {
+    fontSize: 15,
+    letterSpacing: -0.2,
   },
 });

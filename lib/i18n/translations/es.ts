@@ -313,6 +313,15 @@ const es: Record<TranslationKeys, string> = {
   "comments.user": "usuario",
   "comments.addPlaceholder": "Agregar un comentario...",
   "comments.send": "Enviar",
+
+  // Sidebar (desktop)
+  "sidebar_home": "Inicio",
+  "sidebar_search": "Buscar",
+  "sidebar_tribes": "Tribus",
+  "sidebar_create": "Crear",
+  "sidebar_notifications": "Notificaciones",
+  "sidebar_conversations": "Conversaciones",
+  "sidebar_profile": "Perfil",
 };
 
 export default es;

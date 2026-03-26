@@ -312,6 +312,15 @@ const pt = {
   "comments.user": "usuário",
   "comments.addPlaceholder": "Adicionar comentário...",
   "comments.send": "Enviar",
+
+  // Sidebar (desktop)
+  "sidebar_home": "Página inicial",
+  "sidebar_search": "Pesquisa",
+  "sidebar_tribes": "Tribos",
+  "sidebar_create": "Criar",
+  "sidebar_notifications": "Notificações",
+  "sidebar_conversations": "Conversas",
+  "sidebar_profile": "Perfil",
 };
 
 export type TranslationKeys = keyof typeof pt;

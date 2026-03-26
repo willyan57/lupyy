@@ -1711,6 +1711,31 @@ export default function Profile() {
         desc: t("settings.comingSoonDesc"),
       };
 
+      // Special sub-screens with real content
+      if (settingsSubScreen === "appearance") {
+        return (
+          <SafeAreaView style={[styles.screen, { backgroundColor: theme.colors.background }]}>
+            <View style={styles.settingsHeader}>
+              <TouchableOpacity
+                onPress={() => setSettingsSubScreen(null)}
+                activeOpacity={0.7}
+                style={styles.settingsBackBtn}
+              >
+                <Text style={[styles.settingsBackIcon, { color: theme.colors.text }]}>←</Text>
+              </TouchableOpacity>
+              <Text style={[styles.settingsTitle, { color: theme.colors.text }]}>{info.title}</Text>
+              <View style={{ width: 40 }} />
+            </View>
+            <ScrollView contentContainerStyle={{ padding: 20 }} showsVerticalScrollIndicator={false}>
+              <Text style={{ color: theme.colors.textMuted, fontSize: 14, marginBottom: 16, lineHeight: 20 }}>
+                {t("settings.appearanceDesc")}
+              </Text>
+              <ThemeSelector />
+            </ScrollView>
+          </SafeAreaView>
+        );
+      }
+
       return (
         <SafeAreaView style={[styles.screen, { backgroundColor: theme.colors.background }]}>
           <View style={styles.settingsHeader}>
@@ -1748,7 +1773,7 @@ export default function Profile() {
             },
           },
           { icon: "🔒", label: t("settings.accountPrivacy"), onPress: () => setSettingsSubScreen("privacy") },
-          { icon: "🔔", label: t("settings.notifications"), onPress: () => setSettingsSubScreen("notifications") },
+          { icon: "🔔", label: t("settings.notifications"), onPress: () => { setSettingsVisible(false); router.push("/notifications"); } },
           { icon: "🛡️", label: t("settings.security"), onPress: () => setSettingsSubScreen("security") },
         ],
       },
@@ -1777,7 +1802,7 @@ export default function Profile() {
             },
           },
           { icon: "⭐", label: t("settings.closeFriends"), onPress: () => setSettingsSubScreen("close_friends") },
-          { icon: "👥", label: t("settings.tribes"), onPress: () => setSettingsSubScreen("tribes") },
+          { icon: "👥", label: t("settings.tribes"), onPress: () => { setSettingsVisible(false); router.push("/tribes"); } },
           { icon: "🎯", label: t("settings.discoveryPrefs"), onPress: () => setSettingsSubScreen("discovery") },
         ],
       },
@@ -1795,75 +1820,92 @@ export default function Profile() {
           { icon: "🎨", label: t("settings.appearance"), onPress: () => setSettingsSubScreen("appearance") },
           { icon: "⏱️", label: t("settings.timeManagement"), onPress: () => setSettingsSubScreen("time_mgmt") },
           { icon: "❓", label: t("settings.helpSupport"), onPress: () => setSettingsSubScreen("help") },
-          { icon: "📋", label: t("settings.privacyPolicy"), onPress: () => setSettingsSubScreen("privacy_policy") },
-          { icon: "📜", label: t("settings.termsOfUse"), onPress: () => setSettingsSubScreen("terms") },
+          { icon: "📋", label: t("settings.privacyPolicy"), onPress: () => { setSettingsVisible(false); router.push("/privacy"); } },
+          { icon: "📜", label: t("settings.termsOfUse"), onPress: () => { setSettingsVisible(false); router.push("/terms"); } },
         ],
       },
     ];
 
     return (
-      <SafeAreaView style={[styles.screen, { backgroundColor: theme.colors.background }]}>
-        {/* Header */}
-        <View style={styles.settingsHeader}>
-          <TouchableOpacity
-            onPress={() => setSettingsVisible(false)}
-            activeOpacity={0.7}
-            style={styles.settingsBackBtn}
-          >
-            <Text style={[styles.settingsBackIcon, { color: theme.colors.text }]}>←</Text>
-          </TouchableOpacity>
-          <Text style={[styles.settingsTitle, { color: theme.colors.text }]}>{t("settings.title")}</Text>
-          <View style={{ width: 40 }} />
-        </View>
-
-        {/* Search */}
-        <View style={styles.settingsSearchWrap}>
-          <View style={[styles.settingsSearchBox, { backgroundColor: theme.colors.surface }]}>
-            <Text style={[styles.settingsSearchIcon, { color: theme.colors.textMuted }]}>🔍</Text>
-            <Text style={[styles.settingsSearchPlaceholder, { color: theme.colors.textMuted }]}>{t("settings.search")}</Text>
-          </View>
-        </View>
-
-        <ScrollView contentContainerStyle={styles.settingsScroll} showsVerticalScrollIndicator={false}>
-          {settingsSections.map((section, sIdx) => (
-            <View key={sIdx} style={styles.settingsSection}>
-              <Text style={[styles.settingsSectionTitle, { color: theme.colors.primary || "#a855f7" }]}>
-                {section.title}
-              </Text>
-              {section.items.map((item, iIdx) => (
-                <TouchableOpacity
-                  key={iIdx}
-                  style={[styles.settingsRow, { borderBottomColor: "rgba(255,255,255,0.06)" }]}
-                  activeOpacity={0.6}
-                  onPress={item.onPress}
-                >
-                  <Text style={styles.settingsRowIcon}>{item.icon}</Text>
-                  <Text style={[styles.settingsRowLabel, { color: theme.colors.text }]}>{item.label}</Text>
-                  <Text style={[styles.settingsRowChevron, { color: theme.colors.textMuted }]}>›</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          ))}
-
-          {/* Sair */}
-          <View style={styles.settingsSection}>
+      <>
+        <SafeAreaView style={[styles.screen, { backgroundColor: theme.colors.background }]}>
+          {/* Header */}
+          <View style={styles.settingsHeader}>
             <TouchableOpacity
-              style={[styles.settingsRow, { borderBottomColor: "transparent" }]}
-              activeOpacity={0.6}
-              onPress={() => {
-                setSettingsVisible(false);
-                signOut();
-              }}
+              onPress={() => setSettingsVisible(false)}
+              activeOpacity={0.7}
+              style={styles.settingsBackBtn}
             >
-              <Text style={styles.settingsRowIcon}>🚪</Text>
-              <Text style={[styles.settingsRowLabel, { color: "#ff6b6b" }]}>{t("settings.logout")}</Text>
-              <Text style={[styles.settingsRowChevron, { color: "#ff6b6b" }]}>›</Text>
+              <Text style={[styles.settingsBackIcon, { color: theme.colors.text }]}>←</Text>
             </TouchableOpacity>
+            <Text style={[styles.settingsTitle, { color: theme.colors.text }]}>{t("settings.title")}</Text>
+            <View style={{ width: 40 }} />
           </View>
 
-          <View style={{ height: 80 }} />
-        </ScrollView>
-      </SafeAreaView>
+          {/* Search */}
+          <View style={styles.settingsSearchWrap}>
+            <View style={[styles.settingsSearchBox, { backgroundColor: theme.colors.surface }]}>
+              <Text style={[styles.settingsSearchIcon, { color: theme.colors.textMuted }]}>🔍</Text>
+              <Text style={[styles.settingsSearchPlaceholder, { color: theme.colors.textMuted }]}>{t("settings.search")}</Text>
+            </View>
+          </View>
+
+          <ScrollView contentContainerStyle={styles.settingsScroll} showsVerticalScrollIndicator={false}>
+            {settingsSections.map((section, sIdx) => (
+              <View key={sIdx} style={styles.settingsSection}>
+                <Text style={[styles.settingsSectionTitle, { color: theme.colors.primary || "#a855f7" }]}>
+                  {section.title}
+                </Text>
+                {section.items.map((item, iIdx) => (
+                  <TouchableOpacity
+                    key={iIdx}
+                    style={[styles.settingsRow, { borderBottomColor: "rgba(255,255,255,0.06)" }]}
+                    activeOpacity={0.6}
+                    onPress={item.onPress}
+                  >
+                    <Text style={styles.settingsRowIcon}>{item.icon}</Text>
+                    <Text style={[styles.settingsRowLabel, { color: theme.colors.text }]}>{item.label}</Text>
+                    <Text style={[styles.settingsRowChevron, { color: theme.colors.textMuted }]}>›</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ))}
+
+            {/* Sair */}
+            <View style={styles.settingsSection}>
+              <TouchableOpacity
+                style={[styles.settingsRow, { borderBottomColor: "transparent" }]}
+                activeOpacity={0.6}
+                onPress={() => {
+                  setSettingsVisible(false);
+                  signOut();
+                }}
+              >
+                <Text style={styles.settingsRowIcon}>🚪</Text>
+                <Text style={[styles.settingsRowLabel, { color: "#ff6b6b" }]}>{t("settings.logout")}</Text>
+                <Text style={[styles.settingsRowChevron, { color: "#ff6b6b" }]}>›</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ height: 80 }} />
+          </ScrollView>
+        </SafeAreaView>
+
+        {/* Modals rendered on top of settings */}
+        <PeopleListSheet
+          visible={peopleSheetVisible}
+          mode={peopleSheetMode}
+          profileId={userId ?? ""}
+          isOwnProfile={isOwnProfile}
+          myRelationshipStatus={myRelationshipStatus}
+          onClose={() => setPeopleSheetVisible(false)}
+          onOpenProfile={(targetId) => {
+            setPeopleSheetVisible(false);
+            setSettingsVisible(false);
+            handlePressUser(targetId);
+          }}
+        />
+      </>
     );
   }
 

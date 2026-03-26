@@ -591,18 +591,27 @@ export default function Feed() {
         data={posts}
         keyExtractor={(it) => String(it.id)}
         ListHeaderComponent={
-          <View>
+           <View>
             <View style={styles.topBar}>
-              <Text style={styles.logoText}>Lupyy</Text>
-              <TouchableOpacity
-                activeOpacity={0.8}
-                onPress={() => {
-                  if (!isDesktopWeb) router.push("/capture");
-                  else router.push("/new");
-                }}
-              >
-                <Ionicons name="add-circle-outline" size={26} color={theme.colors.primary} />
-              </TouchableOpacity>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                {!isDesktopWeb && (
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    onPress={() => router.push("/capture")}
+                  >
+                    <Ionicons name="add-circle-outline" size={26} color={theme.colors.primary} />
+                  </TouchableOpacity>
+                )}
+                <Text style={[styles.logoText, { color: theme.colors.text }]}>Lupyy</Text>
+              </View>
+              {!isDesktopWeb && (
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => router.push("/notifications")}
+                >
+                  <Ionicons name="heart-outline" size={26} color={theme.colors.text} />
+                </TouchableOpacity>
+              )}
             </View>
             <StoriesBar data={storyUsers} onPressStory={handlePressStory} />
           </View>
