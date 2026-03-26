@@ -34,7 +34,7 @@ export default function PrivacyScreen() {
         <View style={styles.heroTop}>
           <Text style={styles.kicker}>Lupyy • Política de Privacidade</Text>
           <Text style={styles.title}>Política de Privacidade</Text>
-          <Text style={styles.meta}>Última atualização: 07 de janeiro de 2026</Text>
+          <Text style={styles.meta}>Última atualização: 26 de março de 2026</Text>
         </View>
 
         <View style={styles.heroCard}>
@@ -69,7 +69,7 @@ export default function PrivacyScreen() {
 
       <Section title="2. Dados que coletamos">
         <Text style={styles.h3}>2.1. Dados fornecidos por você</Text>
-        <Bullet>Cadastro e autenticação: e-mail, senha (armazenada de forma segura pelos provedores), e dados necessários para login.</Bullet>
+        <Bullet>Cadastro e autenticação: e-mail, senha (armazenada de forma segura pelos provedores), data de nascimento e dados necessários para login.</Bullet>
         <Bullet>Perfil: nome, username, bio, foto/avatar e preferências do app.</Bullet>
         <Bullet>Conteúdo e interações: publicações, comentários, curtidas, reações, mensagens e denúncias.</Bullet>
 
@@ -180,18 +180,53 @@ export default function PrivacyScreen() {
       </Section>
 
       <Section title="11. Privacidade de crianças e adolescentes">
-        <Text style={styles.text}>
-          O Lupyy não é direcionado a crianças. Se identificarmos coleta indevida de
-          dados de crianças sem autorização adequada, poderemos remover o conteúdo e
-          encerrar a conta correspondente.
-        </Text>
+        <View style={styles.highlightBox}>
+          <Text style={styles.highlightTitle}>Lei nº 15.211/2025 — Estatuto Digital</Text>
+          <Text style={styles.highlightText}>
+            Em conformidade com a Lei nº 15.211/2025 (Estatuto Digital da Criança e do
+            Adolescente) e demais normas aplicáveis, o Lupyy adota as seguintes práticas
+            para proteção de menores:
+          </Text>
+          <Bullet>
+            <Text style={styles.text}>
+              O Lupyy não é direcionado a crianças menores de 16 anos. A data de nascimento
+              é verificada no momento do cadastro.
+            </Text>
+          </Bullet>
+          <Bullet>
+            <Text style={styles.text}>
+              Dados de Usuários menores de 18 anos recebem tratamento com proteção reforçada,
+              incluindo restrições de visibilidade e compartilhamento.
+            </Text>
+          </Bullet>
+          <Bullet>
+            <Text style={styles.text}>
+              O tratamento de dados de menores de 18 anos é realizado com base no melhor
+              interesse da criança e do adolescente, conforme Art. 14 da LGPD e a legislação
+              específica de proteção digital.
+            </Text>
+          </Bullet>
+          <Bullet>
+            <Text style={styles.text}>
+              Se identificarmos coleta indevida de dados de crianças sem autorização adequada,
+              poderemos remover o conteúdo e encerrar a conta correspondente, além de notificar
+              as autoridades competentes quando exigido por lei.
+            </Text>
+          </Bullet>
+          <Bullet>
+            <Text style={styles.text}>
+              Responsáveis legais podem solicitar acesso, correção ou exclusão dos dados de
+              menores sob sua tutela mediante comprovação de identidade.
+            </Text>
+          </Bullet>
+        </View>
       </Section>
 
       <Section title="12. Alterações desta Política">
         <Text style={styles.text}>
           Podemos atualizar esta Política periodicamente. Quando houver mudanças
-          relevantes, poderemos notificar por meios razoáveis. A data de “última
-          atualização” indica quando esta versão entrou em vigor.
+          relevantes, poderemos notificar por meios razoáveis. A data de "última
+          atualização" indica quando esta versão entrou em vigor.
         </Text>
       </Section>
 
@@ -201,10 +236,6 @@ export default function PrivacyScreen() {
           ou exercício de direitos, entre em contato:
         </Text>
         <Text style={styles.textStrong}>privacidade@lupyy.com</Text>
-        <Text style={styles.textMutedSmall}>
-          Se este e-mail ainda não estiver ativo, substitua pelo seu e-mail oficial assim
-          que disponível.
-        </Text>
       </Section>
 
       <View style={styles.footer}>
@@ -216,7 +247,7 @@ export default function PrivacyScreen() {
             Termos de Uso
           </Link>
         </View>
-        <Text style={styles.footerNote}>© 2026 Lupyy</Text>
+        <Text style={styles.footerNote}>© 2026 Lupyy — Todos os direitos reservados</Text>
       </View>
     </ScrollView>
   );
@@ -258,7 +289,26 @@ const styles = StyleSheet.create({
 
   text: { color: Colors.textMuted, fontSize: 14, lineHeight: 21 },
   textStrong: { color: Colors.text, fontSize: 14, fontWeight: "900", lineHeight: 21 },
-  textMutedSmall: { color: Colors.textMuted, fontSize: 12, lineHeight: 18 },
+
+  highlightBox: {
+    borderRadius: 14,
+    padding: 14,
+    backgroundColor: "rgba(124,58,237,0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(124,58,237,0.20)",
+    gap: 8,
+  },
+  highlightTitle: {
+    color: "#B794F4",
+    fontSize: 15,
+    fontWeight: "900",
+    marginBottom: 2,
+  },
+  highlightText: {
+    color: Colors.textMuted,
+    fontSize: 14,
+    lineHeight: 21,
+  },
 
   bulletRow: { flexDirection: "row", gap: 10, alignItems: "flex-start" },
   bulletDot: { color: Colors.brandEnd, fontSize: 18, lineHeight: 21, fontWeight: "900" },

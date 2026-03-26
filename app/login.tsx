@@ -25,41 +25,13 @@ export default function LoginScreen() {
 
   function runShake() {
     Animated.sequence([
-      Animated.timing(shakeAnim, {
-        toValue: 10,
-        duration: 50,
-        useNativeDriver: true,
-      }),
-      Animated.timing(shakeAnim, {
-        toValue: -10,
-        duration: 50,
-        useNativeDriver: true,
-      }),
-      Animated.timing(shakeAnim, {
-        toValue: 8,
-        duration: 50,
-        useNativeDriver: true,
-      }),
-      Animated.timing(shakeAnim, {
-        toValue: -8,
-        duration: 50,
-        useNativeDriver: true,
-      }),
-      Animated.timing(shakeAnim, {
-        toValue: 4,
-        duration: 50,
-        useNativeDriver: true,
-      }),
-      Animated.timing(shakeAnim, {
-        toValue: -4,
-        duration: 50,
-        useNativeDriver: true,
-      }),
-      Animated.timing(shakeAnim, {
-        toValue: 0,
-        duration: 50,
-        useNativeDriver: true,
-      }),
+      Animated.timing(shakeAnim, { toValue: 10, duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: -10, duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: 8, duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: -8, duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: 4, duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: -4, duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: 0, duration: 50, useNativeDriver: true }),
     ]).start();
   }
 
@@ -120,14 +92,13 @@ export default function LoginScreen() {
             />
           </View>
           <Text style={styles.appName}>Lupyy</Text>
+          <Text style={styles.tagline}>Compartilhe momentos. Conecte pessoas.</Text>
         </View>
 
         <Animated.View
           style={[
             styles.form,
-            {
-              transform: [{ translateX: shakeAnim }],
-            },
+            { transform: [{ translateX: shakeAnim }] },
           ]}
         >
           <TextInput
@@ -137,10 +108,7 @@ export default function LoginScreen() {
             autoCapitalize="none"
             keyboardType="email-address"
             value={email}
-            onChangeText={(text) => {
-              clearError();
-              setEmail(text);
-            }}
+            onChangeText={(text) => { clearError(); setEmail(text); }}
           />
 
           <TextInput
@@ -149,10 +117,7 @@ export default function LoginScreen() {
             style={[styles.input, hasError && styles.inputError]}
             secureTextEntry
             value={password}
-            onChangeText={(text) => {
-              clearError();
-              setPassword(text);
-            }}
+            onChangeText={(text) => { clearError(); setPassword(text); }}
           />
 
           {hasError ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
@@ -178,10 +143,24 @@ export default function LoginScreen() {
 
           <Link href="/signup" asChild>
             <TouchableOpacity style={styles.linkButton}>
-              <Text style={styles.linkText}>Criar conta</Text>
+              <Text style={styles.linkTextBold}>Criar conta</Text>
             </TouchableOpacity>
           </Link>
         </Animated.View>
+
+        {/* Legal links */}
+        <View style={styles.legalFooter}>
+          <View style={styles.legalRow}>
+            <Link href="/terms" style={styles.legalLink}>
+              Termos de Uso
+            </Link>
+            <Text style={styles.legalSep}>·</Text>
+            <Link href="/privacy" style={styles.legalLink}>
+              Privacidade
+            </Link>
+          </View>
+          <Text style={styles.copyright}>© 2026 Lupyy</Text>
+        </View>
       </View>
     </KeyboardAvoidingView>
   );
@@ -211,6 +190,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.06)",
   },
   logoImage: {
     width: 80,
@@ -221,18 +202,25 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: Colors.text,
   },
+  tagline: {
+    fontSize: 14,
+    color: Colors.textMuted,
+    marginTop: 6,
+    fontWeight: "500",
+  },
   form: {
     width: "100%",
     gap: 12,
   },
   input: {
     backgroundColor: Colors.surface,
-    borderRadius: 8,
+    borderRadius: 14,
     paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingVertical: 15,
     color: Colors.text,
     borderWidth: 1,
     borderColor: Colors.border,
+    fontSize: 16,
   },
   inputError: {
     borderColor: "#ff5a67",
@@ -248,11 +236,12 @@ const styles = StyleSheet.create({
     marginTop: -2,
     marginBottom: 2,
     paddingHorizontal: 4,
+    textAlign: "center",
   },
   button: {
     marginTop: 12,
-    borderRadius: 8,
-    paddingVertical: 14,
+    borderRadius: 14,
+    paddingVertical: 15,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: Colors.brandStart,
@@ -262,8 +251,9 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: "#fff",
-    fontWeight: "700",
+    fontWeight: "800",
     fontSize: 16,
+    letterSpacing: 1,
   },
   linkButton: {
     paddingVertical: 6,
@@ -272,5 +262,34 @@ const styles = StyleSheet.create({
   linkText: {
     color: Colors.brandEnd,
     fontSize: 14,
+  },
+  linkTextBold: {
+    color: Colors.brandEnd,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  legalFooter: {
+    marginTop: 32,
+    alignItems: "center",
+    gap: 6,
+  },
+  legalRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  legalLink: {
+    color: Colors.textMuted,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  legalSep: {
+    color: Colors.textMuted,
+    fontSize: 12,
+  },
+  copyright: {
+    color: "rgba(255,255,255,0.2)",
+    fontSize: 11,
+    fontWeight: "600",
   },
 });

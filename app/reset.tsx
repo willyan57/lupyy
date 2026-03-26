@@ -29,6 +29,25 @@ type NoticeState = {
 
 const RECOVERY_FLAG = "lupyy_password_recovery_pending";
 
+function getPasswordError(pass: string): string | null {
+  if (!pass || pass.length < 8) {
+    return "A senha precisa ter pelo menos 8 caracteres.";
+  }
+  if (!/[a-z]/.test(pass)) {
+    return "A senha precisa ter pelo menos uma letra minúscula.";
+  }
+  if (!/[A-Z]/.test(pass)) {
+    return "A senha precisa ter pelo menos uma letra maiúscula.";
+  }
+  if (!/[0-9]/.test(pass)) {
+    return "A senha precisa ter pelo menos um número.";
+  }
+  if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?`~]/.test(pass)) {
+    return "A senha precisa ter pelo menos um símbolo especial (!@#$%&*...).";
+  }
+  return null;
+}
+
 export default function ResetScreen() {
   const router = useRouter();
 
@@ -58,6 +77,14 @@ export default function ResetScreen() {
     title: "",
     message: "",
   });
+
+  // Password strength indicators
+  const hasMinLength = pass1.length >= 8;
+  const hasLower = /[a-z]/.test(pass1);
+  const hasUpper = /[A-Z]/.test(pass1);
+  const hasNumber = /[0-9]/.test(pass1);
+  const hasSymbol = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?`~]/.test(pass1);
+  const passwordsMatch = pass1.length > 0 && pass2.length > 0 && pass1 === pass2;
 
   const redirectTo = useMemo(() => {
     if (Platform.OS === "web") return "https://lupyy.com/reset";
@@ -124,11 +151,6 @@ export default function ResetScreen() {
     setPass2("");
   }
 
-  /**
-   * Validates that a real recovery session exists in Supabase.
-   * Returns true only if there's an active session.
-   * This prevents relying solely on localStorage flags.
-   */
   async function hasValidRecoverySession(): Promise<boolean> {
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -171,8 +193,8 @@ export default function ResetScreen() {
         `Enviamos um link de recuperação para ${normalizedEmail}. Use somente o e-mail mais recente.`
       );
       showNotice(
-        "Recovery email sent",
-        `We sent a password recovery link to ${normalizedEmail}. Open the newest email and tap the link to continue.`
+        "E-mail enviado",
+        `Enviamos um link de recuperação para ${normalizedEmail}. Abra o e-mail mais recente e toque no link para continuar.`
       );
     } catch (e: any) {
       setEmailError(true);
@@ -226,9 +248,6 @@ export default function ResetScreen() {
         rawUrl.includes("access_token=");
 
       if (!looksLikeRecoveryLink) {
-        // DO NOT fall back to localStorage flag here.
-        // If the URL has no recovery params, this function should do nothing.
-        // The useEffect will handle persisted flag validation with session check.
         return;
       }
 
@@ -283,18 +302,14 @@ export default function ResetScreen() {
             window.location.hash.includes("access_token="));
 
         if (hasRecoveryParams) {
-          // URL has recovery params — process them
           enterResetMode("Validando seu link de recuperação...");
         } else if (hasPersistedRecoveryFlag()) {
-          // Flag exists but NO recovery params in URL.
-          // Must validate that a real session exists before entering reset mode.
           const hasSession = await hasValidRecoverySession();
           if (cancelled) return;
 
           if (hasSession) {
             enterResetMode("Continue definindo sua nova senha.");
           } else {
-            // No valid session — flag is stale. Clean up.
             returnToRequestMode();
             clearRecoveryFlow();
           }
@@ -311,12 +326,10 @@ export default function ResetScreen() {
         enterResetMode("Link validado. Agora defina sua nova senha.");
       }
 
-      // If user signs out (manually or after password change), clear recovery state
       if (event === "SIGNED_OUT") {
         clearRecoveryFlow();
       }
 
-      // If user signs in normally (not recovery), clear recovery flags
       if (event === "SIGNED_IN" && mode !== "reset") {
         clearRecoveryFlow();
       }
@@ -346,9 +359,10 @@ export default function ResetScreen() {
       clearBanner();
       setPasswordError(false);
 
-      if (!pass1 || pass1.length < 6) {
+      const passError = getPasswordError(pass1);
+      if (passError) {
         setPasswordError(true);
-        showBanner("error", "Use pelo menos 6 caracteres na nova senha.");
+        showBanner("error", passError);
         return;
       }
 
@@ -378,8 +392,8 @@ export default function ResetScreen() {
 
       showBanner("success", "Senha alterada com sucesso. Faça login com a nova senha.");
       showNotice(
-        "Password updated",
-        "Your password has been changed successfully. Please sign in again with your new password."
+        "Senha atualizada",
+        "Sua senha foi alterada com sucesso. Faça login novamente com a nova senha."
       );
 
       setTimeout(() => {
@@ -489,7 +503,7 @@ export default function ResetScreen() {
               <>
                 <Text style={styles.label}>Nova senha</Text>
                 <TextInput
-                  placeholder="Pelo menos 6 caracteres"
+                  placeholder="Crie uma senha forte"
                   placeholderTextColor={Colors.textMuted}
                   secureTextEntry
                   value={pass1}
@@ -500,6 +514,25 @@ export default function ResetScreen() {
                   }}
                   style={[styles.input, passwordError && styles.inputError]}
                 />
+
+                {/* Password strength indicators */}
+                <View style={styles.requirementsContainer}>
+                  <Text style={[styles.requirementText, hasMinLength && styles.requirementOk]}>
+                    {hasMinLength ? "✓" : "○"} Pelo menos 8 caracteres
+                  </Text>
+                  <Text style={[styles.requirementText, hasLower && styles.requirementOk]}>
+                    {hasLower ? "✓" : "○"} Pelo menos uma letra minúscula
+                  </Text>
+                  <Text style={[styles.requirementText, hasUpper && styles.requirementOk]}>
+                    {hasUpper ? "✓" : "○"} Pelo menos uma letra maiúscula
+                  </Text>
+                  <Text style={[styles.requirementText, hasNumber && styles.requirementOk]}>
+                    {hasNumber ? "✓" : "○"} Pelo menos um número
+                  </Text>
+                  <Text style={[styles.requirementText, hasSymbol && styles.requirementOk]}>
+                    {hasSymbol ? "✓" : "○"} Pelo menos um símbolo (!@#$%&*...)
+                  </Text>
+                </View>
 
                 <Text style={styles.label}>Confirmar senha</Text>
                 <TextInput
@@ -514,6 +547,12 @@ export default function ResetScreen() {
                   }}
                   style={[styles.input, passwordError && styles.inputError]}
                 />
+
+                {pass2.length > 0 && (
+                  <Text style={[styles.requirementText, passwordsMatch ? styles.requirementOk : styles.requirementFail]}>
+                    {passwordsMatch ? "✓ Senhas coincidem" : "✗ Senhas não coincidem"}
+                  </Text>
+                )}
 
                 <TouchableOpacity
                   onPress={handleChangePassword}
@@ -658,15 +697,9 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontWeight: "600",
   },
-  bannerTextError: {
-    color: "#FF8A94",
-  },
-  bannerTextSuccess: {
-    color: "#86EFAC",
-  },
-  bannerTextInfo: {
-    color: "#8BE9FD",
-  },
+  bannerTextError: { color: "#FF8A94" },
+  bannerTextSuccess: { color: "#86EFAC" },
+  bannerTextInfo: { color: "#8BE9FD" },
   label: {
     color: "#E5E7EB",
     fontSize: 13,
@@ -683,14 +716,30 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.08)",
     fontSize: 16,
-    marginBottom: 14,
+    marginBottom: 6,
   },
   inputError: {
     borderColor: "rgba(255, 90, 103, 0.75)",
     backgroundColor: "rgba(255, 90, 103, 0.05)",
   },
+  requirementsContainer: {
+    marginTop: 2,
+    marginBottom: 8,
+    gap: 2,
+  },
+  requirementText: {
+    color: "#6B7280",
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  requirementOk: {
+    color: "#4ade80",
+  },
+  requirementFail: {
+    color: "#f87171",
+  },
   button: {
-    marginTop: 6,
+    marginTop: 10,
     borderRadius: 16,
     paddingVertical: 17,
     alignItems: "center",

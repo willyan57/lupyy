@@ -34,7 +34,7 @@ export default function TermsScreen() {
         <View style={styles.heroTop}>
           <Text style={styles.kicker}>Lupyy • Termos de Uso</Text>
           <Text style={styles.title}>Termos de Uso</Text>
-          <Text style={styles.meta}>Última atualização: 07 de janeiro de 2026</Text>
+          <Text style={styles.meta}>Última atualização: 26 de março de 2026</Text>
         </View>
 
         <View style={styles.heroCard}>
@@ -56,29 +56,71 @@ export default function TermsScreen() {
 
       <Section title="1. Definições">
         <Bullet>
-          <Text style={styles.textStrong}>“Lupyy”</Text> é a plataforma social
+          <Text style={styles.textStrong}>"Lupyy"</Text> é a plataforma social
           (aplicativo, website e serviços relacionados).
         </Bullet>
         <Bullet>
-          <Text style={styles.textStrong}>“Usuário”</Text> é qualquer pessoa que
+          <Text style={styles.textStrong}>"Usuário"</Text> é qualquer pessoa que
           acessa ou utiliza o Lupyy.
         </Bullet>
         <Bullet>
-          <Text style={styles.textStrong}>“Conteúdo”</Text> inclui textos, fotos,
+          <Text style={styles.textStrong}>"Conteúdo"</Text> inclui textos, fotos,
           vídeos, áudios, comentários, mensagens, reações, links e outros materiais.
         </Bullet>
         <Bullet>
-          <Text style={styles.textStrong}>“Conta”</Text> é o cadastro do Usuário
+          <Text style={styles.textStrong}>"Conta"</Text> é o cadastro do Usuário
           para autenticação e uso de recursos do Lupyy.
         </Bullet>
       </Section>
 
-      <Section title="2. Elegibilidade e conta">
+      <Section title="2. Elegibilidade, conta e proteção de menores">
         <Text style={styles.text}>
-          Você declara que tem capacidade legal para aceitar estes Termos. Se você
-          for menor de idade, deve usar o Lupyy apenas com autorização e supervisão
-          de um responsável legal, conforme a legislação aplicável.
+          Você declara que tem capacidade legal para aceitar estes Termos.
         </Text>
+
+        <View style={styles.highlightBox}>
+          <Text style={styles.highlightTitle}>Proteção de Crianças e Adolescentes</Text>
+          <Text style={styles.highlightText}>
+            Em conformidade com a Lei nº 15.211/2025 (Estatuto Digital da Criança e do
+            Adolescente), o Lupyy adota as seguintes medidas:
+          </Text>
+          <Bullet>
+            <Text style={styles.text}>
+              <Text style={styles.textStrong}>Idade mínima:</Text> é necessário ter pelo menos
+              16 (dezesseis) anos para criar uma conta no Lupyy. Menores de 16 anos somente
+              poderão utilizar a plataforma com autorização expressa e supervisão de responsável legal.
+            </Text>
+          </Bullet>
+          <Bullet>
+            <Text style={styles.text}>
+              <Text style={styles.textStrong}>Verificação de idade:</Text> o Lupyy coleta a data de nascimento
+              durante o cadastro para verificar a elegibilidade do Usuário, podendo adotar mecanismos
+              adicionais de verificação conforme regulamentação aplicável.
+            </Text>
+          </Bullet>
+          <Bullet>
+            <Text style={styles.text}>
+              <Text style={styles.textStrong}>Proteção reforçada:</Text> contas de Usuários menores de 18 anos
+              possuem configurações de privacidade mais restritivas por padrão, incluindo perfil privado,
+              restrições de mensagens diretas de desconhecidos e limitação de recomendações algorítmicas.
+            </Text>
+          </Bullet>
+          <Bullet>
+            <Text style={styles.text}>
+              <Text style={styles.textStrong}>Proibição de exploração:</Text> é estritamente proibido utilizar
+              o Lupyy para explorar, assediar ou colocar em risco crianças e adolescentes. Contas e
+              Conteúdos que violem esta regra serão removidos e denunciados às autoridades competentes.
+            </Text>
+          </Bullet>
+          <Bullet>
+            <Text style={styles.text}>
+              <Text style={styles.textStrong}>Denúncias:</Text> o Lupyy disponibiliza mecanismos de denúncia
+              acessíveis e prioritários para casos envolvendo menores, com análise e resposta em prazo
+              reduzido conforme exigido pela legislação.
+            </Text>
+          </Bullet>
+        </View>
+
         <Text style={styles.text}>
           Você é responsável por manter a confidencialidade das suas credenciais e
           por todas as atividades realizadas na sua Conta. Avise-nos imediatamente
@@ -154,7 +196,7 @@ export default function TermsScreen() {
           Se você acredita que um Conteúdo viola seus direitos (inclusive direitos
           autorais ou imagem), recomendamos que faça uma denúncia dentro da
           plataforma (quando disponível) e/ou entre em contato pelo canal indicado
-          na seção “Contato”.
+          na seção "Contato".
         </Text>
       </Section>
 
@@ -186,8 +228,8 @@ export default function TermsScreen() {
 
       <Section title="10. Isenções e limitações de responsabilidade">
         <Text style={styles.text}>
-          O Lupyy é disponibilizado “no estado em que se encontra” e “conforme
-          disponível”. Embora trabalhemos para oferecer estabilidade e segurança, não
+          O Lupyy é disponibilizado "no estado em que se encontra" e "conforme
+          disponível". Embora trabalhemos para oferecer estabilidade e segurança, não
           garantimos que o Lupyy será ininterrupto ou livre de falhas.
         </Text>
         <Text style={styles.text}>
@@ -238,10 +280,6 @@ export default function TermsScreen() {
           Termos, utilize o canal oficial indicado na plataforma ou envie e-mail para:
         </Text>
         <Text style={styles.textStrong}>contato@lupyy.com</Text>
-        <Text style={styles.textMutedSmall}>
-          Se este e-mail ainda não estiver ativo, substitua pelo seu e-mail oficial assim
-          que disponível.
-        </Text>
       </Section>
 
       <View style={styles.footer}>
@@ -253,7 +291,7 @@ export default function TermsScreen() {
             Política de Privacidade
           </Link>
         </View>
-        <Text style={styles.footerNote}>© 2026 Lupyy</Text>
+        <Text style={styles.footerNote}>© 2026 Lupyy — Todos os direitos reservados</Text>
       </View>
     </ScrollView>
   );
@@ -295,7 +333,26 @@ const styles = StyleSheet.create({
 
   text: { color: Colors.textMuted, fontSize: 14, lineHeight: 21 },
   textStrong: { color: Colors.text, fontSize: 14, fontWeight: "900", lineHeight: 21 },
-  textMutedSmall: { color: Colors.textMuted, fontSize: 12, lineHeight: 18 },
+
+  highlightBox: {
+    borderRadius: 14,
+    padding: 14,
+    backgroundColor: "rgba(124,58,237,0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(124,58,237,0.20)",
+    gap: 8,
+  },
+  highlightTitle: {
+    color: "#B794F4",
+    fontSize: 15,
+    fontWeight: "900",
+    marginBottom: 2,
+  },
+  highlightText: {
+    color: Colors.textMuted,
+    fontSize: 14,
+    lineHeight: 21,
+  },
 
   bulletRow: { flexDirection: "row", gap: 10, alignItems: "flex-start" },
   bulletDot: { color: Colors.brandEnd, fontSize: 18, lineHeight: 21, fontWeight: "900" },
