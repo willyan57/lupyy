@@ -115,7 +115,13 @@ function _PostCard(props: PostCardProps) {
 
   useEffect(() => {
     if (media_type !== "video") return;
-    try { player.muted = !!muted; } catch {}
+    try {
+      player.muted = !!muted;
+      // Force volume on web when unmuting
+      if (Platform.OS === "web" && !muted) {
+        (player as any).volume = 1;
+      }
+    } catch {}
   }, [muted, player, media_type]);
 
   useEffect(() => {

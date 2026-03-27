@@ -2,11 +2,17 @@ import WebSidebar, { WEB_SIDEBAR_WIDTH } from "@/components/WebSidebar";
 import Colors from "@/constants/Colors";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { LanguageProvider } from "@/lib/i18n";
+import {
+  registerForPushNotifications,
+  setupNotificationListeners,
+  unregisterPushToken,
+} from "@/lib/pushNotifications";
 import { supabase } from "@/lib/supabase";
 import { useIsMobileWeb } from "@/lib/useIsMobileWeb";
 import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
+import * as Notifications from "expo-notifications";
 import { Stack, usePathname, useRouter } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Platform, StatusBar, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
@@ -16,12 +22,12 @@ export default function RootLayout() {
   const router = useRouter();
   const pathname = usePathname();
   const [ready, setReady] = useState(false);
+  const pushCleanupRef = useRef<(() => void) | null>(null);
 
   const publicRoutes = useMemo(() => {
     return ["/", "/login", "/signup", "/reset", "/terms", "/privacy"];
   }, []);
 
-  // ✅ CORREÇÃO: /reset REMOVIDO desta lista para não redirecionar para feed durante recovery
   const redirectToFeedRoutes = useMemo(() => {
     return ["/", "/login", "/signup"];
   }, []);
@@ -36,17 +42,9 @@ export default function RootLayout() {
 
   const isMobileWeb = useIsMobileWeb(900);
 
-  /**
-   * Checks if the current context is a password recovery flow.
-   * Uses both URL params and the persisted flag as signals,
-   * but the flag alone is NOT enough — the auth guard uses this
-   * only to SKIP redirect, not to grant access.
-   */
   function isRecoveryContext(): boolean {
-    // If we're on /reset, never redirect to feed
     if (pathname === "/reset") return true;
 
-    // Check URL for recovery params (web only)
     if (Platform.OS === "web" && typeof window !== "undefined") {
       const href = window.location.href;
       if (
@@ -61,6 +59,49 @@ export default function RootLayout() {
     return false;
   }
 
+  // ═══════════════════════════════════════════════════
+  // Push Notifications — registra ao logar, limpa ao deslogar
+  // ═══════════════════════════════════════════════════
+  useEffect(() => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(
+      async (event: AuthChangeEvent, session: Session | null) => {
+        if (event === "SIGNED_IN" && session) {
+          await registerForPushNotifications();
+
+          pushCleanupRef.current = setupNotificationListeners(
+            (notification: Notifications.Notification) => {
+              console.log("Notificação recebida:", notification.request.content);
+            },
+            (response: Notifications.NotificationResponse) => {
+              const data = response.notification.request.content.data;
+              if (data?.type === "follow" && data?.actorId) {
+                router.push(`/user/${data.actorId}` as any);
+              } else {
+                router.push("/notifications" as any);
+              }
+            }
+          );
+        }
+
+        if (event === "SIGNED_OUT") {
+          await unregisterPushToken();
+          pushCleanupRef.current?.();
+          pushCleanupRef.current = null;
+        }
+      }
+    );
+
+    return () => {
+      subscription.unsubscribe();
+      pushCleanupRef.current?.();
+    };
+  }, [router]);
+
+  // ═══════════════════════════════════════════════════
+  // Auth guard — redireciona conforme sessão
+  // ═══════════════════════════════════════════════════
   useEffect(() => {
     let mounted = true;
 
@@ -76,15 +117,13 @@ export default function RootLayout() {
       if (!mounted) return;
 
       if (!session) {
-        // No session: clear any stale recovery flag
         if (Platform.OS === "web" && typeof window !== "undefined") {
           try { window.localStorage.removeItem(RECOVERY_FLAG); } catch {}
         }
         if (!isPublicRoute) navigateIfNeeded("/");
       } else {
-        // ✅ CORREÇÃO: Se estiver em contexto de recovery, NÃO redirecionar para feed
         if (isRecoveryContext()) {
-          // Sessão existe mas é recovery — manter em /reset
+          // recovery — manter em /reset
         } else if (isRedirectToFeedRoute) {
           navigateIfNeeded("/(tabs)/feed");
         }
@@ -100,21 +139,12 @@ export default function RootLayout() {
     } = supabase.auth.onAuthStateChange(
       (_event: AuthChangeEvent, session: Session | null) => {
         if (!mounted) return;
-
-        // ✅ CORREÇÃO: PASSWORD_RECOVERY event = não redirecionar, deixar reset.tsx cuidar
-        if (_event === "PASSWORD_RECOVERY") {
-          return;
-        }
-
-        // ✅ CORREÇÃO: Se estiver em /reset com recovery ativo, não redirecionar
-        if (isRecoveryContext()) {
-          return;
-        }
+        if (_event === "PASSWORD_RECOVERY") return;
+        if (isRecoveryContext()) return;
 
         if (session) {
           if (isRedirectToFeedRoute) navigateIfNeeded("/(tabs)/feed");
         } else {
-          // Usuário deslogou — limpar flag de recovery
           if (Platform.OS === "web" && typeof window !== "undefined") {
             try { window.localStorage.removeItem(RECOVERY_FLAG); } catch {}
           }

@@ -122,10 +122,15 @@ export default function ConversationsScreen() {
       [conversationId]: 0,
     }));
 
-    await supabase
-      .from("messages")
-      .update({ is_read: true })
-      .eq("conversation_id", conversationId);
+    // Só marca como lidas as mensagens do OUTRO usuário (não as minhas)
+    if (currentUserId) {
+      await supabase
+        .from("messages")
+        .update({ is_read: true })
+        .eq("conversation_id", conversationId)
+        .neq("sender", currentUserId)
+        .eq("is_read", false);
+    }
 
     await refreshUnreadCountsForLists();
   };
@@ -343,6 +348,57 @@ export default function ConversationsScreen() {
       supabase.removeChannel(channel);
     };
   }, [friendConversations.length, crushConversations.length]);
+
+  useEffect(() => {
+    if (!currentUserId) return;
+
+    let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const scheduleReload = () => {
+      if (reloadTimer) clearTimeout(reloadTimer);
+      reloadTimer = setTimeout(() => {
+        void loadConversations(currentUserId);
+      }, 120);
+    };
+
+    const channel = supabase
+      .channel(`conversation-list-sync-${currentUserId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "conversation_deletions",
+          filter: `user_id=eq.${currentUserId}`,
+        },
+        scheduleReload
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "conversation_deletions",
+          filter: `user_id=eq.${currentUserId}`,
+        },
+        scheduleReload
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "conversations",
+        },
+        scheduleReload
+      )
+      .subscribe();
+
+    return () => {
+      if (reloadTimer) clearTimeout(reloadTimer);
+      supabase.removeChannel(channel);
+    };
+  }, [currentUserId, loadConversations]);
 
   useFocusEffect(
     useCallback(() => {

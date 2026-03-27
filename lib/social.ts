@@ -152,6 +152,34 @@ export async function setFollowInterestType(
     throw error;
   }
 
+  // ── Push notification para quem foi seguido ──
+  try {
+    const { data: myProfile } = await supabase
+      .from("profiles")
+      .select("username")
+      .eq("id", followerId)
+      .single();
+
+    const myUsername = myProfile?.username ?? "Alguém";
+    const pushBody =
+      interestType === "crush" || interestType === "super_crush"
+        ? `${myUsername} tem um crush em você 💘`
+        : interestType === "silent_crush"
+          ? undefined // silent crush = sem notificação
+          : `${myUsername} começou a seguir você 🔥`;
+
+    if (pushBody) {
+      supabase.functions.invoke("send-push", {
+        body: {
+          recipientId: followingId,
+          title: "LUPYY",
+          body: pushBody,
+          data: { type: interestType === "friend" ? "follow" : "crush", actorId: followerId },
+        },
+      }).catch(() => {});
+    }
+  } catch {}
+
   let crush = false;
   let isNewMatch = false;
 
@@ -166,8 +194,19 @@ export async function setFollowInterestType(
 
     if (!reciprocalErr && reciprocal) {
       crush = true;
-      // It's a new match if this is the action that created the mutual link
       isNewMatch = true;
+
+      // ── Push de match para ambos ──
+      try {
+        supabase.functions.invoke("send-push", {
+          body: {
+            recipientIds: [followerId, followingId],
+            title: "LUPYY 🎉",
+            body: "Vocês deram match! Comecem a conversar agora",
+            data: { type: "match" },
+          },
+        }).catch(() => {});
+      } catch {}
     }
   }
 

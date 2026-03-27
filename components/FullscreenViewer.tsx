@@ -86,9 +86,25 @@ const ViewerVideo: React.FC<{ uri: string; playing: boolean }> = React.memo(({
 }) => {
   const player = useVideoPlayer(uri, (p) => {
     p.loop = true;
-    p.muted = false;
+    p.muted = Platform.OS === "web";
     if (playing) p.play();
   });
+
+  // On web, unmute after first user interaction (autoplay policy)
+  useEffect(() => {
+    if (Platform.OS !== "web" || !player) return;
+    const handler = () => {
+      try { player.muted = false; } catch {}
+      window.removeEventListener("click", handler);
+      window.removeEventListener("touchstart", handler);
+    };
+    window.addEventListener("click", handler, { once: true });
+    window.addEventListener("touchstart", handler, { once: true });
+    return () => {
+      window.removeEventListener("click", handler);
+      window.removeEventListener("touchstart", handler);
+    };
+  }, [player]);
 
   useEffect(() => {
     if (!player) return;
@@ -448,7 +464,7 @@ export default function FullscreenViewer({
             <Pressable onPress={onClose} style={styles.headerBtn} hitSlop={10}>
               <Ionicons name="arrow-back" size={22} color="#fff" />
             </Pressable>
-            <TextLite style={styles.headerTitle}>Reels</TextLite>
+            <View style={{ width: 40 }} />
             <View style={styles.headerRightGroup}>
               {canManage && (
                 <Pressable onPress={openMenu} hitSlop={12} style={styles.headerBtn}>
@@ -591,6 +607,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#000",
     overflow: "hidden" as any,
+    ...(Platform.OS === "web" ? { alignItems: "center" as const } : {}),
   },
 
   header: {
@@ -604,6 +621,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    ...(Platform.OS === "web" ? { maxWidth: 500, alignSelf: "center" as const, width: "100%" as any } : {}),
   },
   headerBtn: {
     width: 40,
@@ -626,9 +644,10 @@ const styles = StyleSheet.create({
   },
 
   page: {
-    width: SCREEN_W,
+    width: Platform.OS === "web" ? Math.min(SCREEN_W, 500) : SCREEN_W,
     height: SCREEN_H,
     overflow: "hidden" as any,
+    ...(Platform.OS === "web" ? { alignSelf: "center" as const, borderRadius: 16 } : {}),
   },
   pageBottomGradient: {
     position: "absolute",

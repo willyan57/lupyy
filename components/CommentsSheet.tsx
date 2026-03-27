@@ -226,6 +226,27 @@ export default function CommentsSheet({ visible, postId, onClose }: Props) {
       return;
     }
 
+    // ── Push notification para o dono do post ──
+    try {
+      const { data: postData } = await supabase
+        .from("posts")
+        .select("user_id")
+        .eq("id", postId)
+        .single();
+
+      if (postData && postData.user_id !== user.id) {
+        const myUsername = user.user_metadata?.username ?? "Alguém";
+        supabase.functions.invoke("send-push", {
+          body: {
+            recipientId: postData.user_id,
+            title: "LUPYY",
+            body: `${myUsername} comentou na sua publicação 💬`,
+            data: { type: "comment", postId },
+          },
+        }).catch(() => {});
+      }
+    } catch {}
+
     setText("");
     setReplyingTo(null);
     setSending(false);

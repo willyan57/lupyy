@@ -41,6 +41,7 @@ import ProfileHighlightEditor from "@/components/ProfileHighlightEditor";
 import ThemeSelector from "@/components/ThemeSelector";
 import { useTheme } from "@/contexts/ThemeContext";
 import { ConversationType, getOrCreateConversation } from "@/lib/conversations";
+import type { ProfileVisitor } from "@/lib/engagement";
 import {
   BADGE_CONFIG,
   type Badge,
@@ -51,6 +52,7 @@ import {
   activateBoost,
   getActiveBoost,
   getProfileViewStats,
+  getProfileVisitors,
   getUserLevelAndBadges,
   getXpProgress,
   registerProfileView
@@ -156,6 +158,17 @@ async function pathToUsableUrl(path: string) {
   // Fallback to public URL
   const pub = supabase.storage.from("posts").getPublicUrl(path);
   return pub.data.publicUrl;
+}
+
+function formatVisitTime(dateStr: string): string {
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return "";
+  const diff = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (diff < 60) return "agora";
+  if (diff < 3600) return `${Math.floor(diff / 60)} min`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+  const days = Math.floor(diff / 86400);
+  return days === 1 ? "ontem" : `${days}d`;
 }
 
 function extractTagsFromBio(bio: string) {
@@ -426,11 +439,52 @@ export default function Profile() {
   const [profileViewStats, setProfileViewStats] = useState<ProfileViewStats | null>(null);
   const [boostLoading, setBoostLoading] = useState(false);
   const [boostCountdown, setBoostCountdown] = useState<string | null>(null);
+  const [visitorsModalVisible, setVisitorsModalVisible] = useState(false);
+  const [visitors, setVisitors] = useState<ProfileVisitor[]>([]);
+  const [visitorsLoading, setVisitorsLoading] = useState(false);
 
   const isOwnProfile = !!authUserId && userId === authUserId;
   const isViewingOther = !!routeUserId && routeUserId !== authUserId;
 
   const bioTags = extractTagsFromBio(bio);
+
+  // ── Feedback phrase based on metrics ──
+  const feedbackPhrase = (() => {
+    if (!isOwnProfile || !levelInfo || !profileViewStats) return null;
+    const v24 = profileViewStats.views_24h ?? 0;
+    const v7d = profileViewStats.views_7d ?? 0;
+    const likes = levelInfo.total_likes_received ?? 0;
+    const crushes = levelInfo.total_crushes_received ?? 0;
+    const followers = levelInfo.total_followers ?? 0;
+
+    if (boostInfo && v24 > 5) return { text: "🔥 Seu boost está funcionando! Visitas dispararam.", color: "#F59E0B" };
+    if (crushes >= 10) return { text: "💘 Você é muito desejado(a)! Crushes não param.", color: "#FF1493" };
+    if (v24 >= 20) return { text: "🚀 Seu perfil está explodindo hoje!", color: "#EF4444" };
+    if (v24 >= 10) return { text: "👀 Muita gente curiosa sobre você hoje!", color: "#8B5CF6" };
+    if (likes >= 50) return { text: "⭐ Suas fotos estão fazendo sucesso!", color: "#F59E0B" };
+    if (followers >= 20) return { text: "🧲 Você está atraindo muitos seguidores!", color: "#EC4899" };
+    if (v7d >= 30) return { text: "📈 Semana forte! Seu perfil está em alta.", color: "#06B6D4" };
+    if (v24 >= 3) return { text: "✨ Alguém está de olho em você...", color: "#A78BFA" };
+    return null;
+  })();
+
+  // ── Load visitors ──
+  const loadVisitors = useCallback(async () => {
+    setVisitorsLoading(true);
+    try {
+      const v = await getProfileVisitors(20);
+      setVisitors(v);
+    } catch {
+      setVisitors([]);
+    } finally {
+      setVisitorsLoading(false);
+    }
+  }, []);
+
+  const openVisitorsModal = useCallback(() => {
+    setVisitorsModalVisible(true);
+    loadVisitors();
+  }, [loadVisitors]);
 
   // ── Boost countdown timer (updates every 15s to avoid excessive re-renders) ──
   useEffect(() => {
@@ -2651,12 +2705,31 @@ export default function Profile() {
                 })}
               </View>
             )}
-            {/* Profile views mini stat */}
+            {/* Profile views mini stat — clickable to open visitors */}
             {profileViewStats && (
-              <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
+              <TouchableOpacity
+                activeOpacity={0.7}
+                onPress={isOwnProfile ? openVisitorsModal : undefined}
+                style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}
+              >
                 <Text style={{ fontSize: 14, marginRight: 4 }}>👀</Text>
                 <Text style={{ color: theme.colors.textMuted, fontSize: 13 }}>
                   {profileViewStats.views_24h} visitas hoje · {profileViewStats.views_7d} esta semana
+                </Text>
+                {isOwnProfile && (
+                  <Text style={{ color: theme.colors.primary, fontSize: 12, marginLeft: 6, fontWeight: "600" }}>Ver →</Text>
+                )}
+              </TouchableOpacity>
+            )}
+            {/* Feedback phrase */}
+            {feedbackPhrase && (
+              <View style={{
+                marginTop: 8, paddingHorizontal: 12, paddingVertical: 8,
+                borderRadius: 10, backgroundColor: feedbackPhrase.color + "15",
+                borderWidth: 1, borderColor: feedbackPhrase.color + "30",
+              }}>
+                <Text style={{ color: feedbackPhrase.color, fontSize: 13, fontWeight: "700" }}>
+                  {feedbackPhrase.text}
                 </Text>
               </View>
             )}
@@ -3066,6 +3139,114 @@ export default function Profile() {
             startIndex={0}
             onClose={() => setHighlightViewerOpen(false)}
           />
+
+          {/* ── VISITORS MODAL ── */}
+          <Modal
+            visible={visitorsModalVisible}
+            animationType="slide"
+            transparent
+            onRequestClose={() => setVisitorsModalVisible(false)}
+          >
+            <View style={{
+              flex: 1, backgroundColor: "rgba(0,0,0,0.6)",
+              justifyContent: "flex-end",
+            }}>
+              <View style={{
+                backgroundColor: theme.colors.surface,
+                borderTopLeftRadius: 20, borderTopRightRadius: 20,
+                maxHeight: "70%", paddingBottom: Platform.select({ ios: 34, default: 16 }),
+              }}>
+                {/* Handle */}
+                <View style={{ alignItems: "center", paddingTop: 10, paddingBottom: 6 }}>
+                  <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: theme.colors.border }} />
+                </View>
+                {/* Header */}
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 12 }}>
+                  <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: "800" }}>👀 Quem visitou seu perfil</Text>
+                  <TouchableOpacity onPress={() => setVisitorsModalVisible(false)}>
+                    <Text style={{ color: theme.colors.textMuted, fontSize: 16 }}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {visitorsLoading ? (
+                  <ActivityIndicator color={theme.colors.primary} style={{ marginVertical: 40 }} />
+                ) : visitors.length === 0 ? (
+                  <View style={{ alignItems: "center", paddingVertical: 40 }}>
+                    <Text style={{ fontSize: 32, marginBottom: 8 }}>👻</Text>
+                    <Text style={{ color: theme.colors.textMuted, fontSize: 14 }}>Nenhuma visita recente</Text>
+                  </View>
+                ) : (
+                  <ScrollView style={{ paddingHorizontal: 16 }}>
+                    {visitors.map((v, i) => {
+                      const isPremium = false; // TODO: check premium status
+                      const blurred = !isPremium && i >= 3;
+                      return (
+                        <View
+                          key={v.viewer_id + i}
+                          style={{
+                            flexDirection: "row", alignItems: "center",
+                            paddingVertical: 12,
+                            borderBottomWidth: i < visitors.length - 1 ? 1 : 0,
+                            borderBottomColor: theme.colors.border,
+                            opacity: blurred ? 0.4 : 1,
+                          }}
+                        >
+                          {v.viewer_avatar_url ? (
+                            <ExpoImage
+                              source={{ uri: v.viewer_avatar_url }}
+                              style={{ width: 44, height: 44, borderRadius: 22, marginRight: 12 }}
+                              contentFit="cover"
+                            />
+                          ) : (
+                            <View style={{
+                              width: 44, height: 44, borderRadius: 22, marginRight: 12,
+                              backgroundColor: theme.colors.backgroundAlt || theme.colors.border,
+                              alignItems: "center", justifyContent: "center",
+                            }}>
+                              <Text style={{ fontSize: 18 }}>👤</Text>
+                            </View>
+                          )}
+                          <View style={{ flex: 1 }}>
+                            <Text style={{
+                              color: theme.colors.text, fontWeight: "700", fontSize: 15,
+                              ...(blurred ? { letterSpacing: 4 } : {}),
+                            }}>
+                              {blurred ? "••••••••" : (v.viewer_username || v.viewer_full_name || "Usuário")}
+                            </Text>
+                            <Text style={{ color: theme.colors.textMuted, fontSize: 12, marginTop: 2 }}>
+                              {blurred ? "🔒 Premium para ver" : `${v.visit_count}x · ${formatVisitTime(v.last_visited_at)}`}
+                            </Text>
+                          </View>
+                          {blurred && (
+                            <View style={{
+                              backgroundColor: theme.colors.primary + "20",
+                              borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4,
+                            }}>
+                              <Text style={{ color: theme.colors.primary, fontSize: 11, fontWeight: "700" }}>PRO</Text>
+                            </View>
+                          )}
+                        </View>
+                      );
+                    })}
+                    {!false /* !isPremium */ && visitors.length > 3 && (
+                      <TouchableOpacity
+                        style={{
+                          marginTop: 16, marginBottom: 8, paddingVertical: 14,
+                          borderRadius: 12, alignItems: "center",
+                          backgroundColor: theme.colors.primary,
+                        }}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={{ color: "#fff", fontWeight: "800", fontSize: 15 }}>
+                          ✨ Desbloquear todos com Premium
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </ScrollView>
+                )}
+              </View>
+            </View>
+          </Modal>
         </>
       )}
     </SafeAreaView>

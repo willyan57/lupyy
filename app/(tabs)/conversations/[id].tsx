@@ -631,6 +631,25 @@ export default function ConversationScreen() {
         sentAt,
       });
 
+      // ── Push notification para o outro usuário ──
+      if (otherUserId && otherUserId !== authUserId) {
+        const { data: myProfile } = await supabase
+          .from("profiles")
+          .select("username")
+          .eq("id", authUserId)
+          .single();
+
+        const myUsername = myProfile?.username ?? "Alguém";
+        supabase.functions.invoke("send-push", {
+          body: {
+            recipientId: otherUserId,
+            title: myUsername,
+            body: text.length > 80 ? text.slice(0, 80) + "…" : text,
+            data: { type: "message", conversationId },
+          },
+        }).catch(() => {});
+      }
+
     } catch (e: any) {
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
       if ((e?.message ?? "").includes("CRUSH_CHAT_LOCKED")) {

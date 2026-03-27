@@ -1,5 +1,5 @@
 import { supabase } from "@/lib/supabase";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type TypingUser = {
   user_id: string;
@@ -23,6 +23,16 @@ export function useTypingIndicator({
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
   const typingTimerRef = useRef<TimeoutType | null>(null);
   const debounceRef = useRef<TimeoutType | null>(null);
+  const conversationIdRef = useRef(conversationId);
+  const currentUserIdRef = useRef(currentUserId);
+
+  // Manter refs atualizados para uso no cleanup
+  useEffect(() => {
+    conversationIdRef.current = conversationId;
+  }, [conversationId]);
+  useEffect(() => {
+    currentUserIdRef.current = currentUserId;
+  }, [currentUserId]);
 
   // 🔔 Listener em tempo real na tabela conversation_typing
   useEffect(() => {
@@ -45,9 +55,10 @@ export function useTypingIndicator({
             .eq("conversation_id", conversationId);
 
           if (data) {
-            const list = data as TypingUser[];
             setTypingUsers(
-              list.filter((row: TypingUser) => row.user_id !== currentUserId)
+              (data as TypingUser[]).filter(
+                (row) => row.user_id !== currentUserId
+              )
             );
           }
         }
@@ -62,57 +73,68 @@ export function useTypingIndicator({
         .eq("conversation_id", conversationId);
 
       if (data) {
-        const list = data as TypingUser[];
         setTypingUsers(
-          list.filter((row: TypingUser) => row.user_id !== currentUserId)
+          (data as TypingUser[]).filter(
+            (row) => row.user_id !== currentUserId
+          )
         );
       }
     })();
 
+    // ✅ CORREÇÃO: ao desmontar, SEMPRE limpar o registro de typing do banco
     return () => {
       supabase.removeChannel(channel);
+
+      // Limpar timers
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+
+      // Deletar registro do banco para o outro usuário não ficar vendo "digitando..."
+      supabase
+        .from("conversation_typing")
+        .delete()
+        .eq("conversation_id", conversationId)
+        .eq("user_id", currentUserId)
+        .then(() => {});
     };
   }, [conversationId, currentUserId]);
 
   // 🧠 Função que você chama quando o usuário digita
-  const reportTyping = (isTyping: boolean) => {
-    if (!conversationId || !currentUserId) return;
+  const reportTyping = useCallback(
+    (isTyping: boolean) => {
+      const cId = conversationIdRef.current;
+      const uId = currentUserIdRef.current;
+      if (!cId || !uId) return;
 
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(async () => {
-      if (isTyping) {
-        await supabase.from("conversation_typing").upsert({
-          conversation_id: conversationId,
-          user_id: currentUserId,
-        });
-      } else {
-        await supabase
-          .from("conversation_typing")
-          .delete()
-          .eq("conversation_id", conversationId)
-          .eq("user_id", currentUserId);
-      }
-    }, typingDebounceMs);
-
-    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
-    if (isTyping) {
-      typingTimerRef.current = setTimeout(async () => {
-        await supabase
-          .from("conversation_typing")
-          .delete()
-          .eq("conversation_id", conversationId)
-          .eq("user_id", currentUserId);
-      }, typingTimeoutMs);
-    }
-  };
-
-  // limpar timers quando desmontar
-  useEffect(() => {
-    return () => {
-      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
       if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, []);
+      debounceRef.current = setTimeout(async () => {
+        if (isTyping) {
+          await supabase.from("conversation_typing").upsert({
+            conversation_id: cId,
+            user_id: uId,
+          });
+        } else {
+          await supabase
+            .from("conversation_typing")
+            .delete()
+            .eq("conversation_id", cId)
+            .eq("user_id", uId);
+        }
+      }, typingDebounceMs);
+
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+      if (isTyping) {
+        typingTimerRef.current = setTimeout(async () => {
+          await supabase
+            .from("conversation_typing")
+            .delete()
+            .eq("conversation_id", cId)
+            .eq("user_id", uId);
+        }, typingTimeoutMs);
+      }
+    },
+    [typingDebounceMs, typingTimeoutMs]
+  );
 
   const isSomeoneTyping = typingUsers.length > 0;
 

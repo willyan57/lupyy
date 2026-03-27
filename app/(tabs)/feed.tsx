@@ -497,6 +497,20 @@ export default function Feed() {
             .from("likes")
             .insert({ post_id: postId, user_id: u.user.id });
           if (insErr) throw insErr;
+
+          // ── Push notification para o dono do post ──
+          const post = posts.find((p) => p.id === postId);
+          if (post && post.user_id !== u.user.id) {
+            const myUsername = u.user.user_metadata?.username ?? "Alguém";
+            supabase.functions.invoke("send-push", {
+              body: {
+                recipientId: post.user_id,
+                title: "LUPYY",
+                body: `${myUsername} curtiu sua publicação ❤️`,
+                data: { type: "like", postId },
+              },
+            }).catch(() => {});
+          }
         } else {
           const { error: delErr } = await supabase
             .from("likes")
@@ -510,7 +524,7 @@ export default function Feed() {
         setCounts((prev) => ({ ...prev, [postId]: cur }));
       }
     },
-    [counts]
+    [counts, posts]
   );
 
   const openComments = useCallback(
