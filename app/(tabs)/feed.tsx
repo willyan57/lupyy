@@ -95,7 +95,7 @@ export default function Feed() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [muted, setMuted] = useState(Platform.OS === "web");
   const [error, setError] = useState<string | null>(null);
-  const [boostedUserIds, setBoostedUserIds] = useState<Set<string>>(new Set());
+  const [boostedPostIds, setBoostedPostIds] = useState<Set<number>>(new Set());
 
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerPostId, setViewerPostId] = useState<string | number | null>(null);
@@ -248,9 +248,9 @@ export default function Feed() {
         const from = curPage * PAGE;
         const to = from + PAGE - 1;
 
-        // Fetch boosted user IDs in parallel with posts (only on first page)
+        // Fetch boosted post IDs in parallel with posts (only on first page)
         const boostedPromise = reset || curPage === 0
-          ? supabase.from("active_boosted_profiles").select("user_id")
+          ? supabase.from("active_boosted_posts").select("post_id")
           : Promise.resolve({ data: null });
 
         const { data: rows, error: qErr, count } = await supabase
@@ -265,22 +265,22 @@ export default function Feed() {
 
         if (qErr) throw qErr;
 
-        // Process boosted users
+        // Process boosted posts
         const boostedResult = await boostedPromise;
+        const currentBoosted = boostedResult.data
+          ? new Set((boostedResult.data as any[]).map((r: any) => Number(r.post_id)))
+          : boostedPostIds;
+
         if (boostedResult.data) {
-          const ids = new Set((boostedResult.data as any[]).map((r: any) => String(r.user_id)));
-          setBoostedUserIds(ids);
+          setBoostedPostIds(currentBoosted);
         }
 
         const mapped = await mapRows((rows ?? []) as DbPost[]);
         if (inflight.current.canceled) return;
 
         // Mark boosted posts
-        const currentBoosted = boostedResult.data
-          ? new Set((boostedResult.data as any[]).map((r: any) => String(r.user_id)))
-          : boostedUserIds;
         mapped.forEach((p) => {
-          p.isBoosted = currentBoosted.has(String(p.user_id));
+          p.isBoosted = currentBoosted.has(Number(p.id));
         });
 
         // Sort: boosted posts first (only on first page)
@@ -288,7 +288,7 @@ export default function Feed() {
           mapped.sort((a, b) => {
             if (a.isBoosted && !b.isBoosted) return -1;
             if (!a.isBoosted && b.isBoosted) return 1;
-            return 0; // keep original order within groups
+            return 0;
           });
         }
 
@@ -659,11 +659,6 @@ export default function Feed() {
         }
         renderItem={({ item, index }) => (
           <View>
-            {item.isBoosted && (
-              <View style={styles.boostBadge}>
-                <Text style={styles.boostBadgeText}>🔥 Perfil em destaque</Text>
-              </View>
-            )}
             <PostCard
               id={item.id}
               media_type={item.media_type}
@@ -679,6 +674,7 @@ export default function Feed() {
               commentsCount={counts[item.id]?.comments ?? 0}
               repostsCount={counts[item.id]?.reposts ?? 0}
               liked={!!counts[item.id]?.liked}
+              isBoosted={item.isBoosted}
               onPressMedia={() => {
                 setViewerIndex(index);
                 setViewerPostId(item.id);
@@ -799,22 +795,4 @@ const styles = StyleSheet.create({
     padding: 8, zIndex: 10,
   },
   errorText: { color: "white", fontWeight: "700" },
-  boostBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 4,
-    paddingHorizontal: 12,
-    marginHorizontal: 16,
-    marginTop: 8,
-    borderRadius: 8,
-    backgroundColor: "rgba(255, 165, 0, 0.15)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 165, 0, 0.3)",
-  },
-  boostBadgeText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#FF8C00",
-  },
 });

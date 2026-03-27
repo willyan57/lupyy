@@ -130,7 +130,7 @@ export async function evaluateBadges(userId: string): Promise<void> {
   }
 }
 
-// ── Boost ──
+// ── Boost (legacy profile-level — kept for backward compat) ──
 
 export async function getActiveBoost(userId: string): Promise<BoostInfo | null> {
   const { data, error } = await supabase
@@ -159,6 +159,54 @@ export async function activateBoost(
   }
   const row = Array.isArray(data) ? data[0] : data;
   return row ?? null;
+}
+
+// ── Post-level Boost (Instagram-style Promote) ──
+
+export type PostBoostInfo = {
+  post_id: number;
+  boost_type: string;
+  started_at: string;
+  expires_at: string;
+  seconds_remaining: number;
+};
+
+export async function boostPost(
+  postId: number,
+  boostType: "standard" | "super" = "standard",
+  durationHours = 24
+): Promise<{ boost_id: number; expires_at: string } | null> {
+  const { data, error } = await supabase.rpc("boost_post", {
+    _post_id: postId,
+    _boost_type: boostType,
+    _duration_hours: durationHours,
+  });
+  if (error) {
+    if (error.message?.includes("POST_ALREADY_BOOSTED")) throw new Error("POST_ALREADY_BOOSTED");
+    if (error.message?.includes("MAX_BOOSTS_REACHED")) throw new Error("MAX_BOOSTS_REACHED");
+    if (error.message?.includes("POST_NOT_OWNED")) throw new Error("POST_NOT_OWNED");
+    throw error;
+  }
+  const row = Array.isArray(data) ? data[0] : data;
+  return row ?? null;
+}
+
+export async function cancelPostBoost(postId: number): Promise<void> {
+  await supabase.rpc("cancel_post_boost", { _post_id: postId });
+}
+
+export async function getMyBoostedPosts(): Promise<PostBoostInfo[]> {
+  const { data, error } = await supabase.rpc("get_my_boosted_posts");
+  if (error || !data) return [];
+  return data as PostBoostInfo[];
+}
+
+export async function getActiveBoostedPostIds(): Promise<Set<number>> {
+  const { data, error } = await supabase
+    .from("active_boosted_posts")
+    .select("post_id");
+  if (error || !data) return new Set();
+  return new Set((data as any[]).map((r) => Number(r.post_id)));
 }
 
 // ── XP progress helpers ──

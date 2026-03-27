@@ -148,65 +148,91 @@ export default function NotificationsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const fetchNotifications = useCallback(async () => {
-    try {
-      const { data, error } = await supabase.rpc("get_user_notifications", {
-        _limit: 80,
-        _offset: 0,
-      });
-
-      if (error) {
-        console.error("Erro ao buscar notificações:", error);
-        // Fallback: try old table
-        await fetchLegacyNotifications();
-        return;
-      }
-
-      if (!data || data.length === 0) {
-        setNotifications([]);
-        return;
-      }
-
-      // Check follow state for follow-type notifications
-      const { data: { user } } = await supabase.auth.getUser();
-      const enriched: Notification[] = data.map((n: any) => ({
-        ...n,
-        follow_state: "not_following" as const,
-      }));
-
-      // Batch check follow states for follow/crush notifications
-      if (user) {
-        const followTypeNotifs = enriched.filter(
-          (n) => n.type === "follow" || n.type === "crush"
-        );
-        await Promise.all(
-          followTypeNotifs.map(async (n) => {
-            try {
-              const state = await getFollowState(user.id, n.actor_id);
-              n.follow_state = state.exists ? "following" : "not_following";
-            } catch {}
-          })
-        );
-      }
-
-      setNotifications(enriched);
-
-      // Mark all as read
-      await supabase.rpc("mark_notifications_read").catch(() => {});
-    } catch (err) {
-      console.error("Erro notificações:", err);
-      await fetchLegacyNotifications();
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
-
-  // Fallback for old status_change_notifications table
-  const fetchLegacyNotifications = useCallback(async () => {
+  const markAllAsRead = useCallback(async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+
+      const { error } = await supabase.rpc("mark_notifications_read");
+      if (error) {
+        await supabase
+          .from("notifications")
+          .update({ is_read: true })
+          .eq("recipient_id", user.id)
+          .eq("is_read", false);
+      }
+
+      await supabase
+        .from("status_change_notifications")
+        .update({ is_read: true })
+        .eq("notified_user_id", user.id)
+        .eq("is_read", false);
+    } catch {}
+  }, []);
+
+  const fetchDirectNotifications = useCallback(async (): Promise<Notification[]> => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return [];
+
+      const { data: rows, error } = await supabase
+        .from("notifications")
+        .select("id, actor_id, type, post_id, story_id, comment_id, metadata, is_read, created_at")
+        .eq("recipient_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(80);
+
+      if (error || !rows || rows.length === 0) return [];
+
+      const userIds = [...new Set(rows.map((n: any) => n.actor_id).filter(Boolean))];
+      const { data: profiles } = userIds.length
+        ? await supabase
+            .from("profiles")
+            .select("id, username, full_name, avatar_url")
+            .in("id", userIds)
+        : { data: [] as any[] };
+
+      const profileMap = new Map((profiles || []).map((p: any) => [p.id, p]));
+
+      const mapped: Notification[] = rows.map((n: any) => {
+        const profile = profileMap.get(n.actor_id) as any;
+        return {
+          id: n.id,
+          actor_id: n.actor_id,
+          type: n.type,
+          post_id: n.post_id,
+          story_id: n.story_id,
+          comment_id: n.comment_id,
+          metadata: n.metadata,
+          is_read: n.is_read,
+          created_at: n.created_at,
+          actor_username: profile?.username ?? null,
+          actor_full_name: profile?.full_name ?? null,
+          actor_avatar_url: profile?.avatar_url ?? null,
+          follow_state: "not_following",
+        };
+      });
+
+      const followTypeNotifs = mapped.filter((n) => n.type === "follow" || n.type === "crush");
+      await Promise.all(
+        followTypeNotifs.map(async (n) => {
+          try {
+            const state = await getFollowState(user.id, n.actor_id);
+            n.follow_state = state.exists ? "following" : "not_following";
+          } catch {}
+        })
+      );
+
+      return mapped;
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const fetchLegacyNotifications = useCallback(async (): Promise<Notification[]> => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return [];
 
       const { data } = await supabase
         .from("status_change_notifications")
@@ -215,10 +241,7 @@ export default function NotificationsScreen() {
         .order("created_at", { ascending: false })
         .limit(50);
 
-      if (!data || data.length === 0) {
-        setNotifications([]);
-        return;
-      }
+      if (!data || data.length === 0) return [];
 
       const userIds = [...new Set(data.map((n: any) => n.changed_user_id))];
       const { data: profiles } = await supabase
@@ -228,7 +251,7 @@ export default function NotificationsScreen() {
 
       const profileMap = new Map((profiles || []).map((p: any) => [p.id, p]));
 
-      const mapped: Notification[] = data.map((n: any) => {
+      return data.map((n: any) => {
         const profile = profileMap.get(n.changed_user_id) as any;
         return {
           id: n.id,
@@ -246,10 +269,48 @@ export default function NotificationsScreen() {
           follow_state: "not_following" as const,
         };
       });
-
-      setNotifications(mapped);
-    } catch {}
+    } catch {
+      return [];
+    }
   }, []);
+
+  const fetchNotifications = useCallback(async () => {
+    try {
+      let nextNotifications: Notification[] = [];
+
+      const { data, error } = await supabase.rpc("get_user_notifications", {
+        _limit: 80,
+        _offset: 0,
+      });
+
+      if (!error && Array.isArray(data) && data.length > 0) {
+        nextNotifications = data.map((n: any) => ({
+          ...n,
+          follow_state: n.i_follow_actor ? "following" as const : "not_following" as const,
+        }));
+      } else {
+        nextNotifications = await fetchDirectNotifications();
+        if (nextNotifications.length === 0) {
+          nextNotifications = await fetchLegacyNotifications();
+        }
+      }
+
+      setNotifications(nextNotifications);
+      await markAllAsRead();
+    } catch (err) {
+      console.error("Erro notificações:", err);
+      const direct = await fetchDirectNotifications();
+      if (direct.length > 0) {
+        setNotifications(direct);
+      } else {
+        setNotifications(await fetchLegacyNotifications());
+      }
+      await markAllAsRead();
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [fetchDirectNotifications, fetchLegacyNotifications, markAllAsRead]);
 
   useFocusEffect(
     useCallback(() => {

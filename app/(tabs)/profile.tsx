@@ -47,10 +47,13 @@ import {
   type Badge,
   type BoostInfo,
   LEVEL_CONFIG,
+  type PostBoostInfo,
   type ProfileViewStats,
   type UserLevelInfo,
-  activateBoost,
+  boostPost,
+  cancelPostBoost,
   getActiveBoost,
+  getMyBoostedPosts,
   getProfileViewStats,
   getProfileVisitors,
   getUserLevelAndBadges,
@@ -441,6 +444,10 @@ export default function Profile() {
   const [boostCountdown, setBoostCountdown] = useState<string | null>(null);
   const [visitorsModalVisible, setVisitorsModalVisible] = useState(false);
   const [visitors, setVisitors] = useState<ProfileVisitor[]>([]);
+  const [boostedPostIds, setBoostedPostIds] = useState<Set<number>>(new Set());
+  const [promoteModalVisible, setPromoteModalVisible] = useState(false);
+  const [promotePostId, setPromotePostId] = useState<number | null>(null);
+  const [promoteLoading, setPromoteLoading] = useState(false);
   const [visitorsLoading, setVisitorsLoading] = useState(false);
 
   const isOwnProfile = !!authUserId && userId === authUserId;
@@ -457,7 +464,7 @@ export default function Profile() {
     const crushes = levelInfo.total_crushes_received ?? 0;
     const followers = levelInfo.total_followers ?? 0;
 
-    if (boostInfo && v24 > 5) return { text: "🔥 Seu boost está funcionando! Visitas dispararam.", color: "#F59E0B" };
+    if (v24 > 15 && crushes > 3) return { text: "🔥 Seu perfil está em alta! Muita gente interessada.", color: "#F59E0B" };
     if (crushes >= 10) return { text: "💘 Você é muito desejado(a)! Crushes não param.", color: "#FF1493" };
     if (v24 >= 20) return { text: "🚀 Seu perfil está explodindo hoje!", color: "#EF4444" };
     if (v24 >= 10) return { text: "👀 Muita gente curiosa sobre você hoje!", color: "#8B5CF6" };
@@ -502,30 +509,59 @@ export default function Profile() {
   }, [boostInfo]);
 
   const handleActivateBoost = useCallback(async () => {
-    if (boostLoading || boostInfo) return;
+    // Legacy — kept for backward compat
+  }, []);
+
+  const handlePromotePost = useCallback(async () => {
+    if (!promotePostId || promoteLoading) return;
     try {
-      setBoostLoading(true);
-      const result = await activateBoost("standard", 60);
-      if (result) {
-        setBoostInfo({
-          user_id: authUserId || "",
-          boost_type: "standard",
-          started_at: new Date().toISOString(),
-          expires_at: result.expires_at,
-          seconds_remaining: 3600,
-        });
-        Alert.alert("🔥 Boost ativado!", "Seu perfil ficará em destaque por 1 hora.");
-      }
+      setPromoteLoading(true);
+      await boostPost(promotePostId, "standard", 24);
+      setBoostedPostIds((prev) => new Set([...prev, promotePostId]));
+      setPromoteModalVisible(false);
+      Alert.alert("✨ Post promovido!", "Seu post ficará em destaque no feed por 24 horas.");
     } catch (err: any) {
-      if (err?.message?.includes("BOOST_ALREADY_ACTIVE")) {
-        Alert.alert("Boost ativo", "Você já tem um boost rodando!");
+      if (err?.message?.includes("POST_ALREADY_BOOSTED")) {
+        Alert.alert("Já promovido", "Este post já está em destaque.");
+      } else if (err?.message?.includes("MAX_BOOSTS_REACHED")) {
+        Alert.alert("Limite atingido", "Você pode promover até 3 posts simultaneamente.");
       } else {
-        Alert.alert("Erro", "Não foi possível ativar o boost.");
+        Alert.alert("Erro", "Não foi possível promover o post.");
       }
     } finally {
-      setBoostLoading(false);
+      setPromoteLoading(false);
     }
-  }, [boostLoading, boostInfo, authUserId]);
+  }, [promotePostId, promoteLoading]);
+
+  const handleCancelBoost = useCallback(async (postId: number) => {
+    try {
+      await cancelPostBoost(postId);
+      setBoostedPostIds((prev) => {
+        const next = new Set(prev);
+        next.delete(postId);
+        return next;
+      });
+      Alert.alert("Promoção cancelada", "O post não será mais destacado.");
+    } catch {
+      Alert.alert("Erro", "Não foi possível cancelar a promoção.");
+    }
+  }, []);
+
+  const openPromoteModal = useCallback((postId: number) => {
+    if (boostedPostIds.has(postId)) {
+      Alert.alert(
+        "Post em destaque",
+        "Este post já está promovido. Deseja cancelar?",
+        [
+          { text: "Manter", style: "cancel" },
+          { text: "Cancelar promoção", style: "destructive", onPress: () => handleCancelBoost(postId) },
+        ]
+      );
+    } else {
+      setPromotePostId(postId);
+      setPromoteModalVisible(true);
+    }
+  }, [boostedPostIds, handleCancelBoost]);
 
   useEffect(() => {
     setPosts([]);
@@ -760,14 +796,18 @@ export default function Profile() {
 
       // ── Load engagement data ──
       try {
-        const [lvl, pvs, boost] = await Promise.all([
+        const [lvl, pvs, boost, myBoosts] = await Promise.all([
           getUserLevelAndBadges(targetUserId),
           getProfileViewStats(targetUserId),
           getActiveBoost(targetUserId),
+          isOwnProfile ? getMyBoostedPosts() : Promise.resolve([]),
         ]);
         setLevelInfo(lvl);
         setProfileViewStats(pvs);
         setBoostInfo(boost);
+        if (myBoosts.length > 0) {
+          setBoostedPostIds(new Set(myBoosts.map((b: PostBoostInfo) => b.post_id)));
+        }
       } catch {
         setLevelInfo(null);
         setProfileViewStats(null);
@@ -1584,11 +1624,16 @@ export default function Profile() {
     ({ item, index }: { item: UiPost; index: number }) => {
       const isVideo = item.media_type === "video";
       const hasThumb = (item as any)._hasThumb !== false;
+      const isBoosted = boostedPostIds.has(Number(item.id));
 
       return (
-        <TouchableOpacity style={styles.cell} activeOpacity={0.8} onPress={() => openPostFromGrid(index)}>
+        <TouchableOpacity
+          style={styles.cell}
+          activeOpacity={0.8}
+          onPress={() => openPostFromGrid(index)}
+          onLongPress={isOwnProfile ? () => openPromoteModal(Number(item.id)) : undefined}
+        >
           {isVideo && !hasThumb ? (
-            // Video without thumbnail — show gradient placeholder with play icon
             <LinearGradient
               colors={[theme.colors.surface, theme.colors.backgroundAlt || theme.colors.background]}
               style={[styles.item, { alignItems: "center", justifyContent: "center" }]}
@@ -1605,10 +1650,19 @@ export default function Profile() {
               <Text style={styles.playText}>▶︎</Text>
             </View>
           )}
+          {isBoosted && (
+            <View style={{
+              position: "absolute", top: 4, right: 4,
+              backgroundColor: "rgba(0,0,0,0.6)", borderRadius: 4,
+              paddingHorizontal: 5, paddingVertical: 2,
+            }}>
+              <Text style={{ color: "#F59E0B", fontSize: 9, fontWeight: "700" }}>⚡</Text>
+            </View>
+          )}
         </TouchableOpacity>
       );
     },
-    [openPostFromGrid, theme],
+    [openPostFromGrid, theme, boostedPostIds, isOwnProfile, openPromoteModal],
   );
 
   // Render for videos/reels tab — with view count overlay
@@ -2736,42 +2790,8 @@ export default function Profile() {
           </View>
         )}
 
-        {/* ── BOOST BUTTON ── */}
-        {isOwnProfile && (
-          <TouchableOpacity
-            activeOpacity={0.8}
-            onPress={boostInfo ? undefined : handleActivateBoost}
-            disabled={boostLoading}
-            style={{
-              marginHorizontal: 16, marginBottom: 12, borderRadius: 12,
-              overflow: "hidden",
-            }}
-          >
-            <LinearGradient
-              colors={boostInfo ? ["#F59E0B", "#EF4444"] : ["#8B5CF6", "#EC4899"]}
-              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-              style={{
-                paddingVertical: 12, paddingHorizontal: 16,
-                alignItems: "center", justifyContent: "center",
-                flexDirection: "row",
-              }}
-            >
-              {boostLoading ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : boostInfo ? (
-                <>
-                  <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>
-                    🔥 Boost ativo — {boostCountdown || "..."}
-                  </Text>
-                </>
-              ) : (
-                <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>
-                  🔥 Destacar meu perfil
-                </Text>
-              )}
-            </LinearGradient>
-          </TouchableOpacity>
-        )}
+
+
 
 
         <ScrollView
@@ -2978,6 +2998,70 @@ export default function Profile() {
           />
 
           {!IS_WEB && <CommentsSheet visible={commentsOpen} postId={commentsPostId} onClose={closeComments} />}
+
+          {/* ── PROMOTE POST MODAL ── */}
+          <Modal
+            visible={promoteModalVisible}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setPromoteModalVisible(false)}
+          >
+            <Pressable
+              style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center" }}
+              onPress={() => setPromoteModalVisible(false)}
+            >
+              <Pressable
+                style={{
+                  backgroundColor: theme.colors.surface,
+                  borderRadius: 16,
+                  padding: 24,
+                  width: "85%",
+                  maxWidth: 360,
+                }}
+                onPress={() => {}}
+              >
+                <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: "700", marginBottom: 8, textAlign: "center" }}>
+                  Promover publicação
+                </Text>
+                <Text style={{ color: theme.colors.textMuted, fontSize: 14, textAlign: "center", marginBottom: 20, lineHeight: 20 }}>
+                  Seu post será exibido no topo do feed de todos os usuários por 24 horas. Máximo de 3 posts simultâneos.
+                </Text>
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={handlePromotePost}
+                  disabled={promoteLoading}
+                  style={{
+                    backgroundColor: theme.colors.primary,
+                    borderRadius: 10,
+                    paddingVertical: 12,
+                    alignItems: "center",
+                    marginBottom: 10,
+                  }}
+                >
+                  {promoteLoading ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>
+                      ⚡ Promover por 24h
+                    </Text>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  onPress={() => setPromoteModalVisible(false)}
+                  style={{
+                    borderRadius: 10,
+                    paddingVertical: 10,
+                    alignItems: "center",
+                    borderWidth: 1,
+                    borderColor: theme.colors.border,
+                  }}
+                >
+                  <Text style={{ color: theme.colors.textMuted, fontWeight: "600", fontSize: 14 }}>Cancelar</Text>
+                </TouchableOpacity>
+              </Pressable>
+            </Pressable>
+          </Modal>
 
           {IS_WEB && commentsOpen && commentsPostId != null && (
             <View style={styles.webOverlay}>

@@ -38,6 +38,7 @@ export type PostCardProps = {
   repostsCount?: number;
   avatarUrl?: string | null;
   liked?: boolean;
+  isBoosted?: boolean;
   onPressMedia?: () => void;
   onLike?: () => void;
   onComment?: () => void;
@@ -234,7 +235,11 @@ function _PostCard(props: PostCardProps) {
           <TouchableOpacity activeOpacity={0.7} onPress={onPressUser} disabled={!onPressUser}>
             <Text style={styles.username}>{username || "user"}</Text>
           </TouchableOpacity>
-          <Text style={styles.date}>{timeAgo(created_at)}</Text>
+          {props.isBoosted ? (
+            <Text style={styles.sponsoredLabel}>Patrocinado</Text>
+          ) : (
+            <Text style={styles.date}>{timeAgo(created_at)}</Text>
+          )}
         </View>
       </View>
 
@@ -339,6 +344,7 @@ const styles = StyleSheet.create({
   },
   username: { color: Colors.text, fontWeight: "700" },
   date: { color: Colors.textMuted, fontSize: 12 },
+  sponsoredLabel: { color: Colors.textMuted, fontSize: 12, fontWeight: "500" },
   mediaContainer: {
     width: "100%",
     aspectRatio: 4 / 5,

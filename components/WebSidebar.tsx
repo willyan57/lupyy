@@ -93,7 +93,7 @@ export default function WebSidebar() {
     fetchUnread();
     const interval = setInterval(fetchUnread, 30000);
     return () => clearInterval(interval);
-  }, [fetchUnread]);
+  }, [fetchUnread, pathname]);
 
   const isActive = (item: SidebarItem) => {
     if (item.key === "feed") return pathname.includes("/feed");
