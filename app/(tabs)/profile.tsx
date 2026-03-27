@@ -31,12 +31,14 @@ import {
   View
 } from "react-native";
 
+import BlockedUsersSheet from "@/components/BlockedUsersSheet";
 import CommentsSheet from "@/components/CommentsSheet";
 import FollowModal from "@/components/FollowModal";
 import FullscreenViewer, { ViewerItem } from "@/components/FullscreenViewer";
 import MatchCelebration from "@/components/MatchCelebration";
 import PeopleListSheet from "@/components/PeopleListSheet";
 import ProfileHighlightEditor from "@/components/ProfileHighlightEditor";
+import ReportModal from "@/components/ReportModal";
 import SwipeableTabScreen from "@/components/SwipeableTabScreen";
 import ThemeSelector from "@/components/ThemeSelector";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -60,6 +62,7 @@ import {
   getXpProgress,
   registerProfileView
 } from "@/lib/engagement";
+import { blockUser, isUserBlocked, unblockUser } from "@/lib/moderation";
 import {
   type Highlight,
   fetchHighlightItems,
@@ -432,6 +435,12 @@ export default function Profile() {
   const [promoteLoading, setPromoteLoading] = useState(false);
   const [visitorsLoading, setVisitorsLoading] = useState(false);
 
+  // ── Moderation state ──
+  const [reportModalVisible, setReportModalVisible] = useState(false);
+  const [isTargetBlocked, setIsTargetBlocked] = useState(false);
+  const [blockingUser, setBlockingUser] = useState(false);
+  const [actionSheetVisible, setActionSheetVisible] = useState(false);
+
   const isOwnProfile = !!authUserId && userId === authUserId;
   const isViewingOther = !!routeUserId && routeUserId !== authUserId;
 
@@ -796,9 +805,10 @@ export default function Profile() {
         setBoostInfo(null);
       }
 
-      // Register profile view if viewing someone else's profile
+      // Register profile view & check block status if viewing someone else
       if (u.id && targetUserId !== u.id) {
         registerProfileView(targetUserId).catch(() => {});
+        isUserBlocked(u.id, targetUserId).then(setIsTargetBlocked).catch(() => {});
       }
     } finally {
       setLoadingHeader(false);
@@ -1879,6 +1889,29 @@ export default function Profile() {
       };
 
       // Special sub-screens with real content
+      if (settingsSubScreen === "blocked") {
+        return (
+          <SafeAreaView style={[styles.screen, { backgroundColor: theme.colors.background }]}>
+            <View style={styles.settingsHeader}>
+              <TouchableOpacity
+                onPress={() => setSettingsSubScreen(null)}
+                activeOpacity={0.7}
+                style={styles.settingsBackBtn}
+              >
+                <Text style={[styles.settingsBackIcon, { color: theme.colors.text }]}>←</Text>
+              </TouchableOpacity>
+              <Text style={[styles.settingsTitle, { color: theme.colors.text }]}>{info.title}</Text>
+              <View style={{ width: 40 }} />
+            </View>
+            <BlockedUsersSheet
+              visible={true}
+              onClose={() => setSettingsSubScreen(null)}
+              {...{ embedded: true }}
+            />
+          </SafeAreaView>
+        );
+      }
+
       if (settingsSubScreen === "appearance") {
         return (
           <SafeAreaView style={[styles.screen, { backgroundColor: theme.colors.background }]}>
@@ -2678,8 +2711,12 @@ export default function Profile() {
                 </TouchableOpacity>
               )}
 
-              <TouchableOpacity style={[styles.actionButton, { borderColor: theme.colors.border }]} activeOpacity={0.8}>
-                <Text style={[styles.actionButtonText, { color: theme.colors.text }]}>{t("profile.showMyId")}</Text>
+              <TouchableOpacity
+                style={[styles.smallActionButton, { borderColor: theme.colors.border }]}
+                activeOpacity={0.8}
+                onPress={() => setActionSheetVisible(true)}
+              >
+                <Text style={[styles.smallActionButtonText, { color: theme.colors.text }]}>⋯</Text>
               </TouchableOpacity>
             </>
           )}
@@ -3185,6 +3222,89 @@ export default function Profile() {
               openConversation("crush");
             }}
           />
+
+          {/* ── ACTION SHEET MODAL (block/report) ── */}
+          <Modal
+            visible={actionSheetVisible}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setActionSheetVisible(false)}
+          >
+            <Pressable
+              style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}
+              onPress={() => setActionSheetVisible(false)}
+            >
+              <Pressable
+                onPress={(e) => e.stopPropagation()}
+                style={{
+                  backgroundColor: theme.colors.surface,
+                  borderTopLeftRadius: 16,
+                  borderTopRightRadius: 16,
+                  paddingBottom: Platform.OS === "ios" ? 34 : 16,
+                  paddingTop: 8,
+                }}
+              >
+                <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: theme.colors.border, alignSelf: "center", marginBottom: 16 }} />
+                <Text style={{ color: theme.colors.textMuted, fontSize: 13, textAlign: "center", marginBottom: 12 }}>
+                  @{username ?? "usuário"}
+                </Text>
+
+                <TouchableOpacity
+                  style={{ flexDirection: "row", alignItems: "center", paddingVertical: 14, paddingHorizontal: 20 }}
+                  onPress={async () => {
+                    if (!userId) return;
+                    setActionSheetVisible(false);
+                    setBlockingUser(true);
+                    if (isTargetBlocked) {
+                      const res = await unblockUser(userId);
+                      if (res.ok) setIsTargetBlocked(false);
+                    } else {
+                      const res = await blockUser(userId);
+                      if (res.ok) {
+                        setIsTargetBlocked(true);
+                        Alert.alert("Bloqueado", `@${username ?? "usuário"} foi bloqueado.`);
+                      }
+                    }
+                    setBlockingUser(false);
+                  }}
+                >
+                  <Text style={{ fontSize: 20, marginRight: 12 }}>{isTargetBlocked ? "✅" : "🚫"}</Text>
+                  <Text style={{ color: "#ef4444", fontSize: 16, fontWeight: "600" }}>
+                    {isTargetBlocked ? "Desbloquear" : "Bloquear"}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={{ flexDirection: "row", alignItems: "center", paddingVertical: 14, paddingHorizontal: 20 }}
+                  onPress={() => {
+                    setActionSheetVisible(false);
+                    setReportModalVisible(true);
+                  }}
+                >
+                  <Text style={{ fontSize: 20, marginRight: 12 }}>⚠️</Text>
+                  <Text style={{ color: "#ef4444", fontSize: 16, fontWeight: "600" }}>Denunciar</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={{ alignItems: "center", paddingVertical: 14, paddingHorizontal: 20, marginTop: 4 }}
+                  onPress={() => setActionSheetVisible(false)}
+                >
+                  <Text style={{ color: theme.colors.text, fontSize: 16 }}>Cancelar</Text>
+                </TouchableOpacity>
+              </Pressable>
+            </Pressable>
+          </Modal>
+
+          {!isOwnProfile && userId && (
+            <ReportModal
+              visible={reportModalVisible}
+              onClose={() => setReportModalVisible(false)}
+              targetUserId={userId}
+              onReported={() => {
+                Alert.alert("Obrigado", "Sua denúncia foi enviada com sucesso.");
+              }}
+            />
+          )}
 
           {/* ── HIGHLIGHT EDITOR ── */}
           {isOwnProfile && (

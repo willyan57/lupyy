@@ -1,11 +1,9 @@
 /**
  * SwipeableTabScreen – Instagram-style peek-swipe navigation between tabs.
  *
- * Wraps any tab screen and adds horizontal drag gesture that:
- *  • Translates the current screen following the finger
- *  • Reveals an edge shadow + destination label ("peek")
- *  • Navigates on release past threshold with smooth animation
- *  • Springs back if below threshold
+ * Full-screen destination panels slide in from the edges with parallax,
+ * while the current screen slides and scales slightly — matching Instagram's
+ * camera/reels swipe feel.
  *
  * Mobile only (APK + mobile web). Desktop web is no-op.
  */
@@ -46,8 +44,10 @@ type Props = {
 };
 
 const SCREEN_W = Dimensions.get("window").width;
-const EDGE_SHADOW_W = 60;
-const MAX_DRAG = SCREEN_W * 0.45; // max peek distance
+const MAX_DRAG = SCREEN_W * 0.45;
+const PARALLAX_FACTOR = 0.35; // destination moves at 35% of drag speed
+const SCALE_MIN = 0.92; // current screen scales down to 92%
+const BORDER_RADIUS_MAX = 14; // rounded corners when scaling
 
 export default function SwipeableTabScreen({
   children,
@@ -63,7 +63,6 @@ export default function SwipeableTabScreen({
   const translateX = useRef(new Animated.Value(0)).current;
   const isNavigating = useRef(false);
 
-  // On desktop web, render children directly
   const isDesktopWeb =
     Platform.OS === "web" &&
     disableOnDesktop &&
@@ -87,8 +86,6 @@ export default function SwipeableTabScreen({
         } else {
           router.replace(target.route as any);
         }
-
-        // Reset after navigation
         setTimeout(() => {
           translateX.setValue(0);
           isNavigating.current = false;
@@ -101,7 +98,6 @@ export default function SwipeableTabScreen({
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_evt, gs) => {
-        // Only activate for horizontal drags
         if (isNavigating.current) return false;
         return Math.abs(gs.dx) > Math.abs(gs.dy) && Math.abs(gs.dx) > 12;
       },
@@ -109,16 +105,10 @@ export default function SwipeableTabScreen({
 
       onPanResponderMove: (_evt, gs) => {
         const { dx } = gs;
-
-        // Right swipe (positive dx) → leftTarget
         if (dx > 0 && leftTarget) {
-          const clamped = Math.min(dx * 0.7, MAX_DRAG);
-          translateX.setValue(clamped);
-        }
-        // Left swipe (negative dx) → rightTarget
-        else if (dx < 0 && rightTarget) {
-          const clamped = Math.max(dx * 0.7, -MAX_DRAG);
-          translateX.setValue(clamped);
+          translateX.setValue(Math.min(dx * 0.7, MAX_DRAG));
+        } else if (dx < 0 && rightTarget) {
+          translateX.setValue(Math.max(dx * 0.7, -MAX_DRAG));
         }
       },
 
@@ -126,19 +116,15 @@ export default function SwipeableTabScreen({
         const { dx, vx } = gs;
         const velocityThreshold = 0.5;
 
-        // Right swipe → leftTarget
         if (dx > 0 && leftTarget && (dx > threshold || vx > velocityThreshold)) {
           navigate(leftTarget, "right");
           return;
         }
-
-        // Left swipe → rightTarget
         if (dx < 0 && rightTarget && (Math.abs(dx) > threshold || Math.abs(vx) > velocityThreshold)) {
           navigate(rightTarget, "left");
           return;
         }
 
-        // Snap back
         Animated.spring(translateX, {
           toValue: 0,
           useNativeDriver: true,
@@ -162,133 +148,150 @@ export default function SwipeableTabScreen({
     return <>{children}</>;
   }
 
-  // Edge shadows opacity based on drag
-  const leftShadowOpacity = translateX.interpolate({
+  // --- Interpolations ---
+
+  // Current screen scale: shrinks slightly as you drag
+  const contentScale = translateX.interpolate({
+    inputRange: [-MAX_DRAG, 0, MAX_DRAG],
+    outputRange: [SCALE_MIN, 1, SCALE_MIN],
+    extrapolate: "clamp",
+  });
+
+  // Current screen border radius: increases as you drag
+  const contentBorderRadius = translateX.interpolate({
+    inputRange: [-MAX_DRAG, 0, MAX_DRAG],
+    outputRange: [BORDER_RADIUS_MAX, 0, BORDER_RADIUS_MAX],
+    extrapolate: "clamp",
+  });
+
+  // Left destination: starts off-screen left, slides in with parallax
+  const leftDestTranslateX = translateX.interpolate({
     inputRange: [0, MAX_DRAG],
-    outputRange: [0, 0.6],
+    outputRange: [-SCREEN_W * (1 - PARALLAX_FACTOR), 0],
     extrapolate: "clamp",
   });
 
-  const rightShadowOpacity = translateX.interpolate({
+  // Right destination: starts off-screen right, slides in with parallax
+  const rightDestTranslateX = translateX.interpolate({
     inputRange: [-MAX_DRAG, 0],
-    outputRange: [0.6, 0],
+    outputRange: [0, SCREEN_W * (1 - PARALLAX_FACTOR)],
     extrapolate: "clamp",
   });
 
-  // Destination label opacity
-  const leftLabelOpacity = translateX.interpolate({
-    inputRange: [0, threshold, MAX_DRAG],
-    outputRange: [0, 0.4, 1],
+  // Destination opacity
+  const leftDestOpacity = translateX.interpolate({
+    inputRange: [0, threshold * 0.5, MAX_DRAG],
+    outputRange: [0, 0.6, 1],
     extrapolate: "clamp",
   });
-  const rightLabelOpacity = translateX.interpolate({
-    inputRange: [-MAX_DRAG, -threshold, 0],
-    outputRange: [1, 0.4, 0],
+  const rightDestOpacity = translateX.interpolate({
+    inputRange: [-MAX_DRAG, -threshold * 0.5, 0],
+    outputRange: [1, 0.6, 0],
     extrapolate: "clamp",
   });
 
-  // Destination icon scale
-  const leftIconScale = translateX.interpolate({
-    inputRange: [0, MAX_DRAG],
-    outputRange: [0.6, 1],
-    extrapolate: "clamp",
-  });
-  const rightIconScale = translateX.interpolate({
-    inputRange: [-MAX_DRAG, 0],
-    outputRange: [1, 0.6],
+  // Overlay darkening on current screen edges
+  const overlayOpacity = translateX.interpolate({
+    inputRange: [-MAX_DRAG, 0, MAX_DRAG],
+    outputRange: [0.3, 0, 0.3],
     extrapolate: "clamp",
   });
 
   return (
     <View style={styles.root} {...panResponder.panHandlers}>
-      {/* Left peek indicator (swipe right → shows left target) */}
+      {/* Left destination panel (full screen behind) */}
       {leftTarget && (
         <Animated.View
           style={[
-            styles.peekIndicator,
-            styles.peekLeft,
+            styles.destinationPanel,
             {
-              opacity: leftLabelOpacity,
-              transform: [{ scale: leftIconScale }],
+              backgroundColor: theme.colors.background,
+              transform: [{ translateX: leftDestTranslateX }],
+              opacity: leftDestOpacity,
             },
           ]}
           pointerEvents="none"
         >
-          {leftTarget.icon && (
-            <Ionicons
-              name={leftTarget.icon}
-              size={28}
-              color={theme.colors.textMuted}
-            />
-          )}
-          {leftTarget.label && (
-            <Animated.Text
-              style={[styles.peekLabel, { color: theme.colors.textMuted }]}
-            >
-              {leftTarget.label}
-            </Animated.Text>
-          )}
+          <View style={styles.destinationContent}>
+            {leftTarget.icon && (
+              <Ionicons
+                name={leftTarget.icon}
+                size={48}
+                color={theme.colors.textMuted}
+                style={styles.destIcon}
+              />
+            )}
+            {leftTarget.label && (
+              <Animated.Text
+                style={[
+                  styles.destLabel,
+                  { color: theme.colors.textMuted },
+                ]}
+              >
+                {leftTarget.label}
+              </Animated.Text>
+            )}
+          </View>
         </Animated.View>
       )}
 
-      {/* Right peek indicator (swipe left → shows right target) */}
+      {/* Right destination panel (full screen behind) */}
       {rightTarget && (
         <Animated.View
           style={[
-            styles.peekIndicator,
-            styles.peekRight,
+            styles.destinationPanel,
             {
-              opacity: rightLabelOpacity,
-              transform: [{ scale: rightIconScale }],
+              backgroundColor: theme.colors.background,
+              transform: [{ translateX: rightDestTranslateX }],
+              opacity: rightDestOpacity,
             },
           ]}
           pointerEvents="none"
         >
-          {rightTarget.icon && (
-            <Ionicons
-              name={rightTarget.icon}
-              size={28}
-              color={theme.colors.textMuted}
-            />
-          )}
-          {rightTarget.label && (
-            <Animated.Text
-              style={[styles.peekLabel, { color: theme.colors.textMuted }]}
-            >
-              {rightTarget.label}
-            </Animated.Text>
-          )}
+          <View style={styles.destinationContent}>
+            {rightTarget.icon && (
+              <Ionicons
+                name={rightTarget.icon}
+                size={48}
+                color={theme.colors.textMuted}
+                style={styles.destIcon}
+              />
+            )}
+            {rightTarget.label && (
+              <Animated.Text
+                style={[
+                  styles.destLabel,
+                  { color: theme.colors.textMuted },
+                ]}
+              >
+                {rightTarget.label}
+              </Animated.Text>
+            )}
+          </View>
         </Animated.View>
       )}
 
-      {/* Main screen content with translateX */}
+      {/* Main screen content — slides + scales */}
       <Animated.View
         style={[
           styles.content,
           {
-            transform: [{ translateX }],
             backgroundColor: theme.colors.background,
+            transform: [
+              { translateX },
+              { scale: contentScale },
+            ],
+            borderRadius: contentBorderRadius,
           },
         ]}
       >
         {children}
 
-        {/* Left edge shadow (visible when swiping right) */}
+        {/* Dark overlay on current screen during drag */}
         <Animated.View
           style={[
-            styles.edgeShadow,
-            styles.edgeShadowLeft,
-            { opacity: leftShadowOpacity },
-          ]}
-          pointerEvents="none"
-        />
-
-        {/* Right edge shadow (visible when swiping left) */}
-        <Animated.View
-          style={[
-            styles.edgeShadow,
-            styles.edgeShadowRight,
-            { opacity: rightShadowOpacity },
+            styles.overlay,
+            { opacity: overlayOpacity },
           ]}
           pointerEvents="none"
         />
@@ -301,58 +304,46 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     overflow: "hidden",
+    backgroundColor: "#000",
   },
   content: {
     flex: 1,
-    // Shadow for depth effect
+    overflow: "hidden",
     ...(Platform.OS === "web"
       ? {
           // @ts-ignore web shadow
-          boxShadow: "0 0 30px rgba(0,0,0,0.3)",
+          boxShadow: "0 0 40px rgba(0,0,0,0.5)",
         }
       : {
           shadowColor: "#000",
           shadowOffset: { width: 0, height: 0 },
-          shadowOpacity: 0.3,
-          shadowRadius: 15,
-          elevation: 10,
+          shadowOpacity: 0.5,
+          shadowRadius: 20,
+          elevation: 15,
         }),
   },
-  edgeShadow: {
-    position: "absolute",
-    top: 0,
-    bottom: 0,
-    width: EDGE_SHADOW_W,
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "#000",
   },
-  edgeShadowLeft: {
-    left: 0,
-    // Gradient from dark to transparent going right
-    backgroundColor: "rgba(0,0,0,0.15)",
-    borderTopRightRadius: 0,
-  },
-  edgeShadowRight: {
-    right: 0,
-    backgroundColor: "rgba(0,0,0,0.15)",
-  },
-  peekIndicator: {
-    position: "absolute",
-    top: 0,
-    bottom: 0,
-    width: 80,
+  destinationPanel: {
+    ...StyleSheet.absoluteFillObject,
     justifyContent: "center",
     alignItems: "center",
-    zIndex: -1,
   },
-  peekLeft: {
-    left: 10,
+  destinationContent: {
+    alignItems: "center",
+    justifyContent: "center",
   },
-  peekRight: {
-    right: 10,
+  destIcon: {
+    marginBottom: 12,
+    opacity: 0.6,
   },
-  peekLabel: {
-    fontSize: 10,
-    fontWeight: "600",
-    marginTop: 4,
-    textAlign: "center",
+  destLabel: {
+    fontSize: 14,
+    fontWeight: "700",
+    letterSpacing: 1,
+    textTransform: "uppercase",
+    opacity: 0.5,
   },
 });
