@@ -1,12 +1,12 @@
+import SwipeableTabScreen from "@/components/SwipeableTabScreen";
 import { useTheme } from "@/contexts/ThemeContext";
 import { supabase } from "@/lib/supabase";
 import { Href, useRouter } from "expo-router";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
   Keyboard,
-  PanResponder,
   Platform,
   Pressable,
   StyleSheet,
@@ -30,28 +30,6 @@ export default function SearchScreen() {
   const [results, setResults] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const swipeThreshold = 60;
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_evt, gestureState) => {
-        const { dx, dy } = gestureState;
-        return Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 10;
-      },
-      onPanResponderRelease: (_evt, gestureState) => {
-        const { dx } = gestureState;
-        if (dx > swipeThreshold) {
-          if (Platform.OS !== "web") {
-            router.replace("/conversations");
-          }
-        } else if (dx < -swipeThreshold) {
-          if (Platform.OS !== "web") {
-            router.replace("/profile");
-          }
-        }
-      },
-    })
-  ).current;
 
   async function handleSearch(text: string) {
     setQuery(text);
@@ -96,8 +74,11 @@ export default function SearchScreen() {
   }
 
   return (
+    <SwipeableTabScreen
+      leftTarget={{ route: "/(tabs)/conversations", icon: "chatbubble-outline", label: "Mensagens" }}
+      rightTarget={{ route: "/(tabs)/profile", icon: "person-outline", label: "Perfil" }}
+    >
     <View
-      {...(Platform.OS !== "web" ? (panResponder as any).panHandlers : {})}
       style={[
         styles.container,
         { backgroundColor: theme.colors.background },
@@ -171,6 +152,7 @@ export default function SearchScreen() {
         )}
       />
     </View>
+    </SwipeableTabScreen>
   );
 }
 

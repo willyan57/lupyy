@@ -15,7 +15,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
-  PanResponder,
   Platform,
   RefreshControl,
   Share,
@@ -28,6 +27,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import StoriesBar, { StoryUser } from "@/components/StoriesBar";
 import StoryViewer, { StoryItem } from "@/components/StoryViewer";
+import SwipeableTabScreen from "@/components/SwipeableTabScreen";
 import { Ionicons } from "@expo/vector-icons";
 
 const POSTS_TABLE = "posts" as const;
@@ -131,23 +131,6 @@ export default function Feed() {
   ]);
   const [storiesByUser, setStoriesByUser] = useState<Record<string, StoryItem[]>>({});
 
-  const swipeThreshold = 60;
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_evt, gestureState) => {
-        const { dx, dy } = gestureState;
-        return Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 10;
-      },
-      onPanResponderRelease: (_evt, gestureState) => {
-        const { dx } = gestureState;
-        if (dx > swipeThreshold) {
-          if (!isDesktopWeb) router.push("/capture");
-        } else if (dx < -swipeThreshold) {
-          if (!isDesktopWeb) router.replace("/(tabs)/tribes");
-        }
-      },
-    })
-  ).current;
 
   const viewabilityConfig = useMemo(
     () => ({ itemVisiblePercentThreshold: 60 }),
@@ -621,8 +604,11 @@ export default function Feed() {
   );
 
   return (
+    <SwipeableTabScreen
+      leftTarget={{ route: "/capture", icon: "camera-outline", label: "Câmera", push: true }}
+      rightTarget={{ route: "/(tabs)/tribes", icon: "people-outline", label: "Tribos" }}
+    >
     <SafeAreaView
-      {...(!isDesktopWeb ? (panResponder as any).panHandlers : {})}
       style={[styles.container, { backgroundColor: theme.colors.background }]}
       edges={["top", "left", "right"]}
     >
@@ -767,6 +753,7 @@ export default function Feed() {
         loading={followModalLoading}
       />
     </SafeAreaView>
+    </SwipeableTabScreen>
   );
 }
 

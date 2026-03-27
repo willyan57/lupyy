@@ -18,7 +18,6 @@ import {
   Alert, Animated, Dimensions,
   FlatList,
   Modal,
-  PanResponder,
   Platform,
   Pressable,
   RefreshControl,
@@ -38,6 +37,7 @@ import FullscreenViewer, { ViewerItem } from "@/components/FullscreenViewer";
 import MatchCelebration from "@/components/MatchCelebration";
 import PeopleListSheet from "@/components/PeopleListSheet";
 import ProfileHighlightEditor from "@/components/ProfileHighlightEditor";
+import SwipeableTabScreen from "@/components/SwipeableTabScreen";
 import ThemeSelector from "@/components/ThemeSelector";
 import { useTheme } from "@/contexts/ThemeContext";
 import { ConversationType, getOrCreateConversation } from "@/lib/conversations";
@@ -201,24 +201,6 @@ export default function Profile() {
   const { theme } = useTheme();
   const { t } = useTranslation();
 
-  const swipeThreshold = 60;
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_evt, gestureState) => {
-        const { dx, dy } = gestureState;
-        return Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 10;
-      },
-      onPanResponderRelease: (_evt, gestureState) => {
-        const { dx } = gestureState;
-        if (dx > swipeThreshold) {
-          if (!isDesktopWeb) {
-            router.replace("/(tabs)/search");
-          }
-        }
-      },
-    }),
-  ).current;
 
   const routeUserId = typeof params.userId === "string" ? params.userId : null;
 
@@ -2907,8 +2889,10 @@ export default function Profile() {
   const isLoadingInitial = loadingHeader && posts.length === 0;
 
   return (
+    <SwipeableTabScreen
+      leftTarget={{ route: "/(tabs)/search", icon: "search-outline", label: "Pesquisar" }}
+    >
     <SafeAreaView
-      {...(!isDesktopWeb ? (panResponder as any).panHandlers : {})}
       style={[styles.screen, { backgroundColor: theme.colors.background }]}
     >
       {isLoadingInitial ? (
@@ -3334,6 +3318,7 @@ export default function Profile() {
         </>
       )}
     </SafeAreaView>
+    </SwipeableTabScreen>
   );
 }
 

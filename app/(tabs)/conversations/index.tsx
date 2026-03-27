@@ -1,4 +1,5 @@
 // app/(tabs)/conversations/index.tsx
+import SwipeableTabScreen from "@/components/SwipeableTabScreen";
 import { getOrCreateConversation } from "@/lib/conversations";
 import { supabase } from "@/lib/supabase";
 import { useFocusEffect } from "@react-navigation/native";
@@ -642,6 +643,10 @@ export default function ConversationsScreen() {
   }
 
   return (
+    <SwipeableTabScreen
+      leftTarget={{ route: "/(tabs)/tribes", icon: "people-outline", label: "Tribos" }}
+      rightTarget={{ route: "/(tabs)/search", icon: "search-outline", label: "Pesquisar" }}
+    >
     <View style={styles.container}>
       {/* ── Header ── */}
       <View style={styles.header}>
@@ -912,6 +917,7 @@ export default function ConversationsScreen() {
         </TouchableOpacity>
       </Modal>
     </View>
+    </SwipeableTabScreen>
   );
 }
 

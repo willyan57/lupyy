@@ -1,4 +1,5 @@
 
+import SwipeableTabScreen from "@/components/SwipeableTabScreen";
 import { useTheme } from "@/contexts/ThemeContext";
 import { supabase } from "@/lib/supabase";
 import { Ionicons } from "@expo/vector-icons";
@@ -217,6 +218,10 @@ export default function TribesScreen() {
   };
 
   return (
+    <SwipeableTabScreen
+      leftTarget={{ route: "/(tabs)/feed", icon: "home-outline", label: "Feed" }}
+      rightTarget={{ route: "/(tabs)/conversations", icon: "chatbubble-outline", label: "Mensagens" }}
+    >
     <SafeAreaView style={[s.safe, { backgroundColor: theme.colors.background }]}>
       <ScrollView
         contentContainerStyle={[s.container, { paddingHorizontal: isLargeWeb ? 24 : 16, paddingBottom: 40 }]}
@@ -332,6 +337,7 @@ export default function TribesScreen() {
         )}
       </ScrollView>
     </SafeAreaView>
+    </SwipeableTabScreen>
   );
 }
 
