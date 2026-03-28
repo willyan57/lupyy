@@ -278,7 +278,7 @@ export default function TribesScreen() {
             </View>
 
             {/* My tribes */}
-            <View style={[s.sectionHeader, { marginTop: 20 }]}>
+            <View style={[s.sectionHeader, { marginTop: 20 }]}> 
               <Ionicons name="shield-checkmark" size={18} color={theme.colors.primary} />
               <Text style={[s.sectionTitle, { color: theme.colors.text }]}>Minhas tribos</Text>
             </View>
@@ -288,12 +288,16 @@ export default function TribesScreen() {
                   <Ionicons name="people-outline" size={28} color={theme.colors.primary} />
                 </View>
                 <Text style={[s.emptyTitle, { color: theme.colors.text }]}>Você ainda não entrou em nenhuma tribo</Text>
-                <Text style={[s.emptySub, { color: theme.colors.textMuted }]}>
+                <Text style={[s.emptySub, { color: theme.colors.textMuted }]}> 
                   Explore abaixo por categoria, ou crie a sua e chame seus amigos.
                 </Text>
               </View>
             ) : (
-              <FlatList data={myTribes} keyExtractor={(item) => item.id} renderItem={renderMyRow} scrollEnabled={false} contentContainerStyle={{ paddingVertical: 4 }} />
+              <View style={{ paddingVertical: 4 }}>
+                {myTribes.map((item) => (
+                  <View key={item.id}>{renderMyRow({ item })}</View>
+                ))}
+              </View>
             )}
 
             {/* Categories */}
@@ -330,7 +334,11 @@ export default function TribesScreen() {
                 <Text style={[s.resultsCount, { color: theme.colors.textMuted }]}>
                   {filteredTribes.length} tribo{filteredTribes.length !== 1 ? "s" : ""} em "{selectedCategory}"
                 </Text>
-                <FlatList data={filteredTribes.slice(0, 20)} keyExtractor={(item) => item.id} renderItem={renderMyRow} scrollEnabled={false} contentContainerStyle={{ paddingVertical: 4 }} />
+                <View style={{ paddingVertical: 4 }}>
+                  {filteredTribes.slice(0, 20).map((item) => (
+                    <View key={item.id}>{renderMyRow({ item })}</View>
+                  ))}
+                </View>
               </View>
             )}
           </>

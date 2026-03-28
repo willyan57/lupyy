@@ -278,6 +278,50 @@ export default function ConversationsScreen() {
         return;
       }
 
+      // Reactivate conversation if it was previously deleted by this user
+      // Set deleted_at = NULL so the RPC includes it again;
+      // also try DELETE as fallback in case UPDATE doesn't match due to RLS
+      const { error: reactivateError } = await supabase
+        .from("conversation_deletions")
+        .delete()
+        .eq("conversation_id", conversation.id)
+        .eq("user_id", currentUserId);
+
+      if (reactivateError) {
+        console.warn("Reactivation fallback - delete error:", reactivateError);
+      }
+
+      // Get the other user's profile for optimistic list update
+      const { data: otherProfile } = await supabase
+        .from("profiles")
+        .select("id, username, full_name, avatar_url")
+        .eq("id", otherUserId)
+        .maybeSingle();
+
+      // Optimistic update: immediately add conversation to local state
+      const optimisticConversation: RpcConversation = {
+        id: conversation.id,
+        conversation_type: conversation.conversation_type ?? "friend",
+        last_message: null,
+        last_message_at: conversation.last_message_at ?? null,
+        created_at: (conversation as any).created_at ?? new Date().toISOString(),
+        other_user_id: otherUserId,
+        other_user_username: (otherProfile as any)?.username ?? null,
+        other_user_full_name: (otherProfile as any)?.full_name ?? null,
+        other_user_avatar: (otherProfile as any)?.avatar_url ?? null,
+      };
+
+      if (conversationType === "crush") {
+        setCrushConversations((prev) => {
+          if (prev.some((c) => c.id === conversation.id)) return prev;
+          return [optimisticConversation, ...prev];
+        });
+      } else {
+        setFriendConversations((prev) => {
+          if (prev.some((c) => c.id === conversation.id)) return prev;
+          return [optimisticConversation, ...prev];
+        });
+      }
 
       setShowNewChat(false);
       setFollowerSearch("");
@@ -289,8 +333,6 @@ export default function ConversationsScreen() {
           type: conversation.conversation_type === "crush" ? "crush" : "friend",
         },
       });
-
-      void loadConversations(currentUserId);
     } catch (e: any) {
       console.error("handleStartConversation error:", e);
       const message = e?.message ?? "Não foi possível iniciar a conversa.";

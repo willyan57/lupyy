@@ -99,14 +99,8 @@ export default function SwipeableTabScreen({
     PanResponder.create({
       onMoveShouldSetPanResponder: (_evt, gs) => {
         if (isNavigating.current) return false;
-        // Only capture if strongly horizontal AND started near screen edges (outer 15%)
-        const isHorizontal = Math.abs(gs.dx) > Math.abs(gs.dy) * 1.8 && Math.abs(gs.dx) > 18;
-        if (!isHorizontal) return false;
-        // Don't capture if the gesture started far from edges — lets inner carousels work
-        const startX = (_evt.nativeEvent as any).pageX ?? _evt.nativeEvent.locationX ?? SCREEN_W / 2;
-        const edgeZone = SCREEN_W * 0.15;
-        const isFromEdge = startX < edgeZone || startX > SCREEN_W - edgeZone;
-        return isFromEdge;
+        // Edge detection is now handled by the edge zone Views, so just check horizontal
+        return Math.abs(gs.dx) > Math.abs(gs.dy) * 1.5 && Math.abs(gs.dx) > 12;
       },
       onMoveShouldSetPanResponderCapture: () => false,
 
@@ -204,8 +198,10 @@ export default function SwipeableTabScreen({
     extrapolate: "clamp",
   });
 
+  const EDGE_WIDTH = SCREEN_W * 0.12;
+
   return (
-    <View style={styles.root} {...panResponder.panHandlers}>
+    <View style={styles.root}>
       {/* Left destination panel (full screen behind) */}
       {leftTarget && (
         <Animated.View
@@ -303,6 +299,20 @@ export default function SwipeableTabScreen({
           pointerEvents="none"
         />
       </Animated.View>
+
+      {/* Invisible edge zones for swipe detection — don't block content scrolling */}
+      {leftTarget && (
+        <View
+          style={[styles.edgeZone, { left: 0, width: EDGE_WIDTH }]}
+          {...panResponder.panHandlers}
+        />
+      )}
+      {rightTarget && (
+        <View
+          style={[styles.edgeZone, { right: 0, width: EDGE_WIDTH }]}
+          {...panResponder.panHandlers}
+        />
+      )}
     </View>
   );
 }
@@ -352,5 +362,12 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     textTransform: "uppercase",
     opacity: 0.5,
+  },
+  edgeZone: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    zIndex: 10,
+    backgroundColor: "transparent",
   },
 });

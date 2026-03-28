@@ -1580,6 +1580,13 @@ export default function Profile() {
           conversationType,
         });
 
+        // Reactivate if previously deleted
+        await supabase
+          .from("conversation_deletions")
+          .delete()
+          .eq("conversation_id", conversation.id)
+          .eq("user_id", authUserId);
+
         router.push({
           pathname: "/conversations/[id]",
           params: {
