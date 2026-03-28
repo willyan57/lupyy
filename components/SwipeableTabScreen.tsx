@@ -95,14 +95,22 @@ export default function SwipeableTabScreen({
     [router, translateX]
   );
 
+  const touchStartX = useRef(0);
+
   const panResponder = useRef(
     PanResponder.create({
-      onMoveShouldSetPanResponder: (_evt, gs) => {
+      onStartShouldSetPanResponder: () => false,
+      onStartShouldSetPanResponderCapture: () => false,
+      onMoveShouldSetPanResponderCapture: () => false,
+      onMoveShouldSetPanResponder: (evt, gs) => {
         if (isNavigating.current) return false;
-        // Edge detection is now handled by the edge zone Views, so just check horizontal
+        // Only claim if touch started in edge zone AND is a clear horizontal swipe
+        const startX = evt.nativeEvent.pageX - gs.dx;
+        const inLeftEdge = leftTarget && startX < EDGE_WIDTH;
+        const inRightEdge = rightTarget && startX > SCREEN_W - EDGE_WIDTH;
+        if (!inLeftEdge && !inRightEdge) return false;
         return Math.abs(gs.dx) > Math.abs(gs.dy) * 1.5 && Math.abs(gs.dx) > 12;
       },
-      onMoveShouldSetPanResponderCapture: () => false,
 
       onPanResponderMove: (_evt, gs) => {
         const { dx } = gs;
@@ -198,7 +206,7 @@ export default function SwipeableTabScreen({
     extrapolate: "clamp",
   });
 
-  const EDGE_WIDTH = SCREEN_W * 0.12;
+  const EDGE_WIDTH = SCREEN_W * 0.15;
 
   return (
     <View style={styles.root}>
@@ -276,6 +284,7 @@ export default function SwipeableTabScreen({
 
       {/* Main screen content — slides + scales */}
       <Animated.View
+        {...panResponder.panHandlers}
         style={[
           styles.content,
           {
@@ -299,20 +308,6 @@ export default function SwipeableTabScreen({
           pointerEvents="none"
         />
       </Animated.View>
-
-      {/* Invisible edge zones for swipe detection — don't block content scrolling */}
-      {leftTarget && (
-        <View
-          style={[styles.edgeZone, { left: 0, width: EDGE_WIDTH }]}
-          {...panResponder.panHandlers}
-        />
-      )}
-      {rightTarget && (
-        <View
-          style={[styles.edgeZone, { right: 0, width: EDGE_WIDTH }]}
-          {...panResponder.panHandlers}
-        />
-      )}
     </View>
   );
 }
@@ -362,12 +357,5 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     textTransform: "uppercase",
     opacity: 0.5,
-  },
-  edgeZone: {
-    position: "absolute",
-    top: 0,
-    bottom: 0,
-    zIndex: 10,
-    backgroundColor: "transparent",
   },
 });
