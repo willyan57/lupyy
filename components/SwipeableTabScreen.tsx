@@ -13,12 +13,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useCallback, useRef } from "react";
 import {
-    Animated,
-    Dimensions,
-    PanResponder,
-    Platform,
-    StyleSheet,
-    View,
+  Animated,
+  Dimensions,
+  PanResponder,
+  Platform,
+  StyleSheet,
+  View,
 } from "react-native";
 
 export type SwipeTarget = {
@@ -99,7 +99,14 @@ export default function SwipeableTabScreen({
     PanResponder.create({
       onMoveShouldSetPanResponder: (_evt, gs) => {
         if (isNavigating.current) return false;
-        return Math.abs(gs.dx) > Math.abs(gs.dy) && Math.abs(gs.dx) > 12;
+        // Only capture if strongly horizontal AND started near screen edges (outer 15%)
+        const isHorizontal = Math.abs(gs.dx) > Math.abs(gs.dy) * 1.8 && Math.abs(gs.dx) > 18;
+        if (!isHorizontal) return false;
+        // Don't capture if the gesture started far from edges — lets inner carousels work
+        const startX = (_evt.nativeEvent as any).pageX ?? _evt.nativeEvent.locationX ?? SCREEN_W / 2;
+        const edgeZone = SCREEN_W * 0.15;
+        const isFromEdge = startX < edgeZone || startX > SCREEN_W - edgeZone;
+        return isFromEdge;
       },
       onMoveShouldSetPanResponderCapture: () => false,
 

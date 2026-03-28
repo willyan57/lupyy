@@ -94,7 +94,12 @@ export default function TribeScreen() {
   const chatScrollRef = useRef<ScrollView>(null);
 
   const goBackToTribes = () => {
-    try { router.replace("/tribes" as any); } catch { try { router.push("/tribes" as any); } catch {} }
+    // Use router.back() to preserve tab bar and safe area context
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      try { router.replace("/(tabs)/tribes" as any); } catch { try { router.push("/tribes" as any); } catch {} }
+    }
   };
 
   const getCoverUri = (raw: string | null) => {
