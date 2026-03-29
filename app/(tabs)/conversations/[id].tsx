@@ -124,10 +124,32 @@ export default function ConversationScreen() {
   }
 
   const { label: presenceLabel, isOnline } = useUserPresence(otherUserId);
-  const { isSomeoneTyping, reportTyping } = useTypingIndicator({
+  const { isSomeoneTyping: rawTyping, reportTyping } = useTypingIndicator({
     conversationId,
     currentUserId: authUserId,
   });
+
+  // Safety: auto-clear typing indicator after 5s to prevent "stuck typing" ghost
+  const [displayTyping, setDisplayTyping] = useState(false);
+  const typingClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (rawTyping) {
+      setDisplayTyping(true);
+      if (typingClearRef.current) clearTimeout(typingClearRef.current);
+      typingClearRef.current = setTimeout(() => {
+        setDisplayTyping(false);
+      }, 5000);
+    } else {
+      setDisplayTyping(false);
+      if (typingClearRef.current) clearTimeout(typingClearRef.current);
+    }
+    return () => {
+      if (typingClearRef.current) clearTimeout(typingClearRef.current);
+    };
+  }, [rawTyping]);
+
+  const isSomeoneTyping = displayTyping;
 
   const isWeb = Platform.OS === "web";
   const isCrush = conversationType === "crush";
@@ -228,6 +250,21 @@ export default function ConversationScreen() {
 
   async function getUploadBodyFromUri(uri: string): Promise<Blob | Uint8Array> {
     if (Platform.OS === "web") {
+      // Handle data: URIs explicitly — fetch() is unreliable for large base64 on mobile browsers
+      if (uri.startsWith("data:")) {
+        const parts = uri.split("base64,");
+        const mimeMatch = uri.match(/^data:([^;]+)/);
+        const mime = mimeMatch?.[1] ?? "image/jpeg";
+        const raw = parts[1] || "";
+        const cleaned = raw.replace(/\s/g, "");
+        const binaryStr = atob(cleaned);
+        const bytes = new Uint8Array(binaryStr.length);
+        for (let i = 0; i < binaryStr.length; i++) {
+          bytes[i] = binaryStr.charCodeAt(i);
+        }
+        return new Blob([bytes], { type: mime });
+      }
+      // Regular http/blob URIs
       const res = await fetch(uri);
       return await res.blob();
     }
@@ -301,22 +338,13 @@ export default function ConversationScreen() {
   async function reactivateConversationForUser() {
     if (!authUserId || !conversationId) return;
 
-    // Tenta via RPC (só faz UPDATE deleted_at = NULL, preserva messages_hidden_before)
-    const { error: rpcError } = await supabase.rpc("reactivate_conversation", {
-      _conversation_id: conversationId,
-      _user_id: authUserId,
-    });
-
-    if (!rpcError) return;
-
-    // Fallback: UPDATE manual em vez de DELETE para preservar messages_hidden_before
-    const { error: updateError } = await supabase
+    const { error: reactivateError } = await supabase
       .from("conversation_deletions")
-      .update({ deleted_at: null })
+      .delete()
       .eq("conversation_id", conversationId)
       .eq("user_id", authUserId);
 
-    if (updateError) console.warn("reactivate fallback error:", updateError);
+    if (reactivateError) console.warn("reactivate delete error:", reactivateError);
   }
 
   async function syncConversationAfterSend(params: {
@@ -393,12 +421,7 @@ export default function ConversationScreen() {
     otherProfile?.username?.trim() ||
     (isCrush ? "Conversa Crush" : "Conversa");
 
-  useEffect(() => {
-    if (!messages.length) return;
-    setTimeout(() => {
-      listRef.current?.scrollToEnd({ animated: true });
-    }, 100);
-  }, [messages.length]);
+  // Removed old scroll effect - using inverted FlatList now
 
   useEffect(() => {
     let isMounted = true;
@@ -470,6 +493,17 @@ export default function ConversationScreen() {
 
         if (!msgErr && isMounted) {
           setMessages((msgs || []) as DbMessage[]);
+
+          // Mark other user's unread messages as read immediately
+          if (other) {
+            supabase
+              .from("messages")
+              .update({ is_read: true })
+              .eq("conversation_id", conversationId)
+              .eq("sender", other)
+              .eq("is_read", false)
+              .then(() => {});
+          }
         }
       } finally {
         if (isMounted) setLoading(false);
@@ -486,7 +520,22 @@ export default function ConversationScreen() {
   useFocusEffect(
     useCallback(() => {
       refreshRelationshipLock();
-    }, [refreshRelationshipLock])
+
+      // Clean up typing status when leaving
+      return () => {
+        reportTyping(false);
+        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+        // Also delete any stale typing record for this user
+        if (authUserId && conversationId) {
+          supabase
+            .from("conversation_typing")
+            .delete()
+            .eq("conversation_id", conversationId)
+            .eq("user_id", authUserId)
+            .then(() => {});
+        }
+      };
+    }, [refreshRelationshipLock, authUserId, conversationId, reportTyping])
   );
 
   useEffect(() => {
@@ -514,6 +563,15 @@ export default function ConversationScreen() {
               a.created_at.localeCompare(b.created_at)
             );
           });
+
+          // Auto mark as read if from other user (user is viewing this conversation)
+          if (msg.sender !== authUserId) {
+            supabase
+              .from("messages")
+              .update({ is_read: true })
+              .eq("id", msg.id)
+              .then(() => {});
+          }
         }
       )
       .on(
@@ -1081,16 +1139,14 @@ export default function ConversationScreen() {
           <View style={styles.flex1}>
             <FlatList
               ref={listRef}
-              data={messages}
+              data={[...messages].reverse()}
+              inverted
               keyExtractor={(item) => String(item.id)}
               renderItem={renderItem}
               contentContainerStyle={[
                 styles.listContent,
                 Platform.OS === "android" && { paddingBottom: 8 },
               ]}
-              onContentSizeChange={() =>
-                listRef.current?.scrollToEnd({ animated: true })
-              }
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="interactive"
             />
@@ -1446,7 +1502,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     flexGrow: 1,
-    justifyContent: "flex-end",
   },
   messageRow: {
     flexDirection: "row",

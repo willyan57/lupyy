@@ -89,6 +89,9 @@ export default function ConversationsScreen() {
     friendsList?: RpcConversation[],
     crushList?: RpcConversation[]
   ) => {
+    const activeUserId = currentUserId;
+    if (!activeUserId) return;
+
     const baseFriends = friendsList ?? friendConversations;
     const baseCrushes = crushList ?? crushConversations;
 
@@ -98,16 +101,19 @@ export default function ConversationsScreen() {
       return;
     }
 
+    // Query unread messages directly, excluding messages sent by the current user
     const { data, error } = await supabase
-      .from("unread_counts")
-      .select("conversation_id, unread")
-      .in("conversation_id", allIds);
+      .from("messages")
+      .select("conversation_id")
+      .in("conversation_id", allIds)
+      .neq("sender", activeUserId)
+      .eq("is_read", false);
 
     if (error || !data) return;
 
     const map: Record<string, number> = {};
-    (data as { conversation_id: string; unread: number }[]).forEach((row: any) => {
-      map[row.conversation_id] = row.unread;
+    (data as { conversation_id: string }[]).forEach((row) => {
+      map[row.conversation_id] = (map[row.conversation_id] || 0) + 1;
     });
 
     const prevTotal = Object.values(unreadMap).reduce((s, v) => s + v, 0);
@@ -165,34 +171,7 @@ export default function ConversationsScreen() {
         return;
       }
 
-      const all = data as RpcConversation[];
-      const conversationIds = all.map((c) => c.id);
-
-      let visible = all;
-
-      if (conversationIds.length > 0) {
-        const { data: deletionRows, error: deletionError } = await supabase
-          .from("conversation_deletions")
-          .select("conversation_id, deleted_at")
-          .eq("user_id", activeUserId)
-          .in("conversation_id", conversationIds);
-
-        if (!deletionError && deletionRows) {
-          const deletedMap = new Map(
-            (deletionRows as { conversation_id: string; deleted_at: string | null }[]).map((row) => [
-              row.conversation_id,
-              row.deleted_at,
-            ])
-          );
-
-          visible = all.filter((conversation) => {
-            const deletedAt = deletedMap.get(conversation.id);
-            if (!deletedAt) return true;
-            if (!conversation.last_message_at) return false;
-            return new Date(conversation.last_message_at).getTime() > new Date(deletedAt).getTime();
-          });
-        }
-      }
+      const visible = data as RpcConversation[];
 
       const friends = visible.filter((c) => c.conversation_type === "friend");
       const crushes = visible.filter((c) => c.conversation_type === "crush");
@@ -278,9 +257,8 @@ export default function ConversationsScreen() {
         return;
       }
 
-      // Reactivate conversation if it was previously deleted by this user
-      // Set deleted_at = NULL so the RPC includes it again;
-      // also try DELETE as fallback in case UPDATE doesn't match due to RLS
+      // Reactivate conversation exactly like the working version:
+      // remove the deletion row so the conversation stays in the list again.
       const { error: reactivateError } = await supabase
         .from("conversation_deletions")
         .delete()

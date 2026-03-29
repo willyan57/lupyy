@@ -1580,7 +1580,7 @@ export default function Profile() {
           conversationType,
         });
 
-        // Reactivate if previously deleted
+        // Reactivate exactly like the working version
         await supabase
           .from("conversation_deletions")
           .delete()
