@@ -330,6 +330,26 @@ export default function Feed() {
   const loadStoriesFeed = useCallback(
     async (uid?: string) => {
       try {
+        // Fetch current user's profile for avatar (always needed for "Seu story")
+        let myAvatarUrl: string | undefined;
+        let myUsername: string = "user";
+        if (authUserId) {
+          const { data: myProfile } = await supabase
+            .from("profiles")
+            .select("username, avatar_url")
+            .eq("id", authUserId)
+            .maybeSingle();
+          if (myProfile) {
+            myUsername = myProfile.username ?? "user";
+            let av = myProfile.avatar_url ?? null;
+            if (av && !av.startsWith("http")) {
+              const { data: pubData } = supabase.storage.from("avatars").getPublicUrl(av);
+              av = pubData?.publicUrl ?? av;
+            }
+            myAvatarUrl = av ?? undefined;
+          }
+        }
+
         const { data: rows, error: storiesError } = await supabase
           .from("view_active_stories")
           .select("*")
@@ -338,7 +358,14 @@ export default function Feed() {
         if (storiesError) return;
         if (!rows || rows.length === 0) {
           setStoriesByUser({});
-          setStoryUsers([{ id: "me", label: "Seu story", initials: "W", hasUnseen: true, isCurrentUser: true }]);
+          setStoryUsers([{
+            id: authUserId ?? "me",
+            label: "Seu story",
+            initials: myUsername[0]?.toUpperCase() ?? "S",
+            avatarUrl: myAvatarUrl,
+            hasUnseen: true,
+            isCurrentUser: true,
+          }]);
           return;
         }
 
@@ -357,14 +384,22 @@ export default function Feed() {
           }
           if (!url) return;
 
+          // Resolve avatar URL if it's a storage path
+          let avatarUrl: string | null = row.avatar_url ?? null;
+          if (avatarUrl && !avatarUrl.startsWith("http")) {
+            const { data: pubData } = supabase.storage.from("avatars").getPublicUrl(avatarUrl);
+            avatarUrl = pubData?.publicUrl ?? avatarUrl;
+          }
+
           const item: StoryItem = {
             id: row.id,
             media_type: row.media_type,
             media_url: url,
             duration: null,
             userName: row.username ?? "user",
-            userAvatarUrl: row.avatar_url ?? null,
+            userAvatarUrl: avatarUrl,
             createdAt: row.created_at ?? null,
+            user_id: row.user_id ?? null,
           };
 
           const userId = String(row.user_id);
@@ -376,7 +411,18 @@ export default function Feed() {
             const username: string = row.username ?? "user";
             const label = isMe ? "Seu story" : username;
             const initials = username?.[0]?.toUpperCase() ?? "S";
-            const avatarUrl: string | null = row.avatar_url ?? null;
+            // For current user, prefer the pre-fetched avatar
+            let finalAvatarUrl: string | undefined;
+            if (isMe && myAvatarUrl) {
+              finalAvatarUrl = myAvatarUrl;
+            } else {
+              let barAvatarUrl: string | null = row.avatar_url ?? null;
+              if (barAvatarUrl && !barAvatarUrl.startsWith("http")) {
+                const { data: pubData } = supabase.storage.from("avatars").getPublicUrl(barAvatarUrl);
+                barAvatarUrl = pubData?.publicUrl ?? barAvatarUrl;
+              }
+              finalAvatarUrl = barAvatarUrl ?? undefined;
+            }
             const meta = metaByUserId[userId];
             const hasUnseen = meta?.has_unseen ?? true;
             const seen = meta?.seen ?? !hasUnseen;
@@ -384,7 +430,7 @@ export default function Feed() {
 
             usersMap[userId] = {
               id: userId, label, initials,
-              avatarUrl: avatarUrl ?? undefined,
+              avatarUrl: finalAvatarUrl,
               hasUnseen, seen, isCurrentUser,
             };
           }
@@ -730,6 +776,10 @@ export default function Feed() {
         items={storyViewerItems}
         startIndex={storyViewerStartIndex}
         onClose={() => setStoryViewerVisible(false)}
+        onPressUser={(userId) => {
+          setStoryViewerVisible(false);
+          router.push({ pathname: "/user/[id]", params: { id: userId } });
+        }}
       />
 
       <CommentsSheet

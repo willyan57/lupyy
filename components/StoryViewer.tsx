@@ -1,4 +1,5 @@
 import { useTheme } from "@/contexts/ThemeContext";
+import { supabase } from "@/lib/supabase";
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
 import { Image } from "expo-image";
@@ -17,6 +18,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import StoryViewersSheet from "./StoryViewersSheet";
 
 export type StoryItem = {
   id: string | number;
@@ -30,6 +32,7 @@ export type StoryItem = {
   username?: string | null;
   avatar_url?: string | null;
   created_at?: string | null;
+  user_id?: string | null;
 };
 
 type StoryViewerProps = {
@@ -38,10 +41,11 @@ type StoryViewerProps = {
   startIndex?: number;
   onClose: () => void;
   onReply?: (text: string, storyId: string | number) => void;
+  onPressUser?: (userId: string) => void;
 };
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
-const STORY_DURATION_DEFAULT = 8; // 8s default like IG
+const STORY_DURATION_DEFAULT = 8;
 
 type FilterId = "none" | "warm" | "cool" | "pink" | "gold" | "night";
 
@@ -121,7 +125,6 @@ function ProgressBar({
   const elapsedRef = useRef(0);
 
   useEffect(() => {
-    // Reset progress for new story
     progressAnim.setValue(0);
     elapsedRef.current = 0;
     startTimeRef.current = Date.now();
@@ -143,11 +146,9 @@ function ProgressBar({
 
   useEffect(() => {
     if (paused) {
-      // Pause: stop animation and record elapsed
       elapsedRef.current += Date.now() - startTimeRef.current;
       animRef.current?.stop();
     } else {
-      // Resume: continue from where we left off
       const remaining = Math.max(durationMs - elapsedRef.current, 100);
       startTimeRef.current = Date.now();
       animRef.current = Animated.timing(progressAnim, {
@@ -214,6 +215,7 @@ export default function StoryViewer({
   startIndex = 0,
   onClose,
   onReply,
+  onPressUser,
 }: StoryViewerProps) {
   const { theme } = useTheme();
   const [currentIndex, setCurrentIndex] = useState(startIndex);
@@ -223,7 +225,20 @@ export default function StoryViewer({
   const [showHeart, setShowHeart] = useState(false);
   const heartScale = useRef(new Animated.Value(0)).current;
 
+  // Auth + ownership
+  const [authUserId, setAuthUserId] = useState<string | null>(null);
+  const [viewsCount, setViewsCount] = useState(0);
+  const [likesCount, setLikesCount] = useState(0);
+  const [viewersSheetOpen, setViewersSheetOpen] = useState(false);
+
   const total = items.length;
+
+  // Get auth user
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }: { data: any }) => {
+      if (data?.user) setAuthUserId(data.user.id);
+    }).catch(() => {});
+  }, []);
 
   const goNext = useCallback(() => {
     if (total === 0) return;
@@ -254,13 +269,54 @@ export default function StoryViewer({
     setPaused(false);
     setLiked(false);
     setReplyText("");
+    setViewersSheetOpen(false);
   }, [visible, startIndex, total]);
+
+  // Register view + fetch counts when story changes
+  useEffect(() => {
+    if (!visible || total === 0 || currentIndex < 0 || currentIndex >= total) return;
+    const current = items[currentIndex];
+    if (!current || !authUserId) return;
+
+    const storyId = Number(current.id);
+    const isOwner = current.user_id === authUserId;
+
+    // Register view if not owner
+    if (!isOwner) {
+      supabase.rpc("register_story_view", { _story_id: storyId }).catch(() => {});
+    }
+
+    // Fetch counts (for owner display)
+    if (isOwner) {
+      Promise.all([
+        supabase.from("story_view_counts").select("views_count").eq("story_id", storyId).maybeSingle(),
+        supabase.from("story_like_counts").select("likes_count").eq("story_id", storyId).maybeSingle(),
+      ]).then(([viewsRes, likesRes]) => {
+        setViewsCount(viewsRes.data?.views_count ?? 0);
+        setLikesCount(likesRes.data?.likes_count ?? 0);
+      }).catch(() => {});
+    }
+
+    // Check if user already liked this story
+    if (!isOwner) {
+      supabase
+        .from("story_likes")
+        .select("id")
+        .eq("story_id", storyId)
+        .eq("user_id", authUserId)
+        .maybeSingle()
+        .then(({ data }: { data: any }) => {
+          setLiked(!!data);
+        }).catch(() => {});
+    }
+  }, [visible, currentIndex, authUserId, items, total]);
 
   if (!visible || total === 0 || currentIndex < 0 || currentIndex >= total) {
     return null;
   }
 
   const current = items[currentIndex];
+  const isOwner = !!authUserId && current?.user_id === authUserId;
 
   const headerName = current?.userName || current?.username || "Story";
   const headerAvatar: string | null = current?.userAvatarUrl || current?.avatar_url || null;
@@ -272,6 +328,7 @@ export default function StoryViewer({
       : STORY_DURATION_DEFAULT;
 
   const handlePress = (evt: any) => {
+    if (viewersSheetOpen) return;
     const x = evt.nativeEvent.locationX;
     if (x < SCREEN_W * 0.3) {
       goPrev();
@@ -280,10 +337,16 @@ export default function StoryViewer({
     }
   };
 
-  const handleLongPress = () => setPaused(true);
-  const handlePressOut = () => setPaused(false);
+  const handleLongPress = () => {
+    if (viewersSheetOpen) return;
+    setPaused(true);
+  };
+  const handlePressOut = () => {
+    if (viewersSheetOpen) return;
+    setPaused(false);
+  };
 
-  const handleDoubleTap = () => {
+  const handleDoubleTap = async () => {
     setLiked(true);
     setShowHeart(true);
     heartScale.setValue(0);
@@ -293,6 +356,28 @@ export default function StoryViewer({
       Animated.delay(600),
       Animated.timing(heartScale, { toValue: 0, duration: 200, useNativeDriver: true }),
     ]).start(() => setShowHeart(false));
+
+    // Persist like
+    if (authUserId && current) {
+      const storyId = Number(current.id);
+      supabase
+        .from("story_likes")
+        .insert({ story_id: storyId, user_id: authUserId })
+        .then(() => {})
+        .catch(() => {});
+    }
+  };
+
+  const handleToggleLike = async () => {
+    if (!authUserId || !current) return;
+    const storyId = Number(current.id);
+
+    if (liked) {
+      setLiked(false);
+      supabase.from("story_likes").delete().eq("story_id", storyId).eq("user_id", authUserId).catch(() => {});
+    } else {
+      handleDoubleTap();
+    }
   };
 
   const handleSendReply = () => {
@@ -300,6 +385,16 @@ export default function StoryViewer({
     if (!text) return;
     onReply?.(text, current.id);
     setReplyText("");
+  };
+
+  const handleOpenViewers = () => {
+    setPaused(true);
+    setViewersSheetOpen(true);
+  };
+
+  const handleCloseViewers = () => {
+    setViewersSheetOpen(false);
+    setPaused(false);
   };
 
   const f = getFilter(current?.filter);
@@ -366,7 +461,7 @@ export default function StoryViewer({
           </View>
         </Pressable>
 
-        {/* ── Top gradient for readability ── */}
+        {/* ── Top gradient ── */}
         <LinearGradient
           colors={["rgba(0,0,0,0.5)", "rgba(0,0,0,0)"]}
           style={s.topGradient}
@@ -380,7 +475,7 @@ export default function StoryViewer({
           pointerEvents="none"
         />
 
-        {/* ── Progress bars ── */}
+        {/* ── Progress bars + Header ── */}
         <View style={s.topOverlay} pointerEvents="box-none">
           <ProgressBar
             count={total}
@@ -391,7 +486,6 @@ export default function StoryViewer({
             fillColor={theme.colors.primary || "#fff"}
           />
 
-          {/* ── Header: avatar, name, time, close ── */}
           <View style={s.header}>
             <View style={s.headerLeft}>
               {headerAvatar ? (
@@ -418,7 +512,7 @@ export default function StoryViewer({
             </View>
 
             <View style={s.headerRight}>
-              {paused && (
+              {paused && !viewersSheetOpen && (
                 <View style={s.pausedBadge}>
                   <Text style={s.pausedText}>⏸</Text>
                 </View>
@@ -434,7 +528,7 @@ export default function StoryViewer({
           </View>
         </View>
 
-        {/* ── Heart animation on double tap ── */}
+        {/* ── Heart animation ── */}
         {showHeart && (
           <Animated.View
             style={[s.heartOverlay, { transform: [{ scale: heartScale }] }]}
@@ -444,39 +538,66 @@ export default function StoryViewer({
           </Animated.View>
         )}
 
-        {/* ── Bottom: reply + actions ── */}
+        {/* ── Bottom bar ── */}
         <View style={s.bottomBar} pointerEvents="box-none">
-          <View style={s.replyRow}>
-            <TextInput
-              style={s.replyInput}
-              placeholder="Enviar mensagem..."
-              placeholderTextColor="rgba(255,255,255,0.5)"
-              value={replyText}
-              onChangeText={setReplyText}
-              onFocus={() => setPaused(true)}
-              onBlur={() => setPaused(false)}
-              onSubmitEditing={handleSendReply}
-              returnKeyType="send"
-            />
+          {isOwner ? (
+            /* Owner sees view count button */
             <TouchableOpacity
-              style={[s.actionBtn, liked && { backgroundColor: "rgba(255,59,92,0.2)" }]}
-              onPress={() => {
-                if (!liked) handleDoubleTap();
-                else setLiked(false);
-              }}
+              style={s.viewCountRow}
               activeOpacity={0.7}
+              onPress={handleOpenViewers}
             >
-              <Ionicons
-                name={liked ? "heart" : "heart-outline"}
-                size={24}
-                color={liked ? "#ff3b5c" : "#fff"}
+              <Ionicons name="eye-outline" size={20} color="#fff" />
+              <Text style={s.viewCountText}>
+                {viewsCount} {viewsCount === 1 ? "visualização" : "visualizações"}
+              </Text>
+              <Ionicons name="chevron-up" size={18} color="rgba(255,255,255,0.6)" />
+            </TouchableOpacity>
+          ) : (
+            /* Other users see reply + like */
+            <View style={s.replyRow}>
+              <TextInput
+                style={s.replyInput}
+                placeholder="Enviar mensagem..."
+                placeholderTextColor="rgba(255,255,255,0.5)"
+                value={replyText}
+                onChangeText={setReplyText}
+                onFocus={() => setPaused(true)}
+                onBlur={() => setPaused(false)}
+                onSubmitEditing={handleSendReply}
+                returnKeyType="send"
               />
-            </TouchableOpacity>
-            <TouchableOpacity style={s.actionBtn} activeOpacity={0.7}>
-              <Ionicons name="paper-plane-outline" size={22} color="#fff" />
-            </TouchableOpacity>
-          </View>
+              <TouchableOpacity
+                style={[s.actionBtn, liked && { backgroundColor: "rgba(255,59,92,0.2)" }]}
+                onPress={handleToggleLike}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name={liked ? "heart" : "heart-outline"}
+                  size={24}
+                  color={liked ? "#ff3b5c" : "#fff"}
+                />
+              </TouchableOpacity>
+              <TouchableOpacity style={s.actionBtn} activeOpacity={0.7}>
+                <Ionicons name="paper-plane-outline" size={22} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
+
+        {/* ── Viewers Sheet (inside story, not external) ── */}
+        <StoryViewersSheet
+          visible={viewersSheetOpen}
+          storyId={current.id}
+          viewsCount={viewsCount}
+          likesCount={likesCount}
+          onClose={handleCloseViewers}
+          onPressUser={(userId) => {
+            handleCloseViewers();
+            onClose();
+            onPressUser?.(userId);
+          }}
+        />
       </View>
     </Modal>
   );
@@ -620,5 +741,21 @@ const s = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.1)",
     alignItems: "center",
     justifyContent: "center",
+  },
+  viewCountRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: 24,
+    alignSelf: "center",
+  },
+  viewCountText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "600",
   },
 });
