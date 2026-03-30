@@ -440,7 +440,17 @@ export default function Feed() {
         const meUser = allUsers.find((u) => u.isCurrentUser);
         const otherUsers = allUsers.filter((u) => !u.isCurrentUser);
         setStoriesByUser(grouped);
-        setStoryUsers(meUser ? [meUser, ...otherUsers] : otherUsers);
+
+        // Always prepend "Seu story" circle — even if user has no stories
+        const meEntry: StoryUser = meUser ?? {
+          id: authUserId ?? "me",
+          label: "Seu story",
+          initials: myUsername[0]?.toUpperCase() ?? "S",
+          avatarUrl: myAvatarUrl,
+          hasUnseen: false,
+          isCurrentUser: true,
+        };
+        setStoryUsers([meEntry, ...otherUsers]);
       } catch {}
     },
     [authUserId]
@@ -641,12 +651,18 @@ export default function Feed() {
   const handlePressStory = useCallback(
     (user: StoryUser) => {
       const items = storiesByUser[String(user.id)];
-      if (!items?.length) return;
+      if (!items?.length) {
+        // No stories — if it's current user, go to capture
+        if (user.isCurrentUser) {
+          router.push("/capture");
+        }
+        return;
+      }
       setStoryViewerItems(items);
       setStoryViewerStartIndex(0);
       setStoryViewerVisible(true);
     },
-    [storiesByUser]
+    [storiesByUser, router]
   );
 
   return (

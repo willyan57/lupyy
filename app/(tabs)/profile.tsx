@@ -586,6 +586,12 @@ export default function Profile() {
         .map((row) => {
           let url: string | null | undefined = row.media_url;
 
+          // media_url from view_active_stories is actually media_path — resolve to public URL
+          if (url && !url.startsWith("http")) {
+            const { data: publicData } = supabase.storage.from("stories").getPublicUrl(url);
+            url = publicData?.publicUrl ?? url;
+          }
+
           if (!url && row.media_path) {
             const { data: publicData } = supabase.storage.from("stories").getPublicUrl(row.media_path as string);
             url = publicData?.publicUrl ?? "";
@@ -1763,8 +1769,11 @@ export default function Profile() {
     id: s.id,
     media_type: s.media_type,
     media_url: s.media_url,
-    // duração opcional; se quiser customizar no futuro, basta adicionar em cada row
     duration: undefined,
+    user_id: s.user_id,
+    userName: username ?? "user",
+    userAvatarUrl: avatarUrl ?? undefined,
+    createdAt: s.created_at,
   }));
 
   // ── RELATIONSHIP STATUS OPTIONS ──
