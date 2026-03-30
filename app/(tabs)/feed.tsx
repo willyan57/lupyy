@@ -378,6 +378,12 @@ export default function Feed() {
 
         (rows as any[]).forEach((row) => {
           let url: string | null | undefined = row.media_url;
+
+          // media_url from view_active_stories is actually media_path — resolve to public URL
+          if (url && !url.startsWith("http")) {
+            const { data: publicData } = supabase.storage.from("stories").getPublicUrl(url);
+            url = publicData?.publicUrl ?? url;
+          }
           if (!url && row.media_path) {
             const { data: publicData } = supabase.storage.from("stories").getPublicUrl(row.media_path as string);
             url = publicData?.publicUrl ?? "";
