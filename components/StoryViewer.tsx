@@ -230,6 +230,7 @@ export default function StoryViewer({
   const [viewsCount, setViewsCount] = useState(0);
   const [likesCount, setLikesCount] = useState(0);
   const [viewersSheetOpen, setViewersSheetOpen] = useState(false);
+  const countsRefreshRef = useRef<NodeJS.Timeout | null>(null);
 
   const total = items.length;
 
@@ -272,6 +273,17 @@ export default function StoryViewer({
     setViewersSheetOpen(false);
   }, [visible, startIndex, total]);
 
+  // Helper to fetch counts
+  const fetchCounts = useCallback((storyId: number) => {
+    Promise.all([
+      supabase.from("story_view_counts").select("views_count").eq("story_id", storyId).maybeSingle(),
+      supabase.from("story_like_counts").select("likes_count").eq("story_id", storyId).maybeSingle(),
+    ]).then(([viewsRes, likesRes]: [any, any]) => {
+      setViewsCount(viewsRes.data?.views_count ?? 0);
+      setLikesCount(likesRes.data?.likes_count ?? 0);
+    }).catch(() => {});
+  }, []);
+
   // Register view + fetch counts when story changes
   useEffect(() => {
     if (!visible || total === 0 || currentIndex < 0 || currentIndex >= total) return;
@@ -282,19 +294,47 @@ export default function StoryViewer({
     const isOwner = current.user_id === authUserId;
 
     // Register view if not owner
-    if (!isOwner) {
-      supabase.rpc("register_story_view", { _story_id: storyId }).then(() => {}).catch(() => {});
+    if (!isOwner && Number.isFinite(storyId) && storyId > 0) {
+      supabase.rpc("register_story_view", { _story_id: storyId })
+        .then((res: any) => {
+          // If RPC fails, try direct insert as fallback
+          if (res.error) {
+            console.warn("register_story_view RPC failed:", res.error.message);
+            supabase
+              .from("story_views")
+              .insert({ story_id: storyId, viewer_id: authUserId })
+              .then(() => {})
+              .catch(() => {});
+          }
+        })
+        .catch(() => {
+          // Fallback: direct insert
+          supabase
+            .from("story_views")
+            .insert({ story_id: storyId, viewer_id: authUserId })
+            .then(() => {})
+            .catch(() => {});
+        });
     }
 
     // Fetch counts (for owner display)
     if (isOwner) {
-      Promise.all([
-        supabase.from("story_view_counts").select("views_count").eq("story_id", storyId).maybeSingle(),
-        supabase.from("story_like_counts").select("likes_count").eq("story_id", storyId).maybeSingle(),
-      ]).then(([viewsRes, likesRes]: [any, any]) => {
-        setViewsCount(viewsRes.data?.views_count ?? 0);
-        setLikesCount(likesRes.data?.likes_count ?? 0);
-      }).catch(() => {});
+      fetchCounts(storyId);
+
+      // Real-time: subscribe to story_views and story_likes changes
+      const channel = supabase
+        .channel(`story-engagement-${storyId}`)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "story_views", filter: `story_id=eq.${storyId}` }, () => {
+          fetchCounts(storyId);
+        })
+        .on("postgres_changes", { event: "*", schema: "public", table: "story_likes", filter: `story_id=eq.${storyId}` }, () => {
+          fetchCounts(storyId);
+        })
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
     }
 
     // Check if user already liked this story
@@ -309,7 +349,7 @@ export default function StoryViewer({
           setLiked(!!data);
         }).catch(() => {});
     }
-  }, [visible, currentIndex, authUserId, items, total]);
+  }, [visible, currentIndex, authUserId, items, total, fetchCounts]);
 
   if (!visible || total === 0 || currentIndex < 0 || currentIndex >= total) {
     return null;
@@ -357,13 +397,24 @@ export default function StoryViewer({
       Animated.timing(heartScale, { toValue: 0, duration: 200, useNativeDriver: true }),
     ]).start(() => setShowHeart(false));
 
-    // Persist like
+    // Persist like + send notification
     if (authUserId && current) {
       const storyId = Number(current.id);
+      const storyOwnerId = current.user_id;
       supabase
         .from("story_likes")
         .insert({ story_id: storyId, user_id: authUserId })
-        .then(() => {})
+        .then(() => {
+          // Create notification for story owner
+          if (storyOwnerId && storyOwnerId !== authUserId) {
+            supabase.rpc("create_notification", {
+              _recipient_id: storyOwnerId,
+              _actor_id: authUserId,
+              _type: "story_like",
+              _story_id: storyId,
+            }).then(() => {}).catch(() => {});
+          }
+        })
         .catch(() => {});
     }
   };
@@ -374,7 +425,7 @@ export default function StoryViewer({
 
     if (liked) {
       setLiked(false);
-      supabase.from("story_likes").delete().eq("story_id", storyId).eq("user_id", authUserId).catch(() => {});
+      supabase.from("story_likes").delete().eq("story_id", storyId).eq("user_id", authUserId).then(() => {}).catch(() => {});
     } else {
       handleDoubleTap();
     }
@@ -578,9 +629,11 @@ export default function StoryViewer({
                   color={liked ? "#ff3b5c" : "#fff"}
                 />
               </TouchableOpacity>
-              <TouchableOpacity style={s.actionBtn} activeOpacity={0.7}>
-                <Ionicons name="paper-plane-outline" size={22} color="#fff" />
-              </TouchableOpacity>
+              {replyText.trim().length > 0 && (
+                <TouchableOpacity style={s.actionBtn} activeOpacity={0.7} onPress={handleSendReply}>
+                  <Ionicons name="paper-plane-outline" size={22} color="#fff" />
+                </TouchableOpacity>
+              )}
             </View>
           )}
         </View>
