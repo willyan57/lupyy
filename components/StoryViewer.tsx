@@ -283,7 +283,7 @@ export default function StoryViewer({
 
     // Register view if not owner
     if (!isOwner) {
-      supabase.rpc("register_story_view", { _story_id: storyId }).catch(() => {});
+      supabase.rpc("register_story_view", { _story_id: storyId }).then(() => {}).catch(() => {});
     }
 
     // Fetch counts (for owner display)
@@ -291,7 +291,7 @@ export default function StoryViewer({
       Promise.all([
         supabase.from("story_view_counts").select("views_count").eq("story_id", storyId).maybeSingle(),
         supabase.from("story_like_counts").select("likes_count").eq("story_id", storyId).maybeSingle(),
-      ]).then(([viewsRes, likesRes]) => {
+      ]).then(([viewsRes, likesRes]: [any, any]) => {
         setViewsCount(viewsRes.data?.views_count ?? 0);
         setLikesCount(likesRes.data?.likes_count ?? 0);
       }).catch(() => {});
