@@ -4,8 +4,6 @@ import type { FilterId } from "@/lib/mediaFilters/applyFilterAndExport";
 
 export type LutSource = number | string | null;
 
-// Para filtros sem LUT dedicada, usamos a mais proxima
-// Quando voce criar as LUTs unicas, troque o require para o arquivo correto
 export function getLutForFilter(filter: FilterId): LutSource {
   switch (filter) {
     case "warm":
@@ -18,43 +16,42 @@ export function getLutForFilter(filter: FilterId): LutSource {
       return require("@/assets/luts/gold.png");
     case "night":
       return require("@/assets/luts/night.png");
-
-    // LUTs novas — crie os arquivos .png e descomente
-    // case "cinematic_gold":
-    //   return require("@/assets/luts/cinematic_gold.png");
-    // case "blue_teal":
-    //   return require("@/assets/luts/blue_teal.png");
-    // case "pastel_dream":
-    //   return require("@/assets/luts/pastel_dream.png");
-    // case "tokyo_night":
-    //   return require("@/assets/luts/tokyo_night.png");
-    // case "desert_warm":
-    //   return require("@/assets/luts/desert_warm.png");
-    // case "vintage_film":
-    //   return require("@/assets/luts/vintage_film.png");
-    // case "sakura":
-    //   return require("@/assets/luts/sakura.png");
-    // case "neon_glow":
-    //   return require("@/assets/luts/neon_glow.png");
-    // case "miami_vibes":
-    //   return require("@/assets/luts/miami_vibes.png");
-    // case "deep_contrast":
-    //   return require("@/assets/luts/deep_contrast.png");
-    // case "moody_forest":
-    //   return require("@/assets/luts/moody_forest.png");
-    // case "winter_lowsat":
-    //   return require("@/assets/luts/winter_lowsat.png");
-    // case "summer_pop":
-    //   return require("@/assets/luts/summer_pop.png");
-    // case "aqua_fresh":
-    //   return require("@/assets/luts/aqua_fresh.png");
-    // case "sepia_clean":
-    //   return require("@/assets/luts/sepia_clean.png");
-    // case "urban_grit":
-    //   return require("@/assets/luts/urban_grit.png");
-    // case "cream_tone":
-    //   return require("@/assets/luts/cream_tone.png");
-
+    case "cinematic_gold":
+      return require("@/assets/luts/cinematic_gold.png");
+    case "blue_teal":
+      return require("@/assets/luts/blue_teal.png");
+    case "pastel_dream":
+      return require("@/assets/luts/pastel_dream.png");
+    case "tokyo_night":
+      return require("@/assets/luts/tokyo_night.png");
+    case "desert_warm":
+      return require("@/assets/luts/desert_warm.png");
+    case "vintage_film":
+      return require("@/assets/luts/vintage_film.png");
+    case "sakura":
+      return require("@/assets/luts/sakura.png");
+    case "neon_glow":
+      return require("@/assets/luts/neon_glow.png");
+    case "miami_vibes":
+      return require("@/assets/luts/miami_vibes.png");
+    case "deep_contrast":
+      return require("@/assets/luts/deep_contrast.png");
+    case "moody_forest":
+      return require("@/assets/luts/moody_forest.png");
+    case "winter_lowsat":
+      return require("@/assets/luts/winter_lowsat.png");
+    case "summer_pop":
+      return require("@/assets/luts/summer_pop.png");
+    case "aqua_fresh":
+      return require("@/assets/luts/aqua_fresh.png");
+    case "pink_rose":
+      return require("@/assets/luts/pink_rose.png");
+    case "sepia_clean":
+      return require("@/assets/luts/sepia_clean.png");
+    case "urban_grit":
+      return require("@/assets/luts/urban_grit.png");
+    case "cream_tone":
+      return require("@/assets/luts/cream_tone.png");
     case "none":
     default:
       return null;
@@ -88,7 +85,14 @@ export function getFilterShaderParams(filter: string): FilterShaderParams {
     case "bw_art":
       return { contrast: 1.2, saturation: 0.0, vignette: 0.6, sharpness: 0.4, grain: 0.2 };
     case "soft_skin_ig":
-      return { brightness: 0.02, contrast: 1.03, saturation: 1.05, smoothing: 0.2, temperature: 0.12, highlights: 0.15 };
+      return {
+        brightness: 0.02,
+        contrast: 1.03,
+        saturation: 1.05,
+        smoothing: 0.2,
+        temperature: 0.12,
+        highlights: 0.15,
+      };
     case "clean_portrait":
       return { brightness: 0.01, contrast: 1.05, saturation: 1.0, sharpness: 0.4, highlights: 0.1 };
     case "cinematic_gold":
@@ -98,11 +102,27 @@ export function getFilterShaderParams(filter: string): FilterShaderParams {
     case "pastel_dream":
       return { brightness: 0.05, saturation: 0.9, fade: 0.3, highlights: 0.3, temperature: 0.05 };
     case "tokyo_night":
-      return { brightness: -0.03, contrast: 1.1, saturation: 0.9, temperature: -0.2, vignette: 0.5, grain: 0.1, shadows: -0.15 };
+      return {
+        brightness: -0.03,
+        contrast: 1.1,
+        saturation: 0.9,
+        temperature: -0.2,
+        vignette: 0.5,
+        grain: 0.1,
+        shadows: -0.15,
+      };
     case "desert_warm":
       return { brightness: 0.04, contrast: 1.05, saturation: 1.1, temperature: 0.35, highlights: 0.2 };
     case "vintage_film":
-      return { brightness: 0.02, contrast: 1.08, saturation: 0.85, grain: 0.35, fade: 0.2, vignette: 0.3, temperature: 0.1 };
+      return {
+        brightness: 0.02,
+        contrast: 1.08,
+        saturation: 0.85,
+        grain: 0.35,
+        fade: 0.2,
+        vignette: 0.3,
+        temperature: 0.1,
+      };
     case "sakura":
       return { brightness: 0.03, saturation: 1.1, temperature: 0.08, highlights: 0.25, fade: 0.1 };
     case "neon_glow":
@@ -112,7 +132,15 @@ export function getFilterShaderParams(filter: string): FilterShaderParams {
     case "deep_contrast":
       return { contrast: 1.3, saturation: 1.05, vignette: 0.5, shadows: -0.2, sharpness: 0.4 };
     case "moody_forest":
-      return { brightness: -0.03, contrast: 1.1, saturation: 0.85, temperature: -0.1, vignette: 0.5, shadows: -0.2, grain: 0.1 };
+      return {
+        brightness: -0.03,
+        contrast: 1.1,
+        saturation: 0.85,
+        temperature: -0.1,
+        vignette: 0.5,
+        shadows: -0.2,
+        grain: 0.1,
+      };
     case "winter_lowsat":
       return { saturation: 0.7, temperature: -0.15, fade: 0.15 };
     case "summer_pop":

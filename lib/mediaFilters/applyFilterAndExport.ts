@@ -1,6 +1,10 @@
 import * as ImageManipulator from "expo-image-manipulator";
 
-export type FilterId = "none" | "warm" | "cool" | "pink" | "gold" | "night";
+export type FilterId = "none" | "warm" | "cool" | "pink" | "gold" | "night"
+  | "cinematic_gold" | "blue_teal" | "pastel_dream" | "tokyo_night" | "desert_warm"
+  | "vintage_film" | "sakura" | "neon_glow" | "miami_vibes" | "deep_contrast"
+  | "moody_forest" | "winter_lowsat" | "summer_pop" | "aqua_fresh" | "pink_rose"
+  | "sepia_clean" | "urban_grit" | "cream_tone";
 export type MediaType = "image" | "video";
 export type QuickAdjustmentId = "none" | "brighten" | "darken" | "vivid";
 

@@ -16,19 +16,11 @@ export type StoryUser = {
   label: string;
   initials?: string;
   avatarUrl?: string;
-  /**
-   * Se o usuário tem story não visto (borda colorida).
-   * Prioridade sobre `seen`. Se `hasUnseen === false`, desenha como visto.
-   */
   hasUnseen?: boolean;
-  /**
-   * Se todos os stories desse usuário já foram vistos.
-   */
   seen?: boolean;
-  /**
-   * Se é o próprio usuário logado (pra controlar o "Seu story" e o botão de +).
-   */
   isCurrentUser?: boolean;
+  /** True if this user has a close_friends_only story for the viewer → green ring */
+  isCloseFriend?: boolean;
 };
 
 type StoriesBarProps = {
@@ -40,6 +32,11 @@ type StoriesBarProps = {
 const DEFAULT_DATA: StoryUser[] = [
   { id: "me", label: "Seu story", initials: "W", hasUnseen: true, isCurrentUser: true },
 ];
+
+// Instagram gradient (orange → magenta)
+const INSTAGRAM_GRADIENT = ["#f09433", "#e6683c", "#dc2743", "#cc2366", "#bc1888"] as const;
+// Close friends gradient (green)
+const CLOSE_FRIENDS_GRADIENT = ["#5dcd5b", "#3dad5c", "#27ae60"] as const;
 
 export default function StoriesBar({
   data = DEFAULT_DATA,
@@ -71,9 +68,10 @@ export default function StoriesBar({
           const hasUnseen =
             item.hasUnseen === undefined ? !item.seen : item.hasUnseen;
 
-          const outerStyle = hasUnseen
-            ? styles.storyAvatarOuterGradient
-            : styles.storyAvatarOuterSeen;
+          const isCloseFriend = !!item.isCloseFriend;
+
+          // Choose gradient: green for close friends, orange for regular unseen
+          const gradientColors = isCloseFriend ? CLOSE_FRIENDS_GRADIENT : INSTAGRAM_GRADIENT;
 
           return (
             <View style={styles.storyItem}>
@@ -120,21 +118,15 @@ export default function StoriesBar({
 
                     return hasUnseen ? (
                       <LinearGradient
-                        colors={[
-                          "#f09433",
-                          "#e6683c",
-                          "#dc2743",
-                          "#cc2366",
-                          "#bc1888",
-                        ]}
-                        style={outerStyle}
+                        colors={gradientColors}
+                        style={styles.storyAvatarOuterGradient}
                       >
                         {avatarNode}
                       </LinearGradient>
                     ) : (
                       <View
                         style={[
-                          outerStyle,
+                          styles.storyAvatarOuterSeen,
                           { borderColor: theme.colors.border },
                         ]}
                       >
@@ -142,6 +134,13 @@ export default function StoriesBar({
                       </View>
                     );
                   })()}
+
+                  {/* Close friends badge — small green star */}
+                  {isCloseFriend && (
+                    <View style={styles.closeFriendBadge}>
+                      <Text style={styles.closeFriendStar}>⭐</Text>
+                    </View>
+                  )}
 
                   {isFirst && (
                     <TouchableOpacity
@@ -233,5 +232,21 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 2,
     borderColor: "#000",
+  },
+  closeFriendBadge: {
+    position: "absolute",
+    top: -2,
+    right: -2,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#27ae60",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: "#000",
+  },
+  closeFriendStar: {
+    fontSize: 9,
   },
 });
