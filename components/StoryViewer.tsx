@@ -20,6 +20,9 @@ import {
 } from "react-native";
 import StoryViewersSheet from "./StoryViewersSheet";
 
+const isDuplicateInsertError = (error: any) =>
+  error?.code === "23505" || String(error?.message ?? "").toLowerCase().includes("duplicate");
+
 export type StoryItem = {
   id: string | number;
   media_type: "image" | "video";
@@ -230,7 +233,7 @@ export default function StoryViewer({
   const [viewsCount, setViewsCount] = useState(0);
   const [likesCount, setLikesCount] = useState(0);
   const [viewersSheetOpen, setViewersSheetOpen] = useState(false);
-  const countsRefreshRef = useRef<NodeJS.Timeout | null>(null);
+  const viewedStoryIdsRef = useRef<Set<number>>(new Set());
 
   const total = items.length;
 
@@ -284,6 +287,46 @@ export default function StoryViewer({
     }).catch(() => {});
   }, []);
 
+  const registerView = useCallback(async (storyId: number, viewerId: string) => {
+    if (!Number.isFinite(storyId) || storyId <= 0 || !viewerId) return;
+    if (viewedStoryIdsRef.current.has(storyId)) return;
+
+    const { error: rpcError } = await supabase.rpc("register_story_view", {
+      _story_id: storyId,
+    });
+
+    if (rpcError) {
+      const { error: insertError } = await supabase
+        .from("story_views")
+        .insert({ story_id: storyId, viewer_id: viewerId } as any);
+
+      if (insertError && String(insertError.message ?? "").includes('column "user_id"')) {
+        const { error: legacyInsertError } = await supabase
+          .from("story_views")
+          .insert({ story_id: storyId, viewer_id: viewerId, user_id: viewerId } as any);
+
+        if (legacyInsertError && !isDuplicateInsertError(legacyInsertError)) {
+          console.warn("story view register failed:", legacyInsertError.message);
+          return;
+        }
+      } else if (insertError && String(insertError.message ?? "").toLowerCase().includes('null value in column "user_id"')) {
+        const { error: legacyInsertError } = await supabase
+          .from("story_views")
+          .insert({ story_id: storyId, viewer_id: viewerId, user_id: viewerId } as any);
+
+        if (legacyInsertError && !isDuplicateInsertError(legacyInsertError)) {
+          console.warn("story view register failed:", legacyInsertError.message);
+          return;
+        }
+      } else if (insertError && !isDuplicateInsertError(insertError)) {
+        console.warn("story view register failed:", insertError.message);
+        return;
+      }
+    }
+
+    viewedStoryIdsRef.current.add(storyId);
+  }, []);
+
   // Register view + fetch counts when story changes
   useEffect(() => {
     if (!visible || total === 0 || currentIndex < 0 || currentIndex >= total) return;
@@ -295,26 +338,7 @@ export default function StoryViewer({
 
     // Register view if not owner
     if (!isOwner && Number.isFinite(storyId) && storyId > 0) {
-      supabase.rpc("register_story_view", { _story_id: storyId })
-        .then((res: any) => {
-          // If RPC fails, try direct insert as fallback
-          if (res.error) {
-            console.warn("register_story_view RPC failed:", res.error.message);
-            supabase
-              .from("story_views")
-              .insert({ story_id: storyId, viewer_id: authUserId })
-              .then(() => {})
-              .catch(() => {});
-          }
-        })
-        .catch(() => {
-          // Fallback: direct insert
-          supabase
-            .from("story_views")
-            .insert({ story_id: storyId, viewer_id: authUserId })
-            .then(() => {})
-            .catch(() => {});
-        });
+      registerView(storyId, authUserId).catch(() => {});
     }
 
     // Fetch counts (for owner display)
@@ -349,7 +373,7 @@ export default function StoryViewer({
           setLiked(!!data);
         }).catch(() => {});
     }
-  }, [visible, currentIndex, authUserId, items, total, fetchCounts]);
+  }, [visible, currentIndex, authUserId, items, total, fetchCounts, registerView]);
 
   if (!visible || total === 0 || currentIndex < 0 || currentIndex >= total) {
     return null;
@@ -397,15 +421,17 @@ export default function StoryViewer({
       Animated.timing(heartScale, { toValue: 0, duration: 200, useNativeDriver: true }),
     ]).start(() => setShowHeart(false));
 
-    // Persist like + send notification
     if (authUserId && current) {
       const storyId = Number(current.id);
       const storyOwnerId = current.user_id;
+
+      registerView(storyId, authUserId).catch(() => {});
+
       supabase
         .from("story_likes")
         .insert({ story_id: storyId, user_id: authUserId })
         .then(() => {
-          // Create notification for story owner
+          fetchCounts(storyId);
           if (storyOwnerId && storyOwnerId !== authUserId) {
             supabase.rpc("create_notification", {
               _recipient_id: storyOwnerId,

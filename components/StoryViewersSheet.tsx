@@ -93,7 +93,7 @@ export default function StoryViewersSheet({
     if (onPressUser) {
       onPressUser(userId);
     } else {
-      router.push({ pathname: "/user/[id]", params: { id: userId } });
+      router.push({ pathname: "/profile", params: { userId } });
     }
   };
 

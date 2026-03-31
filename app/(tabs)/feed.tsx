@@ -800,7 +800,7 @@ export default function Feed() {
         onClose={() => setStoryViewerVisible(false)}
         onPressUser={(userId) => {
           setStoryViewerVisible(false);
-          router.push({ pathname: "/user/[id]", params: { id: userId } });
+          router.push({ pathname: "/profile", params: { userId } });
         }}
       />
 
