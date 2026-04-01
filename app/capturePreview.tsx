@@ -227,6 +227,7 @@ export default function CapturePreview() {
   const [activeToolSheet, setActiveToolSheet] = useState<null | "text" | "stickers" | "music" | "mention" | "effects" | "draw" | "save" | "location">(null);
   const [quickAdjustment, setQuickAdjustment] = useState<"none" | "bright" | "dark" | "punch">("none");
   const [effectsOpen, setEffectsOpen] = useState(false);
+  const [showEffectsPanel, setShowEffectsPanel] = useState(false);
 
   // Beautify
   const [showBeautifyPanel, setShowBeautifyPanel] = useState(false);
@@ -798,13 +799,13 @@ export default function CapturePreview() {
     : [...baseTools, { key: "more", label: "Menos", icon: "⋮" } as const];
 
   const handleToolPress = (key: string) => {
-    if (key === "beautify") { setShowBeautifyPanel(p => !p); setShowAdjustPanel(false); setEffectsOpen(false); setActiveToolSheet(null); setShowInlineFilters(false); setIsDrawing(false); return; }
-    if (key === "adjust") { setShowAdjustPanel(p => !p); setShowBeautifyPanel(false); setEffectsOpen(false); setActiveToolSheet(null); setShowInlineFilters(false); setIsDrawing(false); return; }
-    if (key === "effects") { setActiveToolSheet(prev => prev === "effects" ? null : "effects"); setEffectsOpen(false); setShowBeautifyPanel(false); setShowAdjustPanel(false); setShowInlineFilters(false); setIsDrawing(false); return; }
-    if (key === "more") { setToolsCollapsed(p => !p); setEffectsOpen(false); setShowBeautifyPanel(false); setShowAdjustPanel(false); setShowInlineFilters(false); setActiveToolSheet(null); setIsDrawing(false); return; }
-    if (key === "draw") { setIsDrawing(p => !p); setShowBeautifyPanel(false); setShowAdjustPanel(false); setEffectsOpen(false); setShowInlineFilters(false); setActiveToolSheet(null); return; }
+    if (key === "beautify") { setShowBeautifyPanel(p => !p); setShowAdjustPanel(false); setEffectsOpen(false); setActiveToolSheet(null); setShowInlineFilters(false); setIsDrawing(false); setShowEffectsPanel(false); return; }
+    if (key === "adjust") { setShowAdjustPanel(p => !p); setShowBeautifyPanel(false); setEffectsOpen(false); setActiveToolSheet(null); setShowInlineFilters(false); setIsDrawing(false); setShowEffectsPanel(false); return; }
+    if (key === "effects") { setShowEffectsPanel(p => !p); setEffectsOpen(false); setShowBeautifyPanel(false); setShowAdjustPanel(false); setShowInlineFilters(false); setIsDrawing(false); setActiveToolSheet(null); return; }
+    if (key === "more") { setToolsCollapsed(p => !p); setEffectsOpen(false); setShowBeautifyPanel(false); setShowAdjustPanel(false); setShowInlineFilters(false); setActiveToolSheet(null); setIsDrawing(false); setShowEffectsPanel(false); return; }
+    if (key === "draw") { setIsDrawing(p => !p); setShowBeautifyPanel(false); setShowAdjustPanel(false); setEffectsOpen(false); setShowInlineFilters(false); setActiveToolSheet(null); setShowEffectsPanel(false); return; }
     if (key === "save") { handleSave(); return; }
-    setEffectsOpen(false); setShowBeautifyPanel(false); setShowAdjustPanel(false); setShowInlineFilters(false); setIsDrawing(false);
+    setEffectsOpen(false); setShowBeautifyPanel(false); setShowAdjustPanel(false); setShowInlineFilters(false); setIsDrawing(false); setShowEffectsPanel(false);
     setActiveToolSheet(prev => prev === key ? null : key as any);
   };
 
@@ -1043,6 +1044,25 @@ export default function CapturePreview() {
 
       {/* Bottom panel */}
       <View style={[styles.bottomPanel, { paddingBottom: insets.bottom + 16 }]}>
+        {/* Effects inline panel — Instagram-style horizontal scroll */}
+        {showEffectsPanel && (
+          <View style={styles.beautifyPanel}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 4, gap: 4 }} style={{ marginBottom: 6 }}>
+              {FILTERS.map(f => {
+                const active = f.id === filter;
+                return (
+                  <TouchableOpacity key={f.id} activeOpacity={0.85} onPress={() => { setFilter(f.id); setFilterIntensity(1.0); }} style={styles.effectFilterItem}>
+                    <View style={[styles.effectFilterThumb, { backgroundColor: f.overlay ?? "rgba(255,255,255,0.12)" }, active && styles.effectFilterThumbActive]}>
+                      {active && <Text style={styles.effectFilterCheck}>✓</Text>}
+                    </View>
+                    <Text style={[styles.effectFilterName, active && styles.effectFilterNameActive]} numberOfLines={1}>{f.name}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        )}
+
         {/* Beautify panel */}
         {showBeautifyPanel && (
           <View style={styles.beautifyPanel}>
@@ -1416,94 +1436,8 @@ export default function CapturePreview() {
         </Pressable>
       </Modal>
 
-      {/* ─── EFFECTS MODAL (Instagram-style premium) ─── */}
-      <Modal
-        visible={activeToolSheet === "effects"}
-        transparent animationType="slide" onRequestClose={() => setActiveToolSheet(null)}
-      >
-        <Pressable style={styles.toolModalOverlay} onPress={() => setActiveToolSheet(null)}>
-          <Pressable style={styles.effectsSheet} onPress={() => {}}>
-            <View style={styles.effectsHandle} />
-            <Text style={styles.effectsTitle}>Efeitos</Text>
 
-            {/* LUT Filters section */}
-            <Text style={styles.effectsSectionLabel}>Filtros</Text>
-            <FlatList
-              data={FILTERS}
-              keyExtractor={i => i.id}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: 4, paddingBottom: 6 }}
-              renderItem={({ item: f }) => {
-                const active = f.id === filter;
-                return (
-                  <TouchableOpacity
-                    activeOpacity={0.85}
-                    onPress={() => { setFilter(f.id); setFilterIntensity(1.0); setActiveToolSheet(null); }}
-                    style={styles.effectFilterItem}
-                  >
-                    <View style={[
-                      styles.effectFilterThumb,
-                      { backgroundColor: f.overlay ?? "rgba(255,255,255,0.12)" },
-                      active && styles.effectFilterThumbActive,
-                    ]}>
-                      {active && <Text style={styles.effectFilterCheck}>✓</Text>}
-                    </View>
-                    <Text style={[styles.effectFilterName, active && styles.effectFilterNameActive]} numberOfLines={1}>{f.name}</Text>
-                  </TouchableOpacity>
-                );
-              }}
-            />
 
-            {/* Presets section */}
-            <Text style={[styles.effectsSectionLabel, { marginTop: 16 }]}>Presets</Text>
-            <FlatList
-              data={[
-                { label: "Clarendon", icon: "☀️", vals: { highlights: 0.25, shadows: 0.1, sharpness: 0.15 } },
-                { label: "Gingham", icon: "🌫", vals: { fade: 0.2, highlights: 0.15, temperature: -0.1 } },
-                { label: "Moon", icon: "🌙", vals: { fade: 0.15, temperature: -0.2, highlights: 0.2 } },
-                { label: "Lark", icon: "🐦", vals: { highlights: 0.3, temperature: 0.1, shadows: 0.15 } },
-                { label: "Reyes", icon: "🌅", vals: { fade: 0.25, temperature: 0.15, highlights: 0.1 } },
-                { label: "Juno", icon: "🔥", vals: { highlights: 0.2, shadows: -0.15, temperature: 0.1 } },
-                { label: "Slumber", icon: "💤", vals: { fade: 0.2, vignette: 0.3, temperature: 0.05 } },
-                { label: "Crema", icon: "☕", vals: { fade: 0.15, temperature: 0.12, highlights: 0.1 } },
-                { label: "Ludwig", icon: "🎹", vals: { highlights: 0.15, shadows: -0.1, vignette: 0.2 } },
-                { label: "Aden", icon: "🌿", vals: { fade: 0.18, temperature: 0.08, highlights: 0.15 } },
-                { label: "Perpetua", icon: "🌊", vals: { highlights: 0.2, temperature: -0.12, fade: 0.1 } },
-                { label: "Amaro", icon: "⚡", vals: { highlights: 0.25, sharpness: 0.2, vignette: 0.15 } },
-                { label: "Mayfair", icon: "🎩", vals: { vignette: 0.35, highlights: 0.15, temperature: 0.08 } },
-                { label: "Rise", icon: "🌤", vals: { highlights: 0.2, temperature: 0.15, fade: 0.08 } },
-                { label: "Hudson", icon: "❄️", vals: { temperature: -0.15, highlights: 0.2, vignette: 0.25 } },
-                { label: "Valencia", icon: "🍊", vals: { temperature: 0.15, fade: 0.12, highlights: 0.1 } },
-                { label: "X-Pro II", icon: "📸", vals: { vignette: 0.4, highlights: 0.25, shadows: -0.2 } },
-                { label: "Lo-Fi", icon: "📻", vals: { highlights: 0.3, shadows: -0.25, sharpness: 0.25, vignette: 0.3 } },
-                { label: "Earlybird", icon: "🐥", vals: { temperature: 0.2, fade: 0.2, vignette: 0.25, grain: 0.1 } },
-                { label: "Brannan", icon: "🎞", vals: { temperature: 0.1, fade: 0.15, vignette: 0.2, grain: 0.08 } },
-              ]}
-              keyExtractor={i => i.label}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: 4, paddingBottom: 12 }}
-              renderItem={({ item: eff }) => (
-                <TouchableOpacity
-                  activeOpacity={0.85}
-                  onPress={() => {
-                    setAdjustValues(prev => ({ ...prev, ...eff.vals }));
-                    setActiveToolSheet(null);
-                    setShowAdjustPanel(true);
-                  }}
-                  style={styles.effectPresetItem}
-                >
-                  <View style={styles.effectPresetThumb}>
-                    <Text style={{ fontSize: 22 }}>{eff.icon}</Text>
-                  </View>
-                  <Text style={styles.effectPresetName} numberOfLines={1}>{eff.label}</Text>
-                </TouchableOpacity>
-              )}
-            />
-          </Pressable>
-        </Pressable>
-      </Modal>
 
       {/* ─── Filters full modal ─── */}
       <Modal visible={filtersOpen} transparent animationType="fade" onRequestClose={() => setFiltersOpen(false)}>
