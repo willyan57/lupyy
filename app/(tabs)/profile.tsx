@@ -1,6 +1,7 @@
 // app/(tabs)/profile.tsx
 import StoryViewer, { type StoryItem } from "@/components/StoryViewer";
 import Colors from "@/constants/Colors";
+import { crossAlert } from "@/lib/crossPlatformAlert";
 import { useTranslation } from "@/lib/i18n";
 import { uploadStory } from "@/lib/storage";
 import { supabase } from "@/lib/supabase";
@@ -15,7 +16,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { StyleProp, ViewStyle } from "react-native";
 import {
   ActivityIndicator,
-  Alert, Animated, Dimensions,
+  Animated, Dimensions,
   FlatList,
   Modal,
   Platform,
@@ -529,14 +530,14 @@ export default function Profile() {
       await boostPost(promotePostId, "standard", 24);
       setBoostedPostIds((prev) => new Set([...prev, promotePostId]));
       setPromoteModalVisible(false);
-      Alert.alert("✨ Post promovido!", "Seu post ficará em destaque no feed por 24 horas.");
+      crossAlert("✨ Post promovido!", "Seu post ficará em destaque no feed por 24 horas.");
     } catch (err: any) {
       if (err?.message?.includes("POST_ALREADY_BOOSTED")) {
-        Alert.alert("Já promovido", "Este post já está em destaque.");
+        crossAlert("Já promovido", "Este post já está em destaque.");
       } else if (err?.message?.includes("MAX_BOOSTS_REACHED")) {
-        Alert.alert("Limite atingido", "Você pode promover até 3 posts simultaneamente.");
+        crossAlert("Limite atingido", "Você pode promover até 3 posts simultaneamente.");
       } else {
-        Alert.alert("Erro", "Não foi possível promover o post.");
+        crossAlert("Erro", "Não foi possível promover o post.");
       }
     } finally {
       setPromoteLoading(false);
@@ -551,15 +552,15 @@ export default function Profile() {
         next.delete(postId);
         return next;
       });
-      Alert.alert("Promoção cancelada", "O post não será mais destacado.");
+      crossAlert("Promoção cancelada", "O post não será mais destacado.");
     } catch {
-      Alert.alert("Erro", "Não foi possível cancelar a promoção.");
+      crossAlert("Erro", "Não foi possível cancelar a promoção.");
     }
   }, []);
 
   const openPromoteModal = useCallback((postId: number) => {
     if (boostedPostIds.has(postId)) {
-      Alert.alert(
+      crossAlert(
         "Post em destaque",
         "Este post já está promovido. Deseja cancelar?",
         [
@@ -941,7 +942,7 @@ export default function Profile() {
           pageRef.current = nextPage;
         }
       } catch (e: any) {
-        Alert.alert(t("alert.errorLoadPosts"), e?.message ?? t("alert.tryAgain"));
+        crossAlert(t("alert.errorLoadPosts"), e?.message ?? t("alert.tryAgain"));
       } finally {
         loadingRef.current = false;
         setLoadingPosts(false);
@@ -956,7 +957,7 @@ export default function Profile() {
 
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
-      Alert.alert(t("alert.permissionRequired"), t("alert.photoAccessNeeded"));
+      crossAlert(t("alert.permissionRequired"), t("alert.photoAccessNeeded"));
       return;
     }
 
@@ -1027,7 +1028,7 @@ export default function Profile() {
       if (profileError) throw profileError;
     } catch (e: any) {
       console.error("Erro ao atualizar avatar:", e);
-      Alert.alert(t("alert.errorUpdatePhoto"), e?.message ?? String(e));
+      crossAlert(t("alert.errorUpdatePhoto"), e?.message ?? String(e));
     }
   }, [userId, isOwnProfile]);
 
@@ -1041,7 +1042,7 @@ export default function Profile() {
     // Fetch highlight items and open the story viewer
     const items = await fetchHighlightItems(hl.id);
     if (items.length === 0) {
-      Alert.alert(t("alert.highlightEmpty"), t("alert.highlightEmptyMsg"));
+      crossAlert(t("alert.highlightEmpty"), t("alert.highlightEmptyMsg"));
       return;
     }
     const storyItems: StoryItem[] = items.map((i) => {
@@ -1077,7 +1078,7 @@ export default function Profile() {
   const handleSaveProfile = useCallback(async () => {
     if (!userId || !isOwnProfile) return;
     if (!draftUsername.trim()) {
-      Alert.alert(t("alert.usernameRequired"), t("alert.usernameRequiredMsg"));
+      crossAlert(t("alert.usernameRequired"), t("alert.usernameRequiredMsg"));
       return;
     }
     if (isUsernameSaveBlocked) {
@@ -1096,7 +1097,7 @@ export default function Profile() {
         const hoursLeft = Math.ceil(24 - hoursSince);
         const minutesLeft = Math.ceil((24 - hoursSince) * 60);
         const timeLabel = hoursLeft >= 1 ? `${hoursLeft}h` : `${minutesLeft} minuto${minutesLeft !== 1 ? "s" : ""}`;
-        Alert.alert(
+        crossAlert(
           t("alert.waitMoment"),
           `Você alterou seu status de relacionamento recentemente. Aguarde mais ${timeLabel} para poder alterar novamente.`,
         );
@@ -1172,16 +1173,16 @@ export default function Profile() {
       setDraftRelationshipStatus(nextStatus);
       setDraftPartnerId(savedRow.partner_id ?? null);
       setEditing(false);
-      Alert.alert(t("alert.profileUpdated"), t("alert.profileUpdatedMsg"));
+      crossAlert(t("alert.profileUpdated"), t("alert.profileUpdatedMsg"));
     } catch (e: any) {
       const msg = e?.message ?? String(e);
       if (msg.includes("profiles_username_lower_unique") || msg.includes("duplicate key") || msg.includes("unique")) {
         setUsernameStatus("taken");
         setUsernameMessage(t("profile.usernameTaken"));
         triggerUsernameShake();
-        Alert.alert(t("alert.usernameUnavailable"), t("alert.usernameUnavailableMsg"));
+        crossAlert(t("alert.usernameUnavailable"), t("alert.usernameUnavailableMsg"));
       } else {
-        Alert.alert(t("alert.errorUpdateProfile"), msg);
+        crossAlert(t("alert.errorUpdateProfile"), msg);
       }
     } finally {
       setSavingProfile(false);
@@ -1347,7 +1348,7 @@ export default function Profile() {
       let ok = true;
       if (!skipConfirm) {
         ok = await new Promise<boolean>((resolve) => {
-          Alert.alert(t("alert.deletePost"), t("alert.deletePostMsg"), [
+          crossAlert(t("alert.deletePost"), t("alert.deletePostMsg"), [
             { text: t("common.cancel"), style: "cancel", onPress: () => resolve(false) },
             { text: t("common.delete"), style: "destructive", onPress: () => resolve(true) },
           ]);
@@ -1370,7 +1371,7 @@ export default function Profile() {
         const { error } = await supabase.from("posts").delete().eq("id", postId).eq("user_id", authUserId);
 
         if (error) {
-          Alert.alert(t("common.error"), error.message || t("alert.errorDeletePost"));
+          crossAlert(t("common.error"), error.message || t("alert.errorDeletePost"));
           return;
         }
       }
@@ -1425,7 +1426,7 @@ export default function Profile() {
       if (error) throw error;
       setStories((prev) => [data as StoryRow, ...prev]);
     } catch (e: any) {
-      Alert.alert(t("alert.errorSendStory"), e?.message ?? String(e));
+      crossAlert(t("alert.errorSendStory"), e?.message ?? String(e));
     }
   }, [authUserId]);
 
@@ -1465,7 +1466,7 @@ export default function Profile() {
         }
       } catch {}
     } catch (e: any) {
-      Alert.alert(t("alert.errorUnfollow"), e?.message ?? t("alert.errorUnfollowMsg"));
+      crossAlert(t("alert.errorUnfollow"), e?.message ?? t("alert.errorUnfollowMsg"));
     } finally {
       setLoadingFollow(false);
     }
@@ -1521,14 +1522,14 @@ export default function Profile() {
       } catch (e: any) {
         const msg = e?.message ?? "";
         if (msg === "CRUSH_BLOCKED_SELF_COMMITTED") {
-          Alert.alert(t("alert.crushBlockedSelf"), t("alert.crushBlockedSelfMsg"));
+          crossAlert(t("alert.crushBlockedSelf"), t("alert.crushBlockedSelfMsg"));
         } else if (msg === "CRUSH_BLOCKED_TARGET_COMMITTED") {
-          Alert.alert(
+          crossAlert(
             t("alert.crushBlockedTarget"),
             t("alert.crushBlockedTargetMsg"),
           );
         } else {
-          Alert.alert(t("alert.errorFollow"), msg || t("alert.errorFollowMsg"));
+          crossAlert(t("alert.errorFollow"), msg || t("alert.errorFollowMsg"));
         }
       } finally {
         setLoadingFollow(false);
@@ -1542,7 +1543,7 @@ export default function Profile() {
       if (!userId) return;
 
       if (mode === "interested" && !isOwnProfile) {
-        Alert.alert(t("alert.reservedArea"), t("alert.reservedAreaMsg"));
+        crossAlert(t("alert.reservedArea"), t("alert.reservedAreaMsg"));
         return;
       }
 
@@ -1591,7 +1592,7 @@ export default function Profile() {
     async (conversationType: ConversationType) => {
       if (!authUserId || !userId) return;
       if (conversationType === "crush" && (viewerIsCommitted || targetIsCommitted)) {
-        Alert.alert(
+        crossAlert(
           t("alert.conversationBlocked"),
           t("alert.conversationBlockedMsg"),
         );
@@ -1620,7 +1621,7 @@ export default function Profile() {
           },
         });
       } catch (e: any) {
-        Alert.alert(t("alert.errorOpenConversation"), e?.message ?? t("alert.errorOpenConversationMsg"));
+        crossAlert(t("alert.errorOpenConversation"), e?.message ?? t("alert.errorOpenConversationMsg"));
       }
     },
     [authUserId, userId, router, viewerIsCommitted, targetIsCommitted],
@@ -1673,12 +1674,12 @@ export default function Profile() {
     const ok = await updateUserSetting(key, newVal);
     if (!ok) {
       setUserSettings((prev) => prev ? { ...prev, [key]: !newVal } : prev);
-      Alert.alert("Erro", "Não foi possível salvar a configuração.");
+      crossAlert("Erro", "Não foi possível salvar a configuração.");
     }
   }, [userSettings]);
 
   const handleUnblockFromSettings = useCallback(async (user: BlockedUser) => {
-    Alert.alert(
+    crossAlert(
       "Desbloquear",
       `Desbloquear @${user.username ?? "usuário"}?`,
       [
@@ -1693,7 +1694,7 @@ export default function Profile() {
             if (res.ok) {
               setBlockedUsers((prev) => prev.filter((u) => u.blocked_id !== user.blocked_id));
             } else {
-              Alert.alert("Erro", "Não foi possível desbloquear.");
+              crossAlert("Erro", "Não foi possível desbloquear.");
             }
           },
         },
@@ -1709,7 +1710,7 @@ export default function Profile() {
     if (!ok) {
       // Revert using the captured previous value (not stale closure)
       setUserSettings((prev) => prev ? { ...prev, [key]: previousValue } : prev);
-      Alert.alert("Erro", "Não foi possível salvar a configuração. Tente novamente.");
+      crossAlert("Erro", "Não foi possível salvar a configuração. Tente novamente.");
     }
   }, [userSettings]);
 
@@ -2531,9 +2532,9 @@ export default function Profile() {
                 </Text>
                 <TouchableOpacity
                   onPress={async () => {
-                    if (!authEmail) { Alert.alert("Erro", "E-mail não encontrado."); return; }
+                    if (!authEmail) { crossAlert("Erro", "E-mail não encontrado."); return; }
                     const { error } = await supabase.auth.resetPasswordForEmail(authEmail);
-                    if (error) { Alert.alert("Erro", error.message); } else { Alert.alert("Enviado", "Um link para redefinir sua senha foi enviado para " + authEmail); }
+                    if (error) { crossAlert("Erro", error.message); } else { crossAlert("Enviado", "Um link para redefinir sua senha foi enviado para " + authEmail); }
                   }}
                   style={{ backgroundColor: "#4CD964", borderRadius: 12, paddingVertical: 14, alignItems: "center" }}
                 >
@@ -2580,7 +2581,7 @@ export default function Profile() {
                     Quando a cópia estiver pronta, enviaremos uma notificação. O processo pode levar até 48 horas.
                   </Text>
                   <TouchableOpacity
-                    onPress={() => Alert.alert("Solicitado", "Sua solicitação foi registrada. Você receberá uma notificação quando estiver pronta.")}
+                    onPress={() => crossAlert("Solicitado", "Sua solicitação foi registrada. Você receberá uma notificação quando estiver pronta.")}
                     style={{ backgroundColor: "#4CD964", borderRadius: 12, paddingVertical: 14, alignItems: "center" }}
                   >
                     <Text style={{ color: "#fff", fontSize: 15, fontWeight: "700" }}>Solicitar download</Text>
@@ -2606,7 +2607,7 @@ export default function Profile() {
                 </View>
                 <TouchableOpacity
                   onPress={() => {
-                    Alert.alert("Excluir conta", "Tem certeza? Esta ação não pode ser desfeita.", [
+                    crossAlert("Excluir conta", "Tem certeza? Esta ação não pode ser desfeita.", [
                       { text: "Cancelar", style: "cancel" },
                       { text: "Excluir permanentemente", style: "destructive", onPress: async () => {
                         try {
@@ -2616,13 +2617,13 @@ export default function Profile() {
                             console.log("RPC deletion error:", error);
                           }
                           await supabase.auth.signOut();
-                          Alert.alert("Conta excluída", "Sua conta será removida em até 30 dias.");
+                          crossAlert("Conta excluída", "Sua conta será removida em até 30 dias.");
                           router.replace("/login" as any);
                         } catch (err) {
                           console.log("Delete account error:", err);
                           // Even if RPC doesn't exist, sign out
                           await supabase.auth.signOut();
-                          Alert.alert("Conta marcada para exclusão", "Sua conta será processada em até 30 dias.");
+                          crossAlert("Conta marcada para exclusão", "Sua conta será processada em até 30 dias.");
                           router.replace("/login" as any);
                         }
                       }},
@@ -2890,7 +2891,7 @@ export default function Profile() {
                   style={{ backgroundColor: theme.colors.surface, borderRadius: 14, padding: 16, color: theme.colors.text, fontSize: 14, textAlignVertical: "top", minHeight: 120, marginBottom: 16 }}
                 />
                 <TouchableOpacity
-                  onPress={() => { Alert.alert("Enviado", "Obrigado pelo relatório! Nossa equipe analisará em breve."); setSettingsDeepScreen(null); }}
+                  onPress={() => { crossAlert("Enviado", "Obrigado pelo relatório! Nossa equipe analisará em breve."); setSettingsDeepScreen(null); }}
                   style={{ backgroundColor: "#4CD964", borderRadius: 12, paddingVertical: 14, alignItems: "center" }}
                 >
                   <Text style={{ color: "#fff", fontSize: 15, fontWeight: "700" }}>Enviar relatório</Text>
@@ -2915,7 +2916,7 @@ export default function Profile() {
                   style={{ backgroundColor: theme.colors.surface, borderRadius: 14, padding: 16, color: theme.colors.text, fontSize: 14, textAlignVertical: "top", minHeight: 120, marginBottom: 16 }}
                 />
                 <TouchableOpacity
-                  onPress={() => { Alert.alert("Obrigado!", "Sua sugestão foi registrada."); setSettingsDeepScreen(null); }}
+                  onPress={() => { crossAlert("Obrigado!", "Sua sugestão foi registrada."); setSettingsDeepScreen(null); }}
                   style={{ backgroundColor: "#4CD964", borderRadius: 12, paddingVertical: 14, alignItems: "center" }}
                 >
                   <Text style={{ color: "#fff", fontSize: 15, fontWeight: "700" }}>Enviar sugestão</Text>
@@ -3259,7 +3260,7 @@ export default function Profile() {
             label: t("settings.crushes"),
             onPress: () => {
               if (isCommitted && isOwnProfile) {
-                Alert.alert(t("alert.crushesBlocked"), t("alert.crushesBlockedMsg"));
+                crossAlert(t("alert.crushesBlocked"), t("alert.crushesBlockedMsg"));
                 return;
               }
               openPeopleSheet("interested");
@@ -3882,7 +3883,7 @@ export default function Profile() {
               activeOpacity={0.8}
               onPress={() => {
                 if (isCommitted && isOwnProfile) {
-                  Alert.alert(
+                  crossAlert(
                     t("alert.crushesBlocked"),
                     t("alert.crushesBlockedFullMsg"),
                   );
@@ -4526,7 +4527,7 @@ export default function Profile() {
                       const res = await blockUser(userId);
                       if (res.ok) {
                         setIsTargetBlocked(true);
-                        Alert.alert("Bloqueado", `@${username ?? "usuário"} foi bloqueado.`);
+                        crossAlert("Bloqueado", `@${username ?? "usuário"} foi bloqueado.`);
                       }
                     }
                     setBlockingUser(false);
@@ -4565,7 +4566,7 @@ export default function Profile() {
               onClose={() => setReportModalVisible(false)}
               targetUserId={userId}
               onReported={() => {
-                Alert.alert("Obrigado", "Sua denúncia foi enviada com sucesso.");
+                crossAlert("Obrigado", "Sua denúncia foi enviada com sucesso.");
               }}
             />
           )}

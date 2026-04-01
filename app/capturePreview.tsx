@@ -800,7 +800,7 @@ export default function CapturePreview() {
   const handleToolPress = (key: string) => {
     if (key === "beautify") { setShowBeautifyPanel(p => !p); setShowAdjustPanel(false); setEffectsOpen(false); setActiveToolSheet(null); setShowInlineFilters(false); setIsDrawing(false); return; }
     if (key === "adjust") { setShowAdjustPanel(p => !p); setShowBeautifyPanel(false); setEffectsOpen(false); setActiveToolSheet(null); setShowInlineFilters(false); setIsDrawing(false); return; }
-    if (key === "effects") { setEffectsOpen(p => !p); setShowBeautifyPanel(false); setShowAdjustPanel(false); setActiveToolSheet(null); setShowInlineFilters(false); setIsDrawing(false); return; }
+    if (key === "effects") { setActiveToolSheet(prev => prev === "effects" ? null : "effects"); setEffectsOpen(false); setShowBeautifyPanel(false); setShowAdjustPanel(false); setShowInlineFilters(false); setIsDrawing(false); return; }
     if (key === "more") { setToolsCollapsed(p => !p); setEffectsOpen(false); setShowBeautifyPanel(false); setShowAdjustPanel(false); setShowInlineFilters(false); setActiveToolSheet(null); setIsDrawing(false); return; }
     if (key === "draw") { setIsDrawing(p => !p); setShowBeautifyPanel(false); setShowAdjustPanel(false); setEffectsOpen(false); setShowInlineFilters(false); setActiveToolSheet(null); return; }
     if (key === "save") { handleSave(); return; }
