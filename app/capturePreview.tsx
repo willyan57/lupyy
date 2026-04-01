@@ -341,6 +341,8 @@ export default function CapturePreview() {
 
   const needsGlPreview = useMemo(() => {
     if (mediaType !== "image") return false;
+    // On mobile web, GLView causes black screen — use overlay approach instead
+    if (isWeb) return false;
     if (previewLutSource !== null) return true;
     const bp = beautifyParams;
     if (bp.smoothing && bp.smoothing > 0.01) return true;
@@ -954,7 +956,7 @@ export default function CapturePreview() {
       )}
 
       <Animated.View pointerEvents="none" style={[styles.filterLabel, { opacity: labelOpacity, transform: [{ scale: labelScale }] }]}>
-        <Text style={styles.filterLabelText}>{activeFilter.name}{filterIntensity < 1 ? ` ${Math.round(filterIntensity * 100)}%` : ""}</Text>
+        <Text style={styles.filterLabelText}>{activeFilter.name}</Text>
       </Animated.View>
 
       {((!mediaLoaded) || aiProcessing) && (
@@ -1019,28 +1021,7 @@ export default function CapturePreview() {
         ))}
       </View>
 
-      {/* Filter intensity slider */}
-      {filter !== "none" && (
-        <View style={styles.intensityBar}>
-          <Text style={styles.intensityLabel}>Intensidade: {Math.round(filterIntensity * 100)}%</Text>
-          <View style={styles.intensitySliderRow}>
-            <Text style={styles.intensityMinMax}>0</Text>
-            <View style={styles.intensityTrack}>
-              <View
-                onStartShouldSetResponder={() => true}
-                onMoveShouldSetResponder={() => true}
-                onResponderGrant={(e) => setFilterIntensity(Math.max(0, Math.min(1, e.nativeEvent.locationX / (width - 100))))}
-                onResponderMove={(e) => setFilterIntensity(Math.max(0, Math.min(1, e.nativeEvent.locationX / (width - 100))))}
-                style={styles.intensityTrackInner}
-              >
-                <View style={[styles.intensityFill, { width: `${filterIntensity * 100}%` as any }]} />
-                <View style={[styles.intensityThumb, { left: `${filterIntensity * 100}%` as any }]} />
-              </View>
-            </View>
-            <Text style={styles.intensityMinMax}>100</Text>
-          </View>
-        </View>
-      )}
+      {/* Intensity slider removed — each effect applies its own preset */}
 
       {/* Bottom panel */}
       <View style={[styles.bottomPanel, { paddingBottom: insets.bottom + 16 }]}>
