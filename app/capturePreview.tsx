@@ -119,6 +119,16 @@ const TEXT_BG_COLORS = ["transparent", "rgba(0,0,0,0.7)", "rgba(255,255,255,0.9)
 
 const ITEM_W = 92;
 
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+const getTouchDistance = (touches: any[] = []) => {
+  if (touches.length < 2) return 0;
+  const [a, b] = touches;
+  const dx = (b.pageX ?? 0) - (a.pageX ?? 0);
+  const dy = (b.pageY ?? 0) - (a.pageY ?? 0);
+  return Math.sqrt(dx * dx + dy * dy);
+};
+
 export default function CapturePreview() {
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -128,6 +138,16 @@ export default function CapturePreview() {
   const mediaType = useMemo(() => String(params.mediaType ?? "image") as "image" | "video", [params.mediaType]);
   const mode = useMemo(() => String(params.mode ?? "post") as CaptureMode, [params.mode]);
   const nonce = useMemo(() => String(params.nonce ?? ""), [params.nonce]);
+  const collageUris = useMemo(() => {
+    const raw = params.collageUris;
+    if (typeof raw !== "string") return [] as string[];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string" && !!item) : [];
+    } catch {
+      return [] as string[];
+    }
+  }, [params.collageUris]);
   const facing = useMemo(() => String(params.facing ?? "back"), [params.facing]);
   const isFrontCamera = facing === "front";
   const cameFromCamera = facing === "front" || facing === "back";
@@ -137,7 +157,7 @@ export default function CapturePreview() {
 
   // Normalization
   const [normalizedUri, setNormalizedUri] = useState<string | null>(null);
-  const needsNormalization = Platform.OS !== "web" && mediaType === "image" && cameFromCamera && !hasNormalizedDimensions;
+  const needsNormalization = Platform.OS !== "web" && mediaType === "image" && !!rawUri && (cameFromCamera || !hasNormalizedDimensions);
 
   useEffect(() => {
     if (!needsNormalization || !rawUri) { setNormalizedUri(null); return; }
@@ -145,7 +165,7 @@ export default function CapturePreview() {
     (async () => {
       try {
         const IM = await import("expo-image-manipulator");
-        const result = await IM.manipulateAsync(rawUri, [{ rotate: 0 }], { compress: 1, format: IM.SaveFormat.JPEG });
+        const result = await IM.manipulateAsync(rawUri, [{ rotate: 0 }], { compress: 0.96, format: IM.SaveFormat.JPEG });
         if (!cancelled && result?.uri) setNormalizedUri(result.uri);
       } catch {
         if (!cancelled) setNormalizedUri(rawUri);
@@ -239,6 +259,7 @@ export default function CapturePreview() {
   const [editingTextBg, setEditingTextBg] = useState("transparent");
   const [editingTextWeight, setEditingTextWeight] = useState<"400" | "700" | "900">("700");
   const [editingTextAlign, setEditingTextAlign] = useState<"left" | "center" | "right">("center");
+  const textGestureStateRef = useRef<Record<string, { startX: number; startY: number; startFontSize: number; startPageX: number; startPageY: number; startDistance: number }>>({});
 
   // Mention
   const [mentionQuery, setMentionQuery] = useState("");
@@ -288,19 +309,19 @@ export default function CapturePreview() {
     const fp = typeof getFilterShaderParams === "function" ? getFilterShaderParams(mapPreviewFilterToExport(filter)) : {};
 
     return {
-      brightness: quickBrightness + (fp.brightness ?? 0),
-      contrast: quickContrast * (0.4 + contrastRaw) * (fp.contrast ?? 1),
-      saturation: quickSaturation * (fp.saturation ?? 1),
-      smoothing: Math.max(0, smoothRaw - 0.6) * 2.5 + (fp.smoothing ?? 0),
-      whitenTeeth: Math.max(0, teethRaw - 0.6) * 2.5,
-      baseGlow: Math.max(0, baseRaw - 0.6) * 2.5,
-      sharpness: adjustValues.sharpness + (fp.sharpness ?? 0),
-      temperature: adjustValues.temperature + (fp.temperature ?? 0),
-      vignette: adjustValues.vignette + (fp.vignette ?? 0) + (activeFilter.vignette ? 0.3 : 0),
-      grain: adjustValues.grain + (fp.grain ?? 0),
-      fade: adjustValues.fade + (fp.fade ?? 0),
-      highlights: adjustValues.highlights + (fp.highlights ?? 0),
-      shadows: adjustValues.shadows + (fp.shadows ?? 0),
+      brightness: clamp(quickBrightness + (fp.brightness ?? 0), -0.3, 0.3),
+      contrast: clamp(quickContrast * (0.4 + contrastRaw) * (fp.contrast ?? 1), 0.5, 2.0),
+      saturation: clamp(quickSaturation * (fp.saturation ?? 1), 0.0, 2.0),
+      smoothing: clamp(Math.max(0, smoothRaw - 0.6) * 2.5 + (fp.smoothing ?? 0), 0, 1),
+      whitenTeeth: clamp(Math.max(0, teethRaw - 0.6) * 2.5, 0, 1),
+      baseGlow: clamp(Math.max(0, baseRaw - 0.6) * 2.5, 0, 1),
+      sharpness: clamp(adjustValues.sharpness + (fp.sharpness ?? 0), 0, 0.42),
+      temperature: clamp(adjustValues.temperature + (fp.temperature ?? 0), -0.4, 0.4),
+      vignette: clamp(adjustValues.vignette + (fp.vignette ?? 0) + (activeFilter.vignette ? 0.3 : 0), 0, 0.8),
+      grain: clamp(adjustValues.grain + (fp.grain ?? 0), 0, 0.35),
+      fade: clamp(adjustValues.fade + (fp.fade ?? 0), 0, 0.4),
+      highlights: clamp(adjustValues.highlights + (fp.highlights ?? 0), -0.4, 0.4),
+      shadows: clamp(adjustValues.shadows + (fp.shadows ?? 0), -0.4, 0.4),
     };
   }, [beautifyValues, quickAdjustment, filter, adjustValues, activeFilter]);
 
@@ -554,35 +575,48 @@ export default function CapturePreview() {
       return;
     }
 
-    // Post
+    // Post — handle collage as carousel
     try {
       setSending(true);
       let uid = userId;
       if (!uid) { const { data } = await supabase.auth.getUser(); uid = data.user?.id ?? null; }
       if (!uid) { setSending(false); return; }
       const isVideo = mediaType === "video";
-      let uploadUri = bakedUri;
-      let thumbUri: string | null = null;
-      if (!isVideo) { uploadUri = await compressImage(bakedUri); }
-      else { const p = await prepareVideo(bakedUri); uploadUri = p.videoUri; thumbUri = p.thumbUri ?? null; }
-      const timestamp = Date.now();
-      const basePath = `${uid}/${timestamp}`;
-      const ext = isVideo ? "mp4" : "jpg";
-      await uploadToBucket("posts", `${basePath}.${ext}`, uploadUri, isVideo ? "video/mp4" : "image/jpeg");
-      let thumbPath: string | null = null;
-      if (isVideo && thumbUri) { thumbPath = `${basePath}.jpg`; await uploadToBucket("posts", thumbPath, thumbUri, "image/jpeg"); }
       const { hashtags, mentions } = extractTags(caption);
       const allMentions = [...mentions, ...taggedUsers.map(t => t.username)];
+
+      // If collage, upload each image as a carousel
+      const urisToUpload = collageUris.length > 1 ? collageUris : [bakedUri];
+      const isCarousel = urisToUpload.length > 1;
+
       const { data: insertedPost, error: postError } = await supabase.from("posts").insert({
-        user_id: uid, media_type: mediaType, image_path: `${basePath}.${ext}`,
-        thumbnail_path: thumbPath, caption: caption || null,
-        hashtags, mentions: allMentions, privacy_level: "public", is_carousel: false, location: selectedLocation,
+        user_id: uid, media_type: mediaType, image_path: "", // will be set from first media
+        thumbnail_path: null, caption: caption || null,
+        hashtags, mentions: allMentions, privacy_level: "public", is_carousel: isCarousel, location: selectedLocation,
       }).select("id").single();
       if (postError || !insertedPost) throw postError || new Error("Erro ao criar post");
-      await supabase.from("post_media").insert({
-        post_id: insertedPost.id, media_type: mediaType, media_path: `${basePath}.${ext}`,
-        thumbnail_path: thumbPath, position: 0,
-      });
+
+      for (let i = 0; i < urisToUpload.length; i++) {
+        let uploadUri = urisToUpload[i];
+        let thumbUri: string | null = null;
+        if (!isVideo) { uploadUri = await compressImage(uploadUri); }
+        else { const p = await prepareVideo(uploadUri); uploadUri = p.videoUri; thumbUri = p.thumbUri ?? null; }
+        const timestamp = Date.now();
+        const basePath = `${uid}/${timestamp}_${i}`;
+        const ext = isVideo ? "mp4" : "jpg";
+        await uploadToBucket("posts", `${basePath}.${ext}`, uploadUri, isVideo ? "video/mp4" : "image/jpeg");
+        let thumbPath: string | null = null;
+        if (isVideo && thumbUri) { thumbPath = `${basePath}.jpg`; await uploadToBucket("posts", thumbPath, thumbUri, "image/jpeg"); }
+        await supabase.from("post_media").insert({
+          post_id: insertedPost.id, media_type: mediaType, media_path: `${basePath}.${ext}`,
+          thumbnail_path: thumbPath, position: i,
+        });
+        // Update main post image_path with first media
+        if (i === 0) {
+          await supabase.from("posts").update({ image_path: `${basePath}.${ext}`, thumbnail_path: thumbPath }).eq("id", insertedPost.id).then((r: any) => r);
+        }
+      }
+
       setSending(false);
       router.replace("/feed");
     } catch (err) {
@@ -717,19 +751,19 @@ export default function CapturePreview() {
 
   const quickAdjustments = [
     { key: "none", label: "Normal" },
-    { key: "bright", label: "Claro" },
-    { key: "dark", label: "Escuro" },
-    { key: "punch", label: "Punch" },
+    { key: "bright", label: "Lux" },
+    { key: "dark", label: "Dramático" },
+    { key: "punch", label: "Vibrante" },
   ] as const;
 
   const adjustItems: { key: keyof typeof adjustValues; label: string; icon: string; min: number; max: number }[] = [
-    { key: "sharpness", label: "Nitidez", icon: "△", min: 0, max: 1.0 },
-    { key: "temperature", label: "Temperatura", icon: "🌡", min: -0.5, max: 0.5 },
-    { key: "vignette", label: "Vinheta", icon: "⬡", min: 0, max: 1.0 },
-    { key: "grain", label: "Grão", icon: "▤", min: 0, max: 0.5 },
-    { key: "fade", label: "Fade", icon: "▨", min: 0, max: 0.5 },
-    { key: "highlights", label: "Realces", icon: "▲", min: -0.5, max: 0.5 },
-    { key: "shadows", label: "Sombras", icon: "▼", min: -0.5, max: 0.5 },
+    { key: "sharpness", label: "Nitidez", icon: "△", min: 0, max: 0.42 },
+    { key: "temperature", label: "Temperatura", icon: "🌡", min: -0.4, max: 0.4 },
+    { key: "vignette", label: "Vinheta", icon: "⬡", min: 0, max: 0.8 },
+    { key: "grain", label: "Grão", icon: "▤", min: 0, max: 0.35 },
+    { key: "fade", label: "Fade", icon: "▨", min: 0, max: 0.4 },
+    { key: "highlights", label: "Realces", icon: "▲", min: -0.4, max: 0.4 },
+    { key: "shadows", label: "Sombras", icon: "▼", min: -0.4, max: 0.4 },
   ];
 
   const beautifyValue = beautifyValues[beautifyOption] ?? 60;
@@ -844,10 +878,48 @@ export default function CapturePreview() {
           </Svg>
         )}
 
-        {/* Text overlays */}
+        {/* Text overlays — draggable + pinch to resize */}
         {textOverlays.map(t => (
-          <View key={t.id} style={[styles.textOverlayItem, { left: t.x, top: t.y, backgroundColor: t.bg || "transparent" }]}>
+          <View
+            key={t.id}
+            style={[styles.textOverlayItem, { left: t.x, top: t.y, backgroundColor: t.bg || "transparent" }]}
+            onStartShouldSetResponder={() => !isDrawing}
+            onMoveShouldSetResponder={() => !isDrawing}
+            onResponderGrant={(e) => {
+              const touches = e.nativeEvent.touches ?? [];
+              const state: any = { startX: t.x, startY: t.y, startFontSize: t.fontSize, startPageX: e.nativeEvent.pageX, startPageY: e.nativeEvent.pageY, startDistance: 0 };
+              if (touches.length >= 2) state.startDistance = getTouchDistance(touches as any);
+              textGestureStateRef.current[t.id] = state;
+            }}
+            onResponderMove={(e) => {
+              const gs = textGestureStateRef.current[t.id];
+              if (!gs) return;
+              const touches = e.nativeEvent.touches ?? [];
+              if (touches.length >= 2) {
+                // Pinch to resize
+                const dist = getTouchDistance(touches as any);
+                if (gs.startDistance > 0 && dist > 0) {
+                  const scale = dist / gs.startDistance;
+                  const newSize = Math.round(clamp(gs.startFontSize * scale, 10, 120));
+                  setTextOverlays(prev => prev.map(o => o.id === t.id ? { ...o, fontSize: newSize } : o));
+                }
+              } else {
+                // Drag
+                const dx = e.nativeEvent.pageX - gs.startPageX;
+                const dy = e.nativeEvent.pageY - gs.startPageY;
+                setTextOverlays(prev => prev.map(o => o.id === t.id ? { ...o, x: gs.startX + dx, y: gs.startY + dy } : o));
+              }
+            }}
+            onResponderRelease={() => { delete textGestureStateRef.current[t.id]; }}
+          >
             <Text style={{ color: t.color, fontSize: t.fontSize, fontWeight: t.fontWeight, textAlign: t.align }}>{t.text}</Text>
+            {/* Delete button */}
+            <TouchableOpacity
+              style={{ position: "absolute", top: -10, right: -10, width: 22, height: 22, borderRadius: 11, backgroundColor: "rgba(0,0,0,0.7)", alignItems: "center", justifyContent: "center" }}
+              onPress={() => setTextOverlays(prev => prev.filter(o => o.id !== t.id))}
+            >
+              <Text style={{ color: "#fff", fontSize: 12, fontWeight: "900" }}>✕</Text>
+            </TouchableOpacity>
           </View>
         ))}
 
@@ -1347,24 +1419,34 @@ export default function CapturePreview() {
 
             {activeToolSheet === "effects" && (
               <View style={styles.stickersGrid}>
-                {["Blur de fundo", "Brilho suave", "Granulado filme", "Vinheta dramática", "Luz de neon", "Sépia vintage", "Alto contraste", "Realce HDR"].map(eff => (
-                  <TouchableOpacity key={eff} style={styles.stickerChip} onPress={() => {
-                    const map: Record<string, Partial<typeof adjustValues>> = {
-                      "Blur de fundo": { vignette: 0.5 },
-                      "Brilho suave": { highlights: 0.3, fade: 0.1 },
-                      "Granulado filme": { grain: 0.3, fade: 0.15 },
-                      "Vinheta dramática": { vignette: 0.8, shadows: -0.2 },
-                      "Luz de neon": { temperature: -0.3, highlights: 0.3 },
-                      "Sépia vintage": { temperature: 0.3, fade: 0.2, grain: 0.1 },
-                      "Alto contraste": { highlights: 0.4, shadows: -0.3 },
-                      "Realce HDR": { sharpness: 0.6, highlights: 0.3, shadows: 0.2 },
-                    };
-                    const vals = map[eff];
-                    if (vals) setAdjustValues(prev => ({ ...prev, ...vals }));
+                {[
+                  { label: "Clarendon", vals: { highlights: 0.25, shadows: 0.1, sharpness: 0.15 } },
+                  { label: "Gingham", vals: { fade: 0.2, highlights: 0.15, temperature: -0.1 } },
+                  { label: "Moon", vals: { fade: 0.15, temperature: -0.2, highlights: 0.2 } },
+                  { label: "Lark", vals: { highlights: 0.3, temperature: 0.1, shadows: 0.15 } },
+                  { label: "Reyes", vals: { fade: 0.25, temperature: 0.15, highlights: 0.1 } },
+                  { label: "Juno", vals: { highlights: 0.2, shadows: -0.15, temperature: 0.1 } },
+                  { label: "Slumber", vals: { fade: 0.2, vignette: 0.3, temperature: 0.05 } },
+                  { label: "Crema", vals: { fade: 0.15, temperature: 0.12, highlights: 0.1 } },
+                  { label: "Ludwig", vals: { highlights: 0.15, shadows: -0.1, vignette: 0.2 } },
+                  { label: "Aden", vals: { fade: 0.18, temperature: 0.08, highlights: 0.15 } },
+                  { label: "Perpetua", vals: { highlights: 0.2, temperature: -0.12, fade: 0.1 } },
+                  { label: "Amaro", vals: { highlights: 0.25, sharpness: 0.2, vignette: 0.15 } },
+                  { label: "Mayfair", vals: { vignette: 0.35, highlights: 0.15, temperature: 0.08 } },
+                  { label: "Rise", vals: { highlights: 0.2, temperature: 0.15, fade: 0.08 } },
+                  { label: "Hudson", vals: { temperature: -0.15, highlights: 0.2, vignette: 0.25 } },
+                  { label: "Valencia", vals: { temperature: 0.15, fade: 0.12, highlights: 0.1 } },
+                  { label: "X-Pro II", vals: { vignette: 0.4, highlights: 0.25, shadows: -0.2 } },
+                  { label: "Lo-Fi", vals: { highlights: 0.3, shadows: -0.25, sharpness: 0.25, vignette: 0.3 } },
+                  { label: "Earlybird", vals: { temperature: 0.2, fade: 0.2, vignette: 0.25, grain: 0.1 } },
+                  { label: "Brannan", vals: { temperature: 0.1, fade: 0.15, vignette: 0.2, grain: 0.08 } },
+                ].map(eff => (
+                  <TouchableOpacity key={eff.label} style={styles.stickerChip} onPress={() => {
+                    setAdjustValues(prev => ({ ...prev, ...eff.vals }));
                     setActiveToolSheet(null);
                     setShowAdjustPanel(true);
                   }}>
-                    <Text style={styles.stickerChipText}>{eff}</Text>
+                    <Text style={styles.stickerChipText}>{eff.label}</Text>
                   </TouchableOpacity>
                 ))}
               </View>

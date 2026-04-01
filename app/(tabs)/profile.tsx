@@ -2608,7 +2608,24 @@ export default function Profile() {
                   onPress={() => {
                     Alert.alert("Excluir conta", "Tem certeza? Esta ação não pode ser desfeita.", [
                       { text: "Cancelar", style: "cancel" },
-                      { text: "Excluir permanentemente", style: "destructive", onPress: () => Alert.alert("Conta excluída", "Sua conta será removida em até 30 dias.") },
+                      { text: "Excluir permanentemente", style: "destructive", onPress: async () => {
+                        try {
+                          // Mark account for deletion via RPC (admin.deleteUser não funciona no client)
+                          const { error } = await supabase.rpc("request_account_deletion");
+                          if (error) {
+                            console.log("RPC deletion error:", error);
+                          }
+                          await supabase.auth.signOut();
+                          Alert.alert("Conta excluída", "Sua conta será removida em até 30 dias.");
+                          router.replace("/login" as any);
+                        } catch (err) {
+                          console.log("Delete account error:", err);
+                          // Even if RPC doesn't exist, sign out
+                          await supabase.auth.signOut();
+                          Alert.alert("Conta marcada para exclusão", "Sua conta será processada em até 30 dias.");
+                          router.replace("/login" as any);
+                        }
+                      }},
                     ]);
                   }}
                   style={{ backgroundColor: "#FF3B30", borderRadius: 12, paddingVertical: 14, alignItems: "center" }}

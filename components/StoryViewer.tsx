@@ -471,12 +471,11 @@ export default function StoryViewer({
     const storyId = Number(current.id);
     const doDelete = async () => {
       try {
-        const { data } = await supabase.rpc("delete_own_story", { _story_id: storyId });
-        if (data) {
-          onDeleted?.(current.id);
-          if (currentIndex + 1 < total) goNext();
-          else onClose();
-        }
+        const { error } = await supabase.rpc("delete_own_story", { _story_id: storyId }).then((r: any) => r);
+        if (error) { Alert.alert("Erro", "Não foi possível excluir o story."); return; }
+        onDeleted?.(current.id);
+        if (currentIndex + 1 < total) goNext();
+        else onClose();
       } catch {
         Alert.alert("Erro", "Não foi possível excluir o story.");
       }

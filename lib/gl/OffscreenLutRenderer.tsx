@@ -146,9 +146,10 @@ export function OffscreenLutRenderer({
         makeTex(gl.TEXTURE0, srcAsset);
         gl.uniform1i(uImage, 0);
 
-        // For export: no cover crop needed, use 1:1 aspect mapping
-        gl.uniform1f(uSrcAspect, 1.0);
-        gl.uniform1f(uDstAspect, 1.0);
+        const srcW = srcAsset.width || glWidth || 1;
+        const srcH = srcAsset.height || glHeight || 1;
+        gl.uniform1f(uSrcAspect, srcW / srcH);
+        gl.uniform1f(uDstAspect, glWidth / glHeight);
 
         // LUT
         const lutSource = getLutForFilter(filter);
