@@ -14,9 +14,12 @@ import {
   Pressable,
   StatusBar,
   StyleSheet,
+  TextInput,
   Text as TextRaw,
+  TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import CommentsSheet from "./CommentsSheet";
 
 export type ViewerItem = {
@@ -325,6 +328,7 @@ export default function FullscreenViewer({
   currentUserId,
   onDeletePost,
 }: Props) {
+  const insets = useSafeAreaInsets();
   const listRef = useRef<FlatList<ViewerItem>>(null);
   const [current, setCurrent] = useState<number>(0);
   const [controlsVisible, setControlsVisible] = useState(true);
@@ -333,6 +337,7 @@ export default function FullscreenViewer({
   const [menuBusy, setMenuBusy] = useState(false);
   const [fsCommentsOpen, setFsCommentsOpen] = useState(false);
   const [fsCommentsPostId, setFsCommentsPostId] = useState<number | null>(null);
+  const [commentText, setCommentText] = useState("");
 
   const data = useMemo(() => items ?? [], [items]);
   const itemCount = data.length;
@@ -526,6 +531,46 @@ export default function FullscreenViewer({
           />
         )}
 
+        {/* Comment input bar — Instagram style above safe area */}
+        {controlsVisible && itemCount > 0 && (
+          <View style={[styles.commentBar, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
+            <View style={styles.commentInputRow}>
+              <TextInput
+                style={styles.commentInput}
+                placeholder="Faça um comentário..."
+                placeholderTextColor="rgba(255,255,255,0.45)"
+                value={commentText}
+                onChangeText={setCommentText}
+                onSubmitEditing={() => {
+                  if (commentText.trim()) {
+                    const item = data[clampIndex(current)];
+                    if (item) {
+                      setFsCommentsPostId(item.id as number);
+                      setFsCommentsOpen(true);
+                    }
+                  }
+                }}
+                returnKeyType="send"
+              />
+              {commentText.trim().length > 0 && (
+                <TouchableOpacity
+                  style={styles.commentSendBtn}
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    const item = data[clampIndex(current)];
+                    if (item) {
+                      setFsCommentsPostId(item.id as number);
+                      setFsCommentsOpen(true);
+                    }
+                  }}
+                >
+                  <Ionicons name="send" size={18} color="#0095f6" />
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        )}
+
         {/* Options menu modal */}
         <Modal
           visible={menuOpen}
@@ -595,7 +640,7 @@ export default function FullscreenViewer({
         <CommentsSheet
           visible={fsCommentsOpen}
           postId={fsCommentsPostId}
-          onClose={() => { setFsCommentsOpen(false); setFsCommentsPostId(null); }}
+          onClose={() => { setFsCommentsOpen(false); setFsCommentsPostId(null); setCommentText(""); }}
         />
       </View>
     </Modal>
@@ -671,11 +716,11 @@ const styles = StyleSheet.create({
   },
   media: { width: "100%", height: "100%" },
 
-  /* Side actions – right column */
+  /* Side actions – right column — above comment bar */
   sideActions: {
     position: "absolute",
     right: 12,
-    bottom: Platform.select({ ios: 140, android: 120, default: 100 }),
+    bottom: Platform.select({ ios: 160, android: 140, default: 120 }),
     zIndex: 5,
     alignItems: "center",
   },
@@ -693,10 +738,10 @@ const styles = StyleSheet.create({
     textShadowRadius: 3,
   },
 
-  /* Footer – bottom-left user info */
+  /* Footer – bottom-left user info — above comment bar */
   footer: {
     position: "absolute",
-    bottom: Platform.select({ ios: 100, android: 80, default: 60 }),
+    bottom: Platform.select({ ios: 120, android: 100, default: 80 }),
     left: 16,
     right: 80,
     zIndex: 5,
@@ -820,4 +865,41 @@ const styles = StyleSheet.create({
   glowTop: { position: "absolute", top: 0, left: 0, right: 0, height: 160 },
   vignetteTop: { position: "absolute", top: 0, left: 0, right: 0, height: 220 },
   vignetteBottom: { position: "absolute", bottom: 0, left: 0, right: 0, height: 260 },
+
+  /* Comment bar — Instagram style */
+  commentBar: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    zIndex: 8,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    ...(Platform.OS === "web" ? { maxWidth: 500, alignSelf: "center" as const, width: "100%" as any } : {}),
+  },
+  commentInputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  commentInput: {
+    flex: 1,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.25)",
+    backgroundColor: "rgba(0,0,0,0.35)",
+    paddingHorizontal: 16,
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  commentSendBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
 });

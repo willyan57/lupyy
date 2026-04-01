@@ -302,9 +302,10 @@ export default function NewTribeScreen() {
   })).filter((g) => g.items.length > 0);
 
   const renderCategoryModal = () => (
-    <Modal transparent visible={categoryModalVisible} animationType="fade" onRequestClose={() => setCategoryModalVisible(false)}>
+    <Modal transparent visible={categoryModalVisible} animationType="slide" onRequestClose={() => setCategoryModalVisible(false)}>
       <View style={s.modalOverlay}>
-        <View style={[s.modalCard, { backgroundColor: theme.colors.surfaceElevated, maxHeight: "85%" }]}>
+        <View style={[s.modalCard, { backgroundColor: theme.colors.surfaceElevated, maxHeight: "90%", minHeight: "60%" }]}>
+          <View style={{ flex: 1 }}>
           {/* Header */}
           <View style={s.modalHeader}>
             <View>
@@ -382,8 +383,9 @@ export default function NewTribeScreen() {
                 </View>
               </View>
             ))}
-            <View style={{ height: 20 }} />
+            <View style={{ height: 40 }} />
           </ScrollView>
+          </View>
         </View>
       </View>
     </Modal>
@@ -572,8 +574,8 @@ const s = StyleSheet.create({
   btnContent: { flexDirection: "row", alignItems: "center", gap: 6 },
 
   // Category modal
-  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", padding: 16 },
-  modalCard: { width: "100%", maxWidth: 520, borderRadius: 22, padding: 20 },
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end", padding: 0 },
+  modalCard: { width: "100%", borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20 },
   modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 },
   modalTitle: { fontSize: 18, fontWeight: "800" },
   modalSub: { fontSize: 13, marginTop: 2 },

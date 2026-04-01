@@ -689,9 +689,10 @@ export default function StoryViewer({
           </Animated.View>
         )}
 
-        {/* Bottom bar */}
+        {/* Bottom bar — Instagram style */}
         <View style={s.bottomBar} pointerEvents="box-none">
           {isOwner ? (
+            /* Owner: just show view count + likes — all actions in "..." menu */
             <View style={s.ownerBottomRow}>
               <TouchableOpacity style={s.viewCountRow} activeOpacity={0.7} onPress={() => { setPaused(true); setViewersSheetOpen(true); }}>
                 <Ionicons name="eye-outline" size={20} color="#fff" />
@@ -702,14 +703,9 @@ export default function StoryViewer({
                 <Ionicons name="heart" size={16} color="#ff3b5c" />
                 <Text style={s.ownerStatText}>{likesCount}</Text>
               </View>
-              <TouchableOpacity style={s.highlightBtn} activeOpacity={0.7} onPress={handleAddToHighlight}>
-                <Ionicons name="bookmark-outline" size={20} color="#fff" />
-              </TouchableOpacity>
-              <TouchableOpacity style={s.deleteBtn} activeOpacity={0.7} onPress={handleDeleteStory}>
-                <Ionicons name="trash-outline" size={20} color="#fff" />
-              </TouchableOpacity>
             </View>
           ) : (
+            /* Viewer: reply input + like + share — Instagram layout */
             <View style={s.replyRow}>
               <TextInput
                 style={s.replyInput}
@@ -822,17 +818,15 @@ const s = StyleSheet.create({
   userDotsRow: { flexDirection: "row", justifyContent: "center", gap: 4, paddingTop: 4 },
   userDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "rgba(255,255,255,0.3)" },
   userDotActive: { backgroundColor: "#fff", width: 16 },
-  captionOverlay: { position: "absolute", bottom: 100, left: 16, right: 60, zIndex: 8 },
+  captionOverlay: { position: "absolute", bottom: 120, left: 16, right: 60, zIndex: 8 },
   captionText: { color: "#fff", fontSize: 15, fontWeight: "600", textShadowColor: "rgba(0,0,0,0.8)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 },
   heartOverlay: { position: "absolute", top: "50%" as any, left: "50%" as any, marginLeft: -40, marginTop: -40, zIndex: 20 },
-  bottomBar: { position: "absolute", bottom: 0, left: 0, right: 0, zIndex: 10, paddingHorizontal: 12, paddingBottom: Platform.select({ ios: 40, android: 20, default: 16 }) },
+  bottomBar: { position: "absolute", bottom: 0, left: 0, right: 0, zIndex: 10, paddingHorizontal: 12, paddingBottom: Platform.select({ ios: 44, android: 32, default: 24 }) },
   ownerBottomRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 12 },
   viewCountRow: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 10, paddingHorizontal: 16, backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 24 },
   viewCountText: { color: "#fff", fontSize: 14, fontWeight: "600" },
   ownerStatsRow: { flexDirection: "row", alignItems: "center", gap: 4, paddingVertical: 10, paddingHorizontal: 12, backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 24 },
   ownerStatText: { color: "#fff", fontSize: 13, fontWeight: "600" },
-  highlightBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(255,255,255,0.1)", alignItems: "center", justifyContent: "center" },
-  deleteBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(255,59,92,0.15)", alignItems: "center", justifyContent: "center" },
   replyRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   replyInput: { flex: 1, height: 44, borderRadius: 22, borderWidth: 1.5, borderColor: "rgba(255,255,255,0.3)", backgroundColor: "rgba(0,0,0,0.3)", paddingHorizontal: 16, color: "#fff", fontSize: 14, fontWeight: "500" },
   actionBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(255,255,255,0.1)", alignItems: "center", justifyContent: "center" },

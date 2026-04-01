@@ -438,12 +438,12 @@ export default function CapturePreview() {
     if (!shouldBakeOnExport) return inputUri;
     try {
       if (mediaType === "image") {
-        // On web, use canvas-based CSS filter baking
-        if (isWeb && activeFilter.cssFilter) {
+        // On web/Capacitor, use canvas-based CSS filter baking (always preferred)
+        if (activeFilter.cssFilter) {
           const baked = await bakeWebCssFilter(inputUri, activeFilter.cssFilter);
           if (baked && baked !== inputUri) return baked;
         }
-        // On native, use GLView-based LUT baking
+        // On true native (not web/capacitor), use GLView-based LUT baking
         if (!isWeb) {
           const exportFilterId = mapPreviewFilterToExport(filter);
           const baked = await bakeImageWithLut(inputUri, exportFilterId, beautifyParams);
@@ -907,8 +907,8 @@ export default function CapturePreview() {
                 styles.preview,
                 previewMediaStyle,
                 isFrontCamera && { transform: [{ scaleX: -1 }] },
-                // Apply CSS filter on web for real-time preview
-                isWeb && !isComparing && activeFilter.cssFilter ? { filter: activeFilter.cssFilter } as any : undefined,
+                // Apply CSS filter on web and Capacitor APK for real-time preview
+                !isComparing && activeFilter.cssFilter ? { filter: activeFilter.cssFilter } as any : undefined,
               ].filter(Boolean) as any}
               resizeMode="cover"
               onLoadEnd={() => setMediaLoaded(true)}

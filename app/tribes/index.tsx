@@ -222,9 +222,9 @@ export default function TribesScreen() {
       leftTarget={{ route: "/(tabs)/feed", icon: "home-outline", label: "Feed" }}
       rightTarget={{ route: "/(tabs)/conversations", icon: "chatbubble-outline", label: "Mensagens" }}
     >
-    <SafeAreaView style={[s.safe, { backgroundColor: theme.colors.background }]}>
+    <SafeAreaView style={[s.safe, { backgroundColor: theme.colors.background }]} edges={["top", "left", "right"]}>
       <ScrollView
-        contentContainerStyle={[s.container, { paddingHorizontal: isLargeWeb ? 24 : 16, paddingBottom: 40 }]}
+        contentContainerStyle={[s.container, { paddingHorizontal: isLargeWeb ? 24 : 16, paddingBottom: 100 }]}
         // Fix: allow scroll when touching elements on mobile web
         {...(Platform.OS === "web" ? { style: { touchAction: "pan-y" } as any } : {})}
       >

@@ -419,8 +419,13 @@ export default function CaptureScreen() {
         });
       }
     } catch (err: any) {
-      if (!String(err?.message || err).includes("stop") && !String(err?.message || err).includes("cancel")) {
-        Alert.alert("Erro na gravação", "Não foi possível gravar o vídeo.");
+      const msg = String(err?.message || err).toLowerCase();
+      if (!msg.includes("stop") && !msg.includes("cancel") && !msg.includes("not supported") && !msg.includes("not available") && !msg.includes("not implemented")) {
+        if (Platform.OS === "web") {
+          window.alert("Não foi possível gravar o vídeo. A gravação de vídeo pode não ser suportada no navegador.");
+        } else {
+          Alert.alert("Erro na gravação", "Não foi possível gravar o vídeo.");
+        }
       }
     } finally {
       if (recordTimerRef.current) { clearInterval(recordTimerRef.current); recordTimerRef.current = null; }
@@ -458,8 +463,9 @@ export default function CaptureScreen() {
   };
 
   const handleShotLongPress = () => {
-    if (isWeb || !cameraRef.current || recording) return;
+    if (!cameraRef.current || recording) return;
     if (mode === "story" || mode === "post") {
+      // On web/Capacitor, recordAsync may not be supported — try anyway
       startRecording(mode === "story" ? 30 : 60);
     }
   };
