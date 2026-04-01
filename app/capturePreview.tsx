@@ -1152,7 +1152,7 @@ export default function CapturePreview() {
           </View>
         )}
 
-        {/* Quick effects */}
+      {/* Quick effects */}
         {effectsOpen && (
           <View style={styles.quickAdjustRow}>
             {quickAdjustments.map(item => {
@@ -1164,10 +1164,6 @@ export default function CapturePreview() {
                 </TouchableOpacity>
               );
             })}
-            <TouchableOpacity activeOpacity={0.9} style={styles.aiApplyButton}
-              onPress={() => applyAiTransform("filter", "face_enhance_soft")} disabled={aiProcessing || mediaType !== "image"}>
-              {aiProcessing ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.aiApplyButtonText}>IA</Text>}
-            </TouchableOpacity>
           </View>
         )}
 
@@ -1368,9 +1364,9 @@ export default function CapturePreview() {
         </Pressable>
       </Modal>
 
-      {/* ─── STICKERS / MUSIC / EFFECTS MODAL ─── */}
+      {/* ─── STICKERS / MUSIC MODAL ─── */}
       <Modal
-        visible={activeToolSheet === "stickers" || activeToolSheet === "music" || activeToolSheet === "effects"}
+        visible={activeToolSheet === "stickers" || activeToolSheet === "music"}
         transparent animationType="slide" onRequestClose={() => setActiveToolSheet(null)}
       >
         <Pressable style={styles.toolModalOverlay} onPress={() => setActiveToolSheet(null)}>
@@ -1378,7 +1374,7 @@ export default function CapturePreview() {
             <View style={styles.bottomSheetHandle} />
             <View style={styles.bottomSheetHeaderRow}>
               <Text style={styles.bottomSheetTitle}>
-                {activeToolSheet === "stickers" ? "Figurinhas" : activeToolSheet === "music" ? "Músicas" : "Efeitos"}
+                {activeToolSheet === "stickers" ? "Figurinhas" : "Músicas"}
               </Text>
               <TouchableOpacity onPress={() => setActiveToolSheet(null)}><Text style={styles.bottomSheetClose}>Fechar</Text></TouchableOpacity>
             </View>
@@ -1416,41 +1412,95 @@ export default function CapturePreview() {
                 ))}
               </ScrollView>
             )}
+          </Pressable>
+        </Pressable>
+      </Modal>
 
-            {activeToolSheet === "effects" && (
-              <View style={styles.stickersGrid}>
-                {[
-                  { label: "Clarendon", vals: { highlights: 0.25, shadows: 0.1, sharpness: 0.15 } },
-                  { label: "Gingham", vals: { fade: 0.2, highlights: 0.15, temperature: -0.1 } },
-                  { label: "Moon", vals: { fade: 0.15, temperature: -0.2, highlights: 0.2 } },
-                  { label: "Lark", vals: { highlights: 0.3, temperature: 0.1, shadows: 0.15 } },
-                  { label: "Reyes", vals: { fade: 0.25, temperature: 0.15, highlights: 0.1 } },
-                  { label: "Juno", vals: { highlights: 0.2, shadows: -0.15, temperature: 0.1 } },
-                  { label: "Slumber", vals: { fade: 0.2, vignette: 0.3, temperature: 0.05 } },
-                  { label: "Crema", vals: { fade: 0.15, temperature: 0.12, highlights: 0.1 } },
-                  { label: "Ludwig", vals: { highlights: 0.15, shadows: -0.1, vignette: 0.2 } },
-                  { label: "Aden", vals: { fade: 0.18, temperature: 0.08, highlights: 0.15 } },
-                  { label: "Perpetua", vals: { highlights: 0.2, temperature: -0.12, fade: 0.1 } },
-                  { label: "Amaro", vals: { highlights: 0.25, sharpness: 0.2, vignette: 0.15 } },
-                  { label: "Mayfair", vals: { vignette: 0.35, highlights: 0.15, temperature: 0.08 } },
-                  { label: "Rise", vals: { highlights: 0.2, temperature: 0.15, fade: 0.08 } },
-                  { label: "Hudson", vals: { temperature: -0.15, highlights: 0.2, vignette: 0.25 } },
-                  { label: "Valencia", vals: { temperature: 0.15, fade: 0.12, highlights: 0.1 } },
-                  { label: "X-Pro II", vals: { vignette: 0.4, highlights: 0.25, shadows: -0.2 } },
-                  { label: "Lo-Fi", vals: { highlights: 0.3, shadows: -0.25, sharpness: 0.25, vignette: 0.3 } },
-                  { label: "Earlybird", vals: { temperature: 0.2, fade: 0.2, vignette: 0.25, grain: 0.1 } },
-                  { label: "Brannan", vals: { temperature: 0.1, fade: 0.15, vignette: 0.2, grain: 0.08 } },
-                ].map(eff => (
-                  <TouchableOpacity key={eff.label} style={styles.stickerChip} onPress={() => {
+      {/* ─── EFFECTS MODAL (Instagram-style premium) ─── */}
+      <Modal
+        visible={activeToolSheet === "effects"}
+        transparent animationType="slide" onRequestClose={() => setActiveToolSheet(null)}
+      >
+        <Pressable style={styles.toolModalOverlay} onPress={() => setActiveToolSheet(null)}>
+          <Pressable style={styles.effectsSheet} onPress={() => {}}>
+            <View style={styles.effectsHandle} />
+            <Text style={styles.effectsTitle}>Efeitos</Text>
+
+            {/* LUT Filters section */}
+            <Text style={styles.effectsSectionLabel}>Filtros</Text>
+            <FlatList
+              data={FILTERS}
+              keyExtractor={i => i.id}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 4, paddingBottom: 6 }}
+              renderItem={({ item: f }) => {
+                const active = f.id === filter;
+                return (
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => { setFilter(f.id); setFilterIntensity(1.0); setActiveToolSheet(null); }}
+                    style={styles.effectFilterItem}
+                  >
+                    <View style={[
+                      styles.effectFilterThumb,
+                      { backgroundColor: f.overlay ?? "rgba(255,255,255,0.12)" },
+                      active && styles.effectFilterThumbActive,
+                    ]}>
+                      {active && <Text style={styles.effectFilterCheck}>✓</Text>}
+                    </View>
+                    <Text style={[styles.effectFilterName, active && styles.effectFilterNameActive]} numberOfLines={1}>{f.name}</Text>
+                  </TouchableOpacity>
+                );
+              }}
+            />
+
+            {/* Presets section */}
+            <Text style={[styles.effectsSectionLabel, { marginTop: 16 }]}>Presets</Text>
+            <FlatList
+              data={[
+                { label: "Clarendon", icon: "☀️", vals: { highlights: 0.25, shadows: 0.1, sharpness: 0.15 } },
+                { label: "Gingham", icon: "🌫", vals: { fade: 0.2, highlights: 0.15, temperature: -0.1 } },
+                { label: "Moon", icon: "🌙", vals: { fade: 0.15, temperature: -0.2, highlights: 0.2 } },
+                { label: "Lark", icon: "🐦", vals: { highlights: 0.3, temperature: 0.1, shadows: 0.15 } },
+                { label: "Reyes", icon: "🌅", vals: { fade: 0.25, temperature: 0.15, highlights: 0.1 } },
+                { label: "Juno", icon: "🔥", vals: { highlights: 0.2, shadows: -0.15, temperature: 0.1 } },
+                { label: "Slumber", icon: "💤", vals: { fade: 0.2, vignette: 0.3, temperature: 0.05 } },
+                { label: "Crema", icon: "☕", vals: { fade: 0.15, temperature: 0.12, highlights: 0.1 } },
+                { label: "Ludwig", icon: "🎹", vals: { highlights: 0.15, shadows: -0.1, vignette: 0.2 } },
+                { label: "Aden", icon: "🌿", vals: { fade: 0.18, temperature: 0.08, highlights: 0.15 } },
+                { label: "Perpetua", icon: "🌊", vals: { highlights: 0.2, temperature: -0.12, fade: 0.1 } },
+                { label: "Amaro", icon: "⚡", vals: { highlights: 0.25, sharpness: 0.2, vignette: 0.15 } },
+                { label: "Mayfair", icon: "🎩", vals: { vignette: 0.35, highlights: 0.15, temperature: 0.08 } },
+                { label: "Rise", icon: "🌤", vals: { highlights: 0.2, temperature: 0.15, fade: 0.08 } },
+                { label: "Hudson", icon: "❄️", vals: { temperature: -0.15, highlights: 0.2, vignette: 0.25 } },
+                { label: "Valencia", icon: "🍊", vals: { temperature: 0.15, fade: 0.12, highlights: 0.1 } },
+                { label: "X-Pro II", icon: "📸", vals: { vignette: 0.4, highlights: 0.25, shadows: -0.2 } },
+                { label: "Lo-Fi", icon: "📻", vals: { highlights: 0.3, shadows: -0.25, sharpness: 0.25, vignette: 0.3 } },
+                { label: "Earlybird", icon: "🐥", vals: { temperature: 0.2, fade: 0.2, vignette: 0.25, grain: 0.1 } },
+                { label: "Brannan", icon: "🎞", vals: { temperature: 0.1, fade: 0.15, vignette: 0.2, grain: 0.08 } },
+              ]}
+              keyExtractor={i => i.label}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 4, paddingBottom: 12 }}
+              renderItem={({ item: eff }) => (
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => {
                     setAdjustValues(prev => ({ ...prev, ...eff.vals }));
                     setActiveToolSheet(null);
                     setShowAdjustPanel(true);
-                  }}>
-                    <Text style={styles.stickerChipText}>{eff.label}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
+                  }}
+                  style={styles.effectPresetItem}
+                >
+                  <View style={styles.effectPresetThumb}>
+                    <Text style={{ fontSize: 22 }}>{eff.icon}</Text>
+                  </View>
+                  <Text style={styles.effectPresetName} numberOfLines={1}>{eff.label}</Text>
+                </TouchableOpacity>
+              )}
+            />
           </Pressable>
         </Pressable>
       </Modal>
@@ -1556,6 +1606,20 @@ const styles = StyleSheet.create({
   sendIcon: { color: "#fff", fontSize: 20, fontWeight: "900" },
   aiApplyButton: { height: 32, paddingHorizontal: 12, borderRadius: 999, backgroundColor: "rgba(0,149,246,0.9)", alignItems: "center", justifyContent: "center", marginLeft: 6 },
   aiApplyButtonText: { color: "#fff", fontSize: 12, fontWeight: "700" },
+  // Effects modal (premium)
+  effectsSheet: { backgroundColor: "rgba(18,18,18,0.98)", paddingTop: 10, paddingBottom: 22, paddingHorizontal: 18, borderTopLeftRadius: 24, borderTopRightRadius: 24 },
+  effectsHandle: { width: 40, height: 4, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.2)", alignSelf: "center", marginBottom: 14 },
+  effectsTitle: { color: "#fff", fontWeight: "900", fontSize: 17, letterSpacing: 0.3, alignSelf: "center", marginBottom: 18 },
+  effectsSectionLabel: { color: "rgba(255,255,255,0.55)", fontSize: 12, fontWeight: "700", letterSpacing: 1, textTransform: "uppercase" as any, marginBottom: 10, marginLeft: 4 },
+  effectFilterItem: { alignItems: "center", marginRight: 14, width: 68 },
+  effectFilterThumb: { width: 58, height: 58, borderRadius: 16, marginBottom: 6, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "transparent" },
+  effectFilterThumbActive: { borderColor: "#fff", borderWidth: 2.5 },
+  effectFilterCheck: { color: "#fff", fontSize: 20, fontWeight: "900" },
+  effectFilterName: { color: "rgba(255,255,255,0.7)", fontSize: 11, fontWeight: "600", textAlign: "center" as any },
+  effectFilterNameActive: { color: "#fff", fontWeight: "800" },
+  effectPresetItem: { alignItems: "center", marginRight: 14, width: 68 },
+  effectPresetThumb: { width: 58, height: 58, borderRadius: 16, backgroundColor: "rgba(255,255,255,0.08)", marginBottom: 6, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
+  effectPresetName: { color: "rgba(255,255,255,0.7)", fontSize: 11, fontWeight: "600", textAlign: "center" as any },
   // Carousel
   carouselWrap: { position: "absolute", left: 0, right: 0, bottom: 110, height: 86 },
   carouselItem: { width: ITEM_W, alignItems: "center", justifyContent: "center", paddingTop: 10, paddingBottom: 12, borderRadius: 18, backgroundColor: "rgba(0,0,0,0.38)" },
