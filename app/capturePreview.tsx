@@ -85,32 +85,46 @@ const mapPreviewFilterToExport = (id: FilterId): ExportFilterId => {
   return "none";
 };
 
-const FILTERS: { id: FilterId; name: string; description: string; overlay?: string; blur?: number; vignette?: boolean; glow?: boolean }[] = [
-  { id: "none", name: "Original", description: "Sem alteração" },
-  { id: "face_enhance", name: "Realçar rosto", description: "Suaviza pele e realça rosto", overlay: "rgba(255,214,196,0.20)", glow: true },
-  { id: "studio_glow", name: "Estúdio", description: "Luz profissional e nitidez", overlay: "rgba(255,255,255,0.14)", vignette: true, glow: true },
-  { id: "cartoon_soft", name: "Cartoon", description: "Cores vivas e ilustração suave", overlay: "rgba(255,120,180,0.16)", glow: true },
-  { id: "bw_art", name: "P&B Art", description: "Preto e branco dramático", overlay: "rgba(0,0,0,0.26)", vignette: true },
-  { id: "soft_skin_ig", name: "Soft Skin", description: "Pele macia estilo IG", overlay: "rgba(255,188,160,0.18)", glow: true },
-  { id: "clean_portrait", name: "Clean", description: "Limpo e equilibrado", overlay: "rgba(240,248,255,0.16)", glow: true },
-  { id: "cinematic_gold", name: "Cinema Gold", description: "Tom dourado cinematográfico", overlay: "rgba(255,215,170,0.2)", vignette: true },
-  { id: "blue_teal_2026", name: "Blue Teal", description: "Azuis profundos urbanos", overlay: "rgba(90,170,255,0.22)" },
-  { id: "pastel_dream", name: "Pastel", description: "Cores suaves e delicadas", overlay: "rgba(255,220,245,0.22)", glow: true },
-  { id: "tokyo_night", name: "Tokyo Night", description: "Neon noturno intenso", overlay: "rgba(80,60,140,0.28)", vignette: true },
-  { id: "desert_warm", name: "Desert", description: "Tons quentes de pôr do sol", overlay: "rgba(255,190,120,0.24)" },
-  { id: "vintage_film", name: "Vintage", description: "Granulado de filme analógico", overlay: "rgba(240,210,180,0.24)", vignette: true },
-  { id: "sakura", name: "Sakura", description: "Rosa suave romântico", overlay: "rgba(255,170,210,0.24)", glow: true },
-  { id: "neon_glow", name: "Neon", description: "Luzes de balada futurista", overlay: "rgba(170,120,255,0.26)", vignette: true },
-  { id: "miami_vibes", name: "Miami", description: "Vibrante e dourado", overlay: "rgba(255,210,150,0.26)", glow: true },
-  { id: "deep_contrast", name: "Deep", description: "Contraste de revista", overlay: "rgba(10,10,10,0.30)", vignette: true },
-  { id: "moody_forest", name: "Moody", description: "Verdes dramáticos", overlay: "rgba(40,80,40,0.32)", vignette: true },
-  { id: "winter_lowsat", name: "Winter", description: "Frio e elegante", overlay: "rgba(190,210,230,0.24)" },
-  { id: "summer_pop", name: "Summer", description: "Cores fortes de verão", overlay: "rgba(255,210,120,0.24)", glow: true },
-  { id: "aqua_fresh", name: "Aqua", description: "Turquesa refrescante", overlay: "rgba(120,210,255,0.26)" },
-  { id: "pink_rose", name: "Pink Rose", description: "Rosa romântico", overlay: "rgba(255,170,200,0.26)", glow: true },
-  { id: "sepia_clean", name: "Sépia", description: "Retro moderno elegante", overlay: "rgba(210,170,130,0.28)", vignette: true },
-  { id: "urban_grit", name: "Urban", description: "Clima de rua intenso", overlay: "rgba(40,40,40,0.32)", vignette: true },
-  { id: "cream_tone", name: "Cream", description: "Cremoso e chique", overlay: "rgba(245,220,190,0.28)", glow: true },
+type WebFilterDef = {
+  id: FilterId; name: string; description: string;
+  /** CSS filter string applied to <Image> on web */
+  cssFilter?: string;
+  /** Thin color tint overlay (optional, very subtle) */
+  overlay?: string;
+  vignette?: boolean;
+  glow?: boolean;
+  /** Thumbnail accent color for carousel */
+  accent: string;
+};
+
+const FILTERS: WebFilterDef[] = [
+  { id: "none", name: "Original", description: "Sem alteração", accent: "transparent" },
+  // — Shader-based (beautify) —
+  { id: "face_enhance", name: "Realçar rosto", description: "Suaviza pele e realça rosto", cssFilter: "brightness(1.04) contrast(1.05) saturate(1.08)", overlay: "rgba(255,214,196,0.08)", accent: "#FFD6C4" },
+  { id: "studio_glow", name: "Estúdio", description: "Luz profissional e nitidez", cssFilter: "brightness(1.06) contrast(1.12) saturate(1.02)", vignette: true, glow: true, accent: "#E8E0FF" },
+  { id: "cartoon_soft", name: "Cartoon", description: "Cores vivas e ilustração suave", cssFilter: "brightness(1.04) saturate(1.35) contrast(1.08)", accent: "#FF78B4" },
+  { id: "bw_art", name: "P&B Art", description: "Preto e branco dramático", cssFilter: "grayscale(1) contrast(1.25) brightness(1.02)", vignette: true, accent: "#888888" },
+  { id: "soft_skin_ig", name: "Soft Skin", description: "Pele macia estilo IG", cssFilter: "brightness(1.04) contrast(1.03) saturate(1.08) blur(0.3px)", overlay: "rgba(255,188,160,0.06)", accent: "#FFBCA0" },
+  { id: "clean_portrait", name: "Clean", description: "Limpo e equilibrado", cssFilter: "brightness(1.03) contrast(1.06) saturate(1.0)", accent: "#F0F8FF" },
+  // — LUT-based (color grading) —
+  { id: "cinematic_gold", name: "Cinema Gold", description: "Tom dourado cinematográfico", cssFilter: "brightness(1.05) contrast(1.14) saturate(1.1) sepia(0.25)", vignette: true, accent: "#FFD7AA" },
+  { id: "blue_teal_2026", name: "Blue Teal", description: "Azuis profundos urbanos", cssFilter: "brightness(0.98) contrast(1.08) saturate(0.92) hue-rotate(-15deg)", accent: "#5AAAFF" },
+  { id: "pastel_dream", name: "Pastel", description: "Cores suaves e delicadas", cssFilter: "brightness(1.08) contrast(0.92) saturate(0.85)", overlay: "rgba(255,220,245,0.1)", glow: true, accent: "#FFDCF5" },
+  { id: "tokyo_night", name: "Tokyo Night", description: "Neon noturno intenso", cssFilter: "brightness(0.92) contrast(1.15) saturate(0.88) hue-rotate(-10deg)", vignette: true, accent: "#503C8C" },
+  { id: "desert_warm", name: "Desert", description: "Tons quentes de pôr do sol", cssFilter: "brightness(1.06) contrast(1.06) saturate(1.15) sepia(0.18)", accent: "#FFBE78" },
+  { id: "vintage_film", name: "Vintage", description: "Granulado de filme analógico", cssFilter: "brightness(1.04) contrast(1.1) saturate(0.82) sepia(0.22)", vignette: true, accent: "#F0D2B4" },
+  { id: "sakura", name: "Sakura", description: "Rosa suave romântico", cssFilter: "brightness(1.06) saturate(1.12) hue-rotate(5deg)", overlay: "rgba(255,170,210,0.08)", glow: true, accent: "#FFAAD2" },
+  { id: "neon_glow", name: "Neon", description: "Luzes de balada futurista", cssFilter: "brightness(1.02) contrast(1.18) saturate(1.3)", vignette: true, accent: "#AA78FF" },
+  { id: "miami_vibes", name: "Miami", description: "Vibrante e dourado", cssFilter: "brightness(1.06) contrast(1.1) saturate(1.2) sepia(0.08)", glow: true, accent: "#FFD296" },
+  { id: "deep_contrast", name: "Deep", description: "Contraste de revista", cssFilter: "brightness(0.95) contrast(1.35) saturate(1.08)", vignette: true, accent: "#2A2A2A" },
+  { id: "moody_forest", name: "Moody", description: "Verdes dramáticos", cssFilter: "brightness(0.94) contrast(1.12) saturate(0.82) hue-rotate(10deg)", vignette: true, accent: "#285028" },
+  { id: "winter_lowsat", name: "Winter", description: "Frio e elegante", cssFilter: "brightness(1.02) saturate(0.65) contrast(1.04) hue-rotate(-5deg)", accent: "#BED2E6" },
+  { id: "summer_pop", name: "Summer", description: "Cores fortes de verão", cssFilter: "brightness(1.06) contrast(1.12) saturate(1.28)", glow: true, accent: "#FFD278" },
+  { id: "aqua_fresh", name: "Aqua", description: "Turquesa refrescante", cssFilter: "brightness(1.02) saturate(1.08) hue-rotate(-20deg)", accent: "#78D2FF" },
+  { id: "pink_rose", name: "Pink Rose", description: "Rosa romântico", cssFilter: "brightness(1.04) saturate(1.15) hue-rotate(8deg)", overlay: "rgba(255,170,200,0.06)", glow: true, accent: "#FFAAC8" },
+  { id: "sepia_clean", name: "Sépia", description: "Retro moderno elegante", cssFilter: "brightness(1.02) contrast(1.06) saturate(0.55) sepia(0.35)", vignette: true, accent: "#D2AA82" },
+  { id: "urban_grit", name: "Urban", description: "Clima de rua intenso", cssFilter: "brightness(0.96) contrast(1.25) saturate(0.78)", vignette: true, accent: "#4A4A4A" },
+  { id: "cream_tone", name: "Cream", description: "Cremoso e chique", cssFilter: "brightness(1.06) saturate(0.88) sepia(0.15) contrast(1.02)", glow: true, accent: "#F5DCC0" },
 ];
 
 const DRAW_COLORS = ["#fff", "#000", "#ff3366", "#0095f6", "#ffd700", "#00e676", "#ff6b00", "#9c27b0"];
@@ -391,17 +405,54 @@ export default function CapturePreview() {
     }, []
   );
 
+  /** Bake CSS filters into the image on web using canvas */
+  const bakeWebCssFilter = useCallback(async (inputUri: string, cssFilter: string): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new (window as any).Image() as HTMLImageElement;
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        try {
+          const canvas = document.createElement("canvas");
+          const maxDim = 1440;
+          let w = img.naturalWidth, h = img.naturalHeight;
+          if (w > maxDim || h > maxDim) {
+            const scale = maxDim / Math.max(w, h);
+            w = Math.round(w * scale); h = Math.round(h * scale);
+          }
+          canvas.width = w; canvas.height = h;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) { resolve(inputUri); return; }
+          ctx.filter = cssFilter;
+          ctx.drawImage(img, 0, 0, w, h);
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+          resolve(dataUrl);
+        } catch { resolve(inputUri); }
+      };
+      img.onerror = () => resolve(inputUri);
+      img.src = inputUri;
+      setTimeout(() => resolve(inputUri), 8000);
+    });
+  }, []);
+
   const maybeBakeMedia = async (inputUri: string) => {
     if (!shouldBakeOnExport) return inputUri;
     try {
       if (mediaType === "image") {
-        const exportFilterId = mapPreviewFilterToExport(filter);
-        const baked = await bakeImageWithLut(inputUri, exportFilterId, beautifyParams);
-        if (baked && baked !== inputUri) {
-          try {
-            const info = await FileSystem.getInfoAsync(baked);
-            if (info.exists && (info as any).size > 0) return baked;
-          } catch {}
+        // On web, use canvas-based CSS filter baking
+        if (isWeb && activeFilter.cssFilter) {
+          const baked = await bakeWebCssFilter(inputUri, activeFilter.cssFilter);
+          if (baked && baked !== inputUri) return baked;
+        }
+        // On native, use GLView-based LUT baking
+        if (!isWeb) {
+          const exportFilterId = mapPreviewFilterToExport(filter);
+          const baked = await bakeImageWithLut(inputUri, exportFilterId, beautifyParams);
+          if (baked && baked !== inputUri) {
+            try {
+              const info = await FileSystem.getInfoAsync(baked);
+              if (info.exists && (info as any).size > 0) return baked;
+            } catch {}
+          }
         }
       }
       return inputUri;
@@ -421,11 +472,7 @@ export default function CapturePreview() {
     transition.stopAnimation();
     transition.setValue(0);
     Animated.timing(transition, { toValue: 1, duration: 220, useNativeDriver: true }).start();
-    const b = activeFilter.blur ?? 0;
-    setBlurIntensity(b);
-    blurOpacity.stopAnimation();
-    blurOpacity.setValue(0);
-    if (b > 0) Animated.timing(blurOpacity, { toValue: 1, duration: 220, useNativeDriver: true }).start();
+    setBlurIntensity(0);
     if (hideLabelRef.current) clearTimeout(hideLabelRef.current);
     labelOpacity.stopAnimation(); labelScale.stopAnimation();
     labelOpacity.setValue(0); labelScale.setValue(0.96);
@@ -856,7 +903,13 @@ export default function CapturePreview() {
             <Image
               key={`${effectiveUri}::${nonce}::${isComparing ? "orig" : filter}`}
               source={{ uri: effectiveUri }}
-              style={(isFrontCamera ? [styles.preview, previewMediaStyle, { transform: [{ scaleX: -1 }] }] : [styles.preview, previewMediaStyle]) as any}
+              style={[
+                styles.preview,
+                previewMediaStyle,
+                isFrontCamera && { transform: [{ scaleX: -1 }] },
+                // Apply CSS filter on web for real-time preview
+                isWeb && !isComparing && activeFilter.cssFilter ? { filter: activeFilter.cssFilter } as any : undefined,
+              ].filter(Boolean) as any}
               resizeMode="cover"
               onLoadEnd={() => setMediaLoaded(true)}
             />
@@ -1031,10 +1084,13 @@ export default function CapturePreview() {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 4, gap: 4 }} style={{ marginBottom: 6 }}>
               {FILTERS.map(f => {
                 const active = f.id === filter;
+                const thumbBg = f.id === "none" ? "rgba(255,255,255,0.08)" : f.accent + "30";
+                const thumbBorder = active ? (f.accent !== "transparent" ? f.accent : "#fff") : "transparent";
                 return (
                   <TouchableOpacity key={f.id} activeOpacity={0.85} onPress={() => { setFilter(f.id); setFilterIntensity(1.0); }} style={styles.effectFilterItem}>
-                    <View style={[styles.effectFilterThumb, { backgroundColor: f.overlay ?? "rgba(255,255,255,0.12)" }, active && styles.effectFilterThumbActive]}>
-                      {active && <Text style={styles.effectFilterCheck}>✓</Text>}
+                    <View style={[styles.effectFilterThumb, { backgroundColor: thumbBg, borderColor: thumbBorder, borderWidth: active ? 2.5 : 1, borderStyle: "solid" as any }]}>
+                      {f.id !== "none" && <View style={{ width: 30, height: 30, borderRadius: 99, backgroundColor: f.accent, opacity: 0.7 }} />}
+                      {active && <Text style={[styles.effectFilterCheck, { position: "absolute" }]}>✓</Text>}
                     </View>
                     <Text style={[styles.effectFilterName, active && styles.effectFilterNameActive]} numberOfLines={1}>{f.name}</Text>
                   </TouchableOpacity>
