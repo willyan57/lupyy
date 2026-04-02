@@ -48,6 +48,9 @@ import Svg, { Path } from "react-native-svg";
 
 const { width, height } = Dimensions.get("window");
 const isWeb = Platform.OS === "web";
+// Detect Capacitor (APK) — it runs as web but inside a native shell
+const isCapacitor = isWeb && typeof (window as any)?.Capacitor !== "undefined";
+const isNativeApp = !isWeb; // true React Native
 const previewHeight = isWeb ? height * 0.85 : height;
 
 type CaptureMode = "post" | "story" | "reel";
@@ -355,8 +358,10 @@ export default function CapturePreview() {
 
   const needsGlPreview = useMemo(() => {
     if (mediaType !== "image") return false;
-    // On mobile web, GLView causes black screen — use overlay approach instead
+    // On web, mobile web, AND Capacitor (APK) — GLView causes black screen
+    // Use CSS filter approach instead for all web-based runtimes
     if (isWeb) return false;
+    // On true native (React Native), use GLView
     if (previewLutSource !== null) return true;
     const bp = beautifyParams;
     if (bp.smoothing && bp.smoothing > 0.01) return true;
@@ -844,7 +849,7 @@ export default function CapturePreview() {
   }, [selectedAdjust, adjustItems]);
 
   const tools = toolsCollapsed
-    ? [...baseTools.slice(0, 5), { key: "more", label: "Mais", icon: "⋮" } as const]
+    ? [...baseTools.slice(0, 4), { key: "more", label: "Mais", icon: "⋮" } as const]
     : [...baseTools, { key: "more", label: "Menos", icon: "⋮" } as const];
 
   const handleToolPress = (key: string) => {
@@ -1032,7 +1037,7 @@ export default function CapturePreview() {
             </TouchableOpacity>
           )}
         </View>
-        <TouchableOpacity onPress={() => setFiltersOpen(true)} activeOpacity={0.85}><Text style={styles.topRightIcon}>✦</Text></TouchableOpacity>
+        <View style={{ width: 26 }} />
       </View>
 
       {/* Drawing toolbar */}
@@ -1531,7 +1536,7 @@ const styles = StyleSheet.create({
   topRightIcon: { color: "#fff", fontSize: 22 },
   locationBadge: { marginTop: 4, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: "rgba(0,0,0,0.5)" },
   locationBadgeText: { color: "#fff", fontSize: 11, fontWeight: "600" },
-  rightTools: { position: "absolute", right: 12, top: height * 0.16 },
+  rightTools: { position: "absolute", right: 12, top: height * 0.12, maxHeight: height * 0.55 },
   rightToolButton: { flexDirection: "row-reverse", alignItems: "center", marginBottom: 10 },
   rightToolCircle: { width: 40, height: 40, borderRadius: 999, backgroundColor: "rgba(0,0,0,0.65)", alignItems: "center", justifyContent: "center", marginLeft: 8 },
   rightToolIcon: { color: "#fff", fontSize: 18, fontWeight: "800" },

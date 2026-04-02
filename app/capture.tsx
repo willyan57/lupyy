@@ -266,32 +266,36 @@ export default function CaptureScreen() {
 
   /* ── Capture a photo for a collage slot (via camera) ── */
   const captureForSlot = async (slotIndex: number) => {
-    if (!cameraRef.current || !cameraReady) return;
+    // On web/Capacitor, camera capture for hidden views often fails
+    // Fall back to gallery picker
+    if (isWeb || !cameraRef.current || !cameraReady) {
+      pickGalleryForSlot(slotIndex);
+      return;
+    }
     try {
       setLoadingCapture(true);
       setActiveSlot(slotIndex);
       const photo: any = await Promise.race([
         cameraRef.current.takePictureAsync({
-          quality: Platform.OS === "web" ? 0.92 : 1,
-          skipProcessing: Platform.OS === "web",
+          quality: 1,
+          skipProcessing: false,
         } as any),
         new Promise<never>((_, rej) => setTimeout(() => rej(new Error("timeout")), 10000)),
       ]);
       if (photo?.uri) {
         let finalUri = photo.uri;
-        if (Platform.OS !== "web") {
-          try {
-            const IM = await import("expo-image-manipulator");
-            const norm = await IM.manipulateAsync(photo.uri, [{ rotate: 0 }], { compress: 1, format: IM.SaveFormat.JPEG });
-            if (norm?.uri) finalUri = norm.uri;
-          } catch {}
-        }
+        try {
+          const IM = await import("expo-image-manipulator");
+          const norm = await IM.manipulateAsync(photo.uri, [{ rotate: 0 }], { compress: 1, format: IM.SaveFormat.JPEG });
+          if (norm?.uri) finalUri = norm.uri;
+        } catch {}
         const newPhotos = [...collagePhotos];
         newPhotos[slotIndex] = finalUri;
         setCollagePhotos(newPhotos);
       }
     } catch {
-      Alert.alert("Erro", "Não foi possível capturar a foto.");
+      // If camera fails, fall back to gallery
+      pickGalleryForSlot(slotIndex);
     } finally {
       setLoadingCapture(false);
       setActiveSlot(null);

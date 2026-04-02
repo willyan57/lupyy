@@ -1,3 +1,4 @@
+import { supabase } from "@/lib/supabase";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
 import { Image } from "expo-image";
@@ -227,7 +228,7 @@ const ViewerPage = React.memo(function ViewerPage({
           <Image
             source={{ uri: item.media_url }}
             style={styles.media}
-            contentFit="cover"
+            contentFit="contain"
             transition={150}
             cachePolicy="disk"
           />
@@ -531,7 +532,7 @@ export default function FullscreenViewer({
           />
         )}
 
-        {/* Comment input bar — Instagram style above safe area */}
+        {/* Comment input bar — Instagram style */}
         {controlsVisible && itemCount > 0 && (
           <View style={[styles.commentBar, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
             <View style={styles.commentInputRow}>
@@ -541,13 +542,25 @@ export default function FullscreenViewer({
                 placeholderTextColor="rgba(255,255,255,0.45)"
                 value={commentText}
                 onChangeText={setCommentText}
-                onSubmitEditing={() => {
-                  if (commentText.trim()) {
-                    const item = data[clampIndex(current)];
-                    if (item) {
-                      setFsCommentsPostId(item.id as number);
-                      setFsCommentsOpen(true);
-                    }
+                onSubmitEditing={async () => {
+                  if (!commentText.trim()) return;
+                  const item = data[clampIndex(current)];
+                  if (!item) return;
+                  try {
+                    const { data: authData } = await supabase.auth.getUser();
+                    const uid = authData?.user?.id;
+                    if (!uid) return;
+                    await supabase.from("comments").insert({
+                      post_id: item.id,
+                      user_id: uid,
+                      content: commentText.trim(),
+                    });
+                    setCommentText("");
+                    // Open full comments sheet to show the new comment
+                    setFsCommentsPostId(item.id as number);
+                    setFsCommentsOpen(true);
+                  } catch (err) {
+                    console.log("Comment error:", err);
                   }
                 }}
                 returnKeyType="send"
@@ -556,11 +569,24 @@ export default function FullscreenViewer({
                 <TouchableOpacity
                   style={styles.commentSendBtn}
                   activeOpacity={0.7}
-                  onPress={() => {
+                  onPress={async () => {
+                    if (!commentText.trim()) return;
                     const item = data[clampIndex(current)];
-                    if (item) {
+                    if (!item) return;
+                    try {
+                      const { data: authData } = await supabase.auth.getUser();
+                      const uid = authData?.user?.id;
+                      if (!uid) return;
+                      await supabase.from("comments").insert({
+                        post_id: item.id,
+                        user_id: uid,
+                        content: commentText.trim(),
+                      });
+                      setCommentText("");
                       setFsCommentsPostId(item.id as number);
                       setFsCommentsOpen(true);
+                    } catch (err) {
+                      console.log("Comment error:", err);
                     }
                   }}
                 >
@@ -692,6 +718,7 @@ const styles = StyleSheet.create({
     width: Platform.OS === "web" ? Math.min(SCREEN_W, 500) : SCREEN_W,
     height: SCREEN_H,
     overflow: "hidden" as any,
+    backgroundColor: "#000",
     ...(Platform.OS === "web" ? { alignSelf: "center" as const, borderRadius: 16 } : {}),
   },
   pageBottomGradient: {
@@ -720,7 +747,7 @@ const styles = StyleSheet.create({
   sideActions: {
     position: "absolute",
     right: 12,
-    bottom: Platform.select({ ios: 160, android: 140, default: 120 }),
+    bottom: Platform.select({ ios: 180, android: 160, default: 140 }),
     zIndex: 5,
     alignItems: "center",
   },
@@ -741,7 +768,7 @@ const styles = StyleSheet.create({
   /* Footer – bottom-left user info — above comment bar */
   footer: {
     position: "absolute",
-    bottom: Platform.select({ ios: 120, android: 100, default: 80 }),
+    bottom: Platform.select({ ios: 140, android: 120, default: 100 }),
     left: 16,
     right: 80,
     zIndex: 5,
