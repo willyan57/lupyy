@@ -83,7 +83,7 @@ export default function MediaPicker() {
         setAlbums(list);
       } catch {}
     })();
-  }, [hasPermission, selectedAlbum]);
+  }, [hasPermission]);
 
 
   const title = useMemo(() => {
@@ -142,7 +142,7 @@ export default function MediaPicker() {
     if (!canShowLibraryGrid) return;
     if (!hasPermission) return;
     loadMore(true);
-  }, [hasPermission]);
+  }, [hasPermission, selectedAlbum]);
 
   const pickWebOrFallback = async () => {
     const res = await ImagePicker.launchImageLibraryAsync({

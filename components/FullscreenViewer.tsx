@@ -55,9 +55,12 @@ type Props = {
   onPressUser?: (userId: string) => void;
   currentUserId?: string | null;
   onDeletePost?: (id: string | number) => void | Promise<void>;
+  /** Called when user scrolls near the end — parent should load more items */
+  onLoadMore?: () => void;
 };
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
+const COMMENT_BAR_HEIGHT = 60;
 
 type FilterId = "none" | "warm" | "cool" | "pink" | "gold" | "night";
 
@@ -94,7 +97,6 @@ const ViewerVideo: React.FC<{ uri: string; playing: boolean }> = React.memo(({
     if (playing) p.play();
   });
 
-  // On web, unmute after first user interaction (autoplay policy)
   useEffect(() => {
     if (Platform.OS !== "web" || !player) return;
     const handler = () => {
@@ -169,13 +171,14 @@ const FilterOverlay = React.memo(({ filterId }: { filterId?: string | null }) =>
   );
 });
 
-/* ─── Single Page ─── */
+/* ─── Single Page — Instagram Reels style ─── */
 const ViewerPage = React.memo(function ViewerPage({
   item,
   index,
   current,
   counts,
   controlsVisible,
+  commentBarH,
   onLike,
   onComment,
   onRepost,
@@ -189,6 +192,7 @@ const ViewerPage = React.memo(function ViewerPage({
   current: number;
   counts: Counts;
   controlsVisible: boolean;
+  commentBarH: number;
   onLike?: () => void;
   onComment?: () => void;
   onRepost?: () => void;
@@ -200,7 +204,6 @@ const ViewerPage = React.memo(function ViewerPage({
   const playing = index === current;
   const isVideo = item.media_type === "video";
   const likeColor = counts.liked ? "#ff4f7d" : "#ffffff";
-
   const shouldRenderVideo = isVideo && Math.abs(index - current) <= 1;
 
   return (
@@ -210,7 +213,8 @@ const ViewerPage = React.memo(function ViewerPage({
       onLongPress={onHideControls}
       delayLongPress={250}
     >
-      <View style={styles.mediaContainer}>
+      {/* Media area — respects comment bar */}
+      <View style={[styles.mediaContainer, { bottom: commentBarH }]}>
         {isVideo ? (
           shouldRenderVideo ? (
             <ViewerVideo uri={item.media_url} playing={playing} />
@@ -237,10 +241,13 @@ const ViewerPage = React.memo(function ViewerPage({
         <FilterOverlay filterId={item.filter} />
       </View>
 
-      {/* Bottom gradient for readability */}
+      {/* Bottom dark area behind comment bar */}
+      <View style={[styles.commentBarBg, { height: commentBarH }]} />
+
+      {/* Bottom gradient for readability — above comment bar */}
       <LinearGradient
         colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.75)"]}
-        style={styles.pageBottomGradient}
+        style={[styles.pageBottomGradient, { bottom: commentBarH }]}
         pointerEvents="none"
       />
 
@@ -253,8 +260,8 @@ const ViewerPage = React.memo(function ViewerPage({
 
       {controlsVisible && (
         <>
-          {/* Side actions - Instagram/TikTok style */}
-          <View style={styles.sideActions}>
+          {/* Side actions — positioned above comment bar */}
+          <View style={[styles.sideActions, { bottom: commentBarH + 20 }]}>
             <Pressable onPress={onLike} style={styles.sideButton} hitSlop={10}>
               <Ionicons
                 name={counts.liked ? "heart" : "heart-outline"}
@@ -285,8 +292,8 @@ const ViewerPage = React.memo(function ViewerPage({
             </Pressable>
           </View>
 
-          {/* Footer - user info + caption */}
-          <View style={styles.footer}>
+          {/* Footer — user info + caption — above comment bar */}
+          <View style={[styles.footer, { bottom: commentBarH + 12 }]}>
             <Pressable style={styles.userRow} onPress={onPressUser}>
               {item.avatar_url ? (
                 <Image
@@ -328,6 +335,7 @@ export default function FullscreenViewer({
   onPressUser,
   currentUserId,
   onDeletePost,
+  onLoadMore,
 }: Props) {
   const insets = useSafeAreaInsets();
   const listRef = useRef<FlatList<ViewerItem>>(null);
@@ -339,6 +347,8 @@ export default function FullscreenViewer({
   const [fsCommentsOpen, setFsCommentsOpen] = useState(false);
   const [fsCommentsPostId, setFsCommentsPostId] = useState<number | null>(null);
   const [commentText, setCommentText] = useState("");
+
+  const commentBarH = COMMENT_BAR_HEIGHT + Math.max(insets.bottom, 16);
 
   const data = useMemo(() => items ?? [], [items]);
   const itemCount = data.length;
@@ -458,6 +468,27 @@ export default function FullscreenViewer({
     []
   );
 
+  const handleSubmitComment = useCallback(async () => {
+    if (!commentText.trim()) return;
+    const item = data[clampIndex(current)];
+    if (!item) return;
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const uid = authData?.user?.id;
+      if (!uid) return;
+      await supabase.from("comments").insert({
+        post_id: item.id,
+        user_id: uid,
+        content: commentText.trim(),
+      });
+      setCommentText("");
+      setFsCommentsPostId(item.id as number);
+      setFsCommentsOpen(true);
+    } catch (err) {
+      console.log("Comment error:", err);
+    }
+  }, [commentText, data, current, clampIndex]);
+
   if (!visible) return null;
 
   return (
@@ -509,8 +540,10 @@ export default function FullscreenViewer({
               const pageIndex = Math.round(offsetY / SCREEN_H);
               setCurrent(clampIndex(pageIndex));
             }}
-            windowSize={3}
-            maxToRenderPerBatch={2}
+            onEndReached={() => onLoadMore?.()}
+            onEndReachedThreshold={2}
+            windowSize={5}
+            maxToRenderPerBatch={3}
             removeClippedSubviews={Platform.OS !== "web"}
             extraData={current}
             renderItem={({ item, index }) => (
@@ -520,6 +553,7 @@ export default function FullscreenViewer({
                 current={current}
                 counts={countsForId(item.id)}
                 controlsVisible={controlsVisible}
+                commentBarH={commentBarH}
                 onLike={() => onLike?.(item.id)}
                 onComment={() => { setFsCommentsPostId(item.id as number); setFsCommentsOpen(true); }}
                 onRepost={() => onRepost?.(item.id)}
@@ -532,63 +566,36 @@ export default function FullscreenViewer({
           />
         )}
 
-        {/* Comment input bar — Instagram style */}
+        {/* Comment input bar — Instagram style, fixed bottom, dark background */}
         {controlsVisible && itemCount > 0 && (
-          <View style={[styles.commentBar, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
+          <View style={[styles.commentBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
             <View style={styles.commentInputRow}>
+              {currentItem?.avatar_url ? (
+                <Image
+                  source={{ uri: currentItem.avatar_url }}
+                  style={styles.commentAvatar}
+                  contentFit="cover"
+                  cachePolicy="disk"
+                />
+              ) : (
+                <View style={styles.commentAvatarPlaceholder}>
+                  <Ionicons name="person" size={14} color="rgba(255,255,255,0.5)" />
+                </View>
+              )}
               <TextInput
                 style={styles.commentInput}
                 placeholder="Faça um comentário..."
                 placeholderTextColor="rgba(255,255,255,0.45)"
                 value={commentText}
                 onChangeText={setCommentText}
-                onSubmitEditing={async () => {
-                  if (!commentText.trim()) return;
-                  const item = data[clampIndex(current)];
-                  if (!item) return;
-                  try {
-                    const { data: authData } = await supabase.auth.getUser();
-                    const uid = authData?.user?.id;
-                    if (!uid) return;
-                    await supabase.from("comments").insert({
-                      post_id: item.id,
-                      user_id: uid,
-                      content: commentText.trim(),
-                    });
-                    setCommentText("");
-                    // Open full comments sheet to show the new comment
-                    setFsCommentsPostId(item.id as number);
-                    setFsCommentsOpen(true);
-                  } catch (err) {
-                    console.log("Comment error:", err);
-                  }
-                }}
+                onSubmitEditing={handleSubmitComment}
                 returnKeyType="send"
               />
               {commentText.trim().length > 0 && (
                 <TouchableOpacity
                   style={styles.commentSendBtn}
                   activeOpacity={0.7}
-                  onPress={async () => {
-                    if (!commentText.trim()) return;
-                    const item = data[clampIndex(current)];
-                    if (!item) return;
-                    try {
-                      const { data: authData } = await supabase.auth.getUser();
-                      const uid = authData?.user?.id;
-                      if (!uid) return;
-                      await supabase.from("comments").insert({
-                        post_id: item.id,
-                        user_id: uid,
-                        content: commentText.trim(),
-                      });
-                      setCommentText("");
-                      setFsCommentsPostId(item.id as number);
-                      setFsCommentsOpen(true);
-                    } catch (err) {
-                      console.log("Comment error:", err);
-                    }
-                  }}
+                  onPress={handleSubmitComment}
                 >
                   <Ionicons name="send" size={18} color="#0095f6" />
                 </TouchableOpacity>
@@ -662,7 +669,7 @@ export default function FullscreenViewer({
           </View>
         </Modal>
 
-        {/* Comments inside the fullscreen modal so it renders on top */}
+        {/* Comments sheet */}
         <CommentsSheet
           visible={fsCommentsOpen}
           postId={fsCommentsPostId}
@@ -702,12 +709,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "rgba(0,0,0,0.35)",
   },
-  headerTitle: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "800",
-    letterSpacing: 0.3,
-  },
   headerRightGroup: {
     flexDirection: "row",
     alignItems: "center",
@@ -723,10 +724,9 @@ const styles = StyleSheet.create({
   },
   pageBottomGradient: {
     position: "absolute",
-    bottom: 0,
     left: 0,
     right: 0,
-    height: 280,
+    height: 200,
     zIndex: 2,
   },
   pageTopGradient: {
@@ -738,16 +738,27 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   mediaContainer: {
-    ...StyleSheet.absoluteFillObject,
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
     overflow: "hidden" as any,
   },
   media: { width: "100%", height: "100%" },
 
-  /* Side actions – right column — above comment bar */
+  /* Dark background for comment bar area */
+  commentBarBg: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: "#000",
+  },
+
+  /* Side actions */
   sideActions: {
     position: "absolute",
     right: 12,
-    bottom: Platform.select({ ios: 180, android: 160, default: 140 }),
     zIndex: 5,
     alignItems: "center",
   },
@@ -765,10 +776,9 @@ const styles = StyleSheet.create({
     textShadowRadius: 3,
   },
 
-  /* Footer – bottom-left user info — above comment bar */
+  /* Footer */
   footer: {
     position: "absolute",
-    bottom: Platform.select({ ios: 140, android: 120, default: 100 }),
     left: 16,
     right: 80,
     zIndex: 5,
@@ -862,7 +872,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.10)",
   },
-
   menuItem: {
     paddingHorizontal: 16,
     paddingVertical: 14,
@@ -877,7 +886,6 @@ const styles = StyleSheet.create({
   menuItemText: { color: "#fff", fontSize: 15, fontWeight: "700" },
   menuItemDangerText: { color: "#ff4f7d" },
   menuItemTextDisabled: { color: "rgba(255,255,255,0.45)", fontSize: 15, fontWeight: "600" },
-
   menuCancel: {
     marginTop: 10,
     marginHorizontal: 16,
@@ -893,13 +901,14 @@ const styles = StyleSheet.create({
   vignetteTop: { position: "absolute", top: 0, left: 0, right: 0, height: 220 },
   vignetteBottom: { position: "absolute", bottom: 0, left: 0, right: 0, height: 260 },
 
-  /* Comment bar — Instagram style */
+  /* Comment bar — Instagram style, dark bg, fixed bottom */
   commentBar: {
     position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
     zIndex: 8,
+    backgroundColor: "#000",
     paddingHorizontal: 12,
     paddingTop: 10,
     ...(Platform.OS === "web" ? { maxWidth: 500, alignSelf: "center" as const, width: "100%" as any } : {}),
@@ -909,13 +918,28 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
   },
+  commentAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+  },
+  commentAvatarPlaceholder: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   commentInput: {
     flex: 1,
     height: 42,
     borderRadius: 21,
     borderWidth: 1.5,
     borderColor: "rgba(255,255,255,0.25)",
-    backgroundColor: "rgba(0,0,0,0.35)",
+    backgroundColor: "rgba(255,255,255,0.08)",
     paddingHorizontal: 16,
     color: "#fff",
     fontSize: 14,

@@ -48,8 +48,15 @@ import Svg, { Path } from "react-native-svg";
 
 const { width, height } = Dimensions.get("window");
 const isWeb = Platform.OS === "web";
-// Detect Capacitor (APK) — it runs as web but inside a native shell
-const isCapacitor = isWeb && typeof (window as any)?.Capacitor !== "undefined";
+// Detect Capacitor (APK) — multiple detection methods for reliability
+const isCapacitor = isWeb && (
+  typeof (window as any)?.Capacitor !== "undefined" ||
+  typeof (window as any)?.AndroidBridge !== "undefined" ||
+  typeof (window as any)?.webkit?.messageHandlers?.bridge !== "undefined" ||
+  document?.URL?.startsWith("http://localhost") ||
+  document?.URL?.includes("capacitor://") ||
+  navigator?.userAgent?.includes("Capacitor")
+);
 const isNativeApp = !isWeb; // true React Native
 const previewHeight = isWeb ? height * 0.85 : height;
 
@@ -410,11 +417,14 @@ export default function CapturePreview() {
     }, []
   );
 
-  /** Bake CSS filters into the image on web using canvas */
+  /** Bake CSS filters into the image on web/Capacitor using canvas */
   const bakeWebCssFilter = useCallback(async (inputUri: string, cssFilter: string): Promise<string> => {
     return new Promise((resolve) => {
       const img = new (window as any).Image() as HTMLImageElement;
-      img.crossOrigin = "anonymous";
+      // For Capacitor/APK, avoid crossOrigin for local file:// URIs
+      if (!inputUri.startsWith("file://") && !inputUri.startsWith("content://") && !inputUri.startsWith("blob:")) {
+        img.crossOrigin = "anonymous";
+      }
       img.onload = () => {
         try {
           const canvas = document.createElement("canvas");
@@ -429,13 +439,58 @@ export default function CapturePreview() {
           if (!ctx) { resolve(inputUri); return; }
           ctx.filter = cssFilter;
           ctx.drawImage(img, 0, 0, w, h);
-          const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
-          resolve(dataUrl);
+          try {
+            const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+            if (dataUrl && dataUrl.length > 100) {
+              resolve(dataUrl);
+            } else {
+              resolve(inputUri);
+            }
+          } catch {
+            // Canvas tainted — try blob approach
+            canvas.toBlob((blob) => {
+              if (blob) {
+                resolve(URL.createObjectURL(blob));
+              } else {
+                resolve(inputUri);
+              }
+            }, "image/jpeg", 0.92);
+          }
         } catch { resolve(inputUri); }
       };
-      img.onerror = () => resolve(inputUri);
+      img.onerror = () => {
+        // On Capacitor, file:// URIs may fail — try fetching as blob first
+        if (isCapacitor && (inputUri.startsWith("file://") || inputUri.startsWith("content://"))) {
+          fetch(inputUri)
+            .then(r => r.blob())
+            .then(blob => {
+              const objectUrl = URL.createObjectURL(blob);
+              // Retry with object URL
+              const img2 = new (window as any).Image() as HTMLImageElement;
+              img2.onload = () => {
+                try {
+                  const canvas = document.createElement("canvas");
+                  let w = img2.naturalWidth, h = img2.naturalHeight;
+                  const maxDim = 1440;
+                  if (w > maxDim || h > maxDim) { const s = maxDim / Math.max(w, h); w = Math.round(w * s); h = Math.round(h * s); }
+                  canvas.width = w; canvas.height = h;
+                  const ctx = canvas.getContext("2d");
+                  if (!ctx) { resolve(inputUri); return; }
+                  ctx.filter = cssFilter;
+                  ctx.drawImage(img2, 0, 0, w, h);
+                  resolve(canvas.toDataURL("image/jpeg", 0.92));
+                } catch { resolve(inputUri); }
+              };
+              img2.onerror = () => resolve(inputUri);
+              img2.src = objectUrl;
+            })
+            .catch(() => resolve(inputUri));
+        } else {
+          resolve(inputUri);
+        }
+      };
       img.src = inputUri;
-      setTimeout(() => resolve(inputUri), 8000);
+      setTimeout(() => resolve(inputUri), 12000);
     });
   }, []);
 
@@ -788,12 +843,15 @@ export default function CapturePreview() {
   const prevOpacity = transition.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
   const nextOpacity = transition;
 
+  // Hide Beautify and Adjustments on Capacitor/APK — they cause image distortion
   const baseTools = [
     { key: "text", label: "Texto", icon: "Aa" },
     { key: "stickers", label: "Figurinhas", icon: "☻" },
     { key: "music", label: "Músicas", icon: "♫" },
-    { key: "beautify", label: "Embelezar", icon: "✧" },
-    { key: "adjust", label: "Ajustes", icon: "⚙" },
+    ...(!isCapacitor ? [
+      { key: "beautify", label: "Embelezar", icon: "✧" },
+      { key: "adjust", label: "Ajustes", icon: "⚙" },
+    ] : []),
     { key: "mention", label: "Marcar", icon: "@" },
     { key: "location", label: "Local", icon: "📍" },
     { key: "effects", label: "Efeitos", icon: "✺" },
@@ -905,19 +963,36 @@ export default function CapturePreview() {
               onReady={() => setMediaLoaded(true)}
             />
           ) : mediaType === "image" ? (
-            <Image
-              key={`${effectiveUri}::${nonce}::${isComparing ? "orig" : filter}`}
-              source={{ uri: effectiveUri }}
-              style={[
-                styles.preview,
-                previewMediaStyle,
-                isFrontCamera && { transform: [{ scaleX: -1 }] },
-                // Apply CSS filter on web and Capacitor APK for real-time preview
-                !isComparing && activeFilter.cssFilter ? { filter: activeFilter.cssFilter } as any : undefined,
-              ].filter(Boolean) as any}
-              resizeMode="cover"
-              onLoadEnd={() => setMediaLoaded(true)}
-            />
+            isWeb && !isComparing && activeFilter.cssFilter ? (
+              // On web/Capacitor use native <img> tag for CSS filter support
+              <View style={[styles.preview, previewMediaStyle]}>
+                <img
+                  key={`${effectiveUri}::${nonce}::${filter}`}
+                  src={effectiveUri}
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                    filter: activeFilter.cssFilter,
+                    transform: isFrontCamera ? "scaleX(-1)" : undefined,
+                  } as any}
+                  onLoad={() => setMediaLoaded(true)}
+                  onError={() => setMediaLoaded(true)}
+                />
+              </View>
+            ) : (
+              <Image
+                key={`${effectiveUri}::${nonce}::${isComparing ? "orig" : filter}`}
+                source={{ uri: effectiveUri }}
+                style={[
+                  styles.preview,
+                  previewMediaStyle,
+                  isFrontCamera && { transform: [{ scaleX: -1 }] },
+                ].filter(Boolean) as any}
+                resizeMode="cover"
+                onLoadEnd={() => setMediaLoaded(true)}
+              />
+            )
           ) : (
             <Video
               key={`${uri}::${nonce}`}
@@ -1277,65 +1352,106 @@ export default function CapturePreview() {
         />
       </View>
 
-      {/* ─── TEXT TOOL MODAL ─── */}
-      <Modal visible={activeToolSheet === "text"} transparent animationType="fade" onRequestClose={() => setActiveToolSheet(null)}>
+      {/* ─── TEXT TOOL MODAL — Premium Instagram-style ─── */}
+      <Modal visible={activeToolSheet === "text"} transparent animationType="slide" onRequestClose={() => setActiveToolSheet(null)}>
         <View style={styles.toolModalOverlay}>
+          {/* Preview area with existing image dimmed */}
+          <Pressable style={{ flex: 1 }} onPress={() => setActiveToolSheet(null)} />
           <View style={[styles.textToolContainer, { paddingBottom: insets.bottom + 24 }]}>
             <View style={styles.textToolHeader}>
               <TouchableOpacity onPress={() => setActiveToolSheet(null)}><Text style={styles.textToolHeaderButton}>Cancelar</Text></TouchableOpacity>
               <Text style={styles.textToolHeaderTitle}>Texto</Text>
-              <TouchableOpacity onPress={addTextOverlay}><Text style={styles.textToolHeaderButton}>Adicionar</Text></TouchableOpacity>
+              <TouchableOpacity onPress={addTextOverlay}><Text style={[styles.textToolHeaderButton, { fontWeight: "800" }]}>Adicionar</Text></TouchableOpacity>
             </View>
 
-            {/* Font weights */}
+            {/* Font style row */}
             <View style={styles.textToolFormattingRow}>
-              {(["400", "700", "900"] as const).map(w => (
-                <TouchableOpacity key={w} onPress={() => setEditingTextWeight(w)}
-                  style={[styles.textWeightBtn, editingTextWeight === w && styles.textWeightBtnActive]}>
-                  <Text style={[styles.textWeightBtnText, { fontWeight: w }]}>
-                    {w === "400" ? "Light" : w === "700" ? "Bold" : "Black"}
-                  </Text>
+              {([
+                { w: "400" as const, label: "Light", icon: "Aa" },
+                { w: "700" as const, label: "Bold", icon: "Aa" },
+                { w: "900" as const, label: "Black", icon: "Aa" },
+              ]).map(item => (
+                <TouchableOpacity key={item.w} onPress={() => setEditingTextWeight(item.w)}
+                  style={[styles.textWeightBtn, editingTextWeight === item.w && styles.textWeightBtnActive]}>
+                  <Text style={[styles.textWeightBtnText, { fontWeight: item.w }]}>{item.label}</Text>
                 </TouchableOpacity>
               ))}
             </View>
 
-            {/* Alignment */}
+            {/* Alignment + Size controls */}
             <View style={styles.textToolFormattingRow}>
               {(["left", "center", "right"] as const).map(a => (
                 <TouchableOpacity key={a} onPress={() => setEditingTextAlign(a)}
                   style={[styles.textWeightBtn, editingTextAlign === a && styles.textWeightBtnActive]}>
-                  <Text style={styles.textWeightBtnText}>{a === "left" ? "◀" : a === "center" ? "⬛" : "▶"}</Text>
+                  <Text style={styles.textWeightBtnText}>{a === "left" ? "◀" : a === "center" ? "▣" : "▶"}</Text>
                 </TouchableOpacity>
               ))}
             </View>
 
-            {/* Colors */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
-              {TEXT_COLORS.map(c => (
+            {/* Text colors — expanded palette */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+              {[
+                "#ffffff", "#000000", "#ff3366", "#0095f6", "#ffd700",
+                "#00e676", "#ff6b00", "#9c27b0", "#e91e63", "#00bcd4",
+                "#ff5722", "#8bc34a", "#673ab7", "#f44336", "#03a9f4",
+                "#cddc39", "#ff9800", "#607d8b", "#795548", "#4caf50",
+              ].map(c => (
                 <TouchableOpacity key={c} onPress={() => setEditingTextColor(c)}
-                  style={[styles.textColorDot, { backgroundColor: c }, editingTextColor === c && { borderWidth: 3, borderColor: "#0095f6" }]} />
+                  style={[styles.textColorDot, { backgroundColor: c }, editingTextColor === c && { borderWidth: 3, borderColor: "#0095f6", transform: [{ scale: 1.15 }] }]} />
               ))}
             </ScrollView>
 
-            {/* Background colors */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
-              {TEXT_BG_COLORS.map(c => (
-                <TouchableOpacity key={c} onPress={() => setEditingTextBg(c)}
-                  style={[styles.textBgDot, { backgroundColor: c === "transparent" ? "#333" : c }, editingTextBg === c && { borderWidth: 3, borderColor: "#0095f6" }]}>
-                  {c === "transparent" && <Text style={{ color: "#fff", fontSize: 10 }}>∅</Text>}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+            {/* Background styles */}
+            <View style={{ marginBottom: 12 }}>
+              <Text style={{ color: "rgba(255,255,255,0.5)", fontSize: 11, fontWeight: "600", marginBottom: 6, marginLeft: 2 }}>FUNDO</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                {[
+                  "transparent",
+                  "rgba(0,0,0,0.7)",
+                  "rgba(255,255,255,0.9)",
+                  "rgba(255,51,102,0.8)",
+                  "rgba(0,149,246,0.8)",
+                  "rgba(0,0,0,0.4)",
+                  "rgba(255,215,0,0.8)",
+                  "rgba(0,230,118,0.8)",
+                  "rgba(156,39,176,0.8)",
+                ].map(c => (
+                  <TouchableOpacity key={c} onPress={() => setEditingTextBg(c)}
+                    style={[styles.textBgDot, { backgroundColor: c === "transparent" ? "#222" : c }, editingTextBg === c && { borderWidth: 3, borderColor: "#0095f6" }]}>
+                    {c === "transparent" && <Text style={{ color: "#fff", fontSize: 10 }}>∅</Text>}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+
+            {/* Live preview of text */}
+            <View style={{ alignItems: "center", marginBottom: 12 }}>
+              <View style={{ 
+                backgroundColor: editingTextBg !== "transparent" ? editingTextBg : "rgba(255,255,255,0.05)", 
+                paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, minWidth: 120 
+              }}>
+                <Text style={{ 
+                  color: editingTextColor, fontSize: 22, fontWeight: editingTextWeight, 
+                  textAlign: editingTextAlign, opacity: editingText ? 1 : 0.4 
+                }}>
+                  {editingText || "Prévia do texto"}
+                </Text>
+              </View>
+            </View>
 
             <TextInput
-              style={[styles.textToolInput, { color: editingTextColor, fontWeight: editingTextWeight, textAlign: editingTextAlign, backgroundColor: editingTextBg !== "transparent" ? editingTextBg : undefined }]}
+              style={[styles.textToolInput, { color: editingTextColor, fontWeight: editingTextWeight, textAlign: editingTextAlign }]}
               placeholder="Toque para digitar..."
-              placeholderTextColor="#666"
+              placeholderTextColor="rgba(255,255,255,0.35)"
               multiline
               value={editingText}
               onChangeText={setEditingText}
               autoFocus
             />
+
+            <Text style={{ color: "rgba(255,255,255,0.4)", fontSize: 11, textAlign: "center", marginTop: 8 }}>
+              Arraste e use dois dedos para redimensionar na foto
+            </Text>
           </View>
         </View>
       </Modal>

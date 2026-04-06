@@ -61,7 +61,7 @@ function isCommitted(status?: string | null) {
 }
 
 const SCREEN_HEIGHT = Dimensions.get("window").height;
-const SHEET_HEIGHT = Math.min(SCREEN_HEIGHT * 0.72, 640);
+const SHEET_HEIGHT = Math.min(SCREEN_HEIGHT * 0.82, 720);
 
 export default function PeopleListSheet(props: PeopleListSheetProps) {
   const {
@@ -196,7 +196,7 @@ export default function PeopleListSheet(props: PeopleListSheetProps) {
   const keyExtractor = useCallback((item: PersonRow) => item.follow_id, []);
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose} statusBarTranslucent>
       <Pressable style={s.backdrop} onPress={onClose} />
 
       <View style={s.sheetContainer}>
