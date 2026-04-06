@@ -791,6 +791,10 @@ export default function Feed() {
         onComment={(id) => openComments(id as number)}
         onRepost={() => {}}
         onShare={(id) => sharePost(id)}
+        onPressUser={(userId) => {
+          setViewerOpen(false);
+          router.push({ pathname: "/profile", params: { userId } });
+        }}
       />
 
       <StoryViewer

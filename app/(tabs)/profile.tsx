@@ -4558,6 +4558,20 @@ export default function Profile() {
             />
           )}
 
+          {/* ── PEOPLE LIST (followers/following/interested) ── */}
+          <PeopleListSheet
+            visible={peopleSheetVisible}
+            mode={peopleSheetMode}
+            profileId={userId ?? ""}
+            isOwnProfile={isOwnProfile}
+            myRelationshipStatus={myRelationshipStatus}
+            onClose={() => setPeopleSheetVisible(false)}
+            onOpenProfile={(targetId) => {
+              setPeopleSheetVisible(false);
+              handlePressUser(targetId);
+            }}
+          />
+
           {/* ── HIGHLIGHT EDITOR ── */}
           {isOwnProfile && (
             <ProfileHighlightEditor

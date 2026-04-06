@@ -305,7 +305,7 @@ const ViewerPage = React.memo(function ViewerPage({
           </View>
 
           {/* Footer — user info + caption — above comment bar */}
-          <View style={[styles.footer, { bottom: commentBarH + 34 }]}> 
+          <View style={[styles.footer, { bottom: commentBarH + 8 }]}> 
             <Pressable style={styles.userRow} onPress={onPressUser}>
               {item.avatar_url ? (
                 <Image
