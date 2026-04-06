@@ -118,12 +118,27 @@ function _PostCard(props: PostCardProps) {
     if (media_type !== "video") return;
     try {
       player.muted = !!muted;
-      // Force volume on web when unmuting
-      if (Platform.OS === "web" && !muted) {
-        (player as any).volume = 1;
+      // On web, also reach into the underlying <video> element directly
+      // to bypass expo-video's Web Audio API (which CORS blocks)
+      if (Platform.OS === "web") {
+        const videoEl = document.querySelector(`video[src="${media_url}"]`) as HTMLVideoElement | null;
+        if (videoEl) {
+          videoEl.muted = !!muted;
+          videoEl.volume = 1;
+        }
+        // Fallback: try all videos if src doesn't match directly
+        if (!videoEl) {
+          const allVideos = document.querySelectorAll("video");
+          allVideos.forEach((v) => {
+            if (v.currentSrc?.includes(media_url?.split("/").pop() || "__none__")) {
+              v.muted = !!muted;
+              v.volume = 1;
+            }
+          });
+        }
       }
     } catch {}
-  }, [muted, player, media_type]);
+  }, [muted, player, media_type, media_url]);
 
   useEffect(() => {
     return () => {

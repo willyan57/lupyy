@@ -93,6 +93,8 @@ const ViewerVideo: React.FC<{ uri: string; playing: boolean }> = React.memo(({
   uri,
   playing,
 }) => {
+  const [muted, setMuted] = useState(Platform.OS === "web");
+
   const player = useVideoPlayer(uri, (p) => {
     p.loop = true;
     p.muted = Platform.OS === "web";
@@ -100,19 +102,25 @@ const ViewerVideo: React.FC<{ uri: string; playing: boolean }> = React.memo(({
   });
 
   useEffect(() => {
-    if (Platform.OS !== "web" || !player) return;
-    const handler = () => {
-      try { player.muted = false; } catch {}
-      window.removeEventListener("click", handler);
-      window.removeEventListener("touchstart", handler);
-    };
-    window.addEventListener("click", handler, { once: true });
-    window.addEventListener("touchstart", handler, { once: true });
-    return () => {
-      window.removeEventListener("click", handler);
-      window.removeEventListener("touchstart", handler);
-    };
-  }, [player]);
+    if (!player) return;
+    try {
+      player.muted = muted;
+      // Directly access the HTML video element to bypass CORS-blocked Web Audio API
+      if (Platform.OS === "web") {
+        setTimeout(() => {
+          try {
+            const allVideos = document.querySelectorAll("video");
+            allVideos.forEach((v) => {
+              if (v.currentSrc?.includes(uri?.split("/").pop() || "__none__")) {
+                v.muted = muted;
+                v.volume = 1;
+              }
+            });
+          } catch {}
+        }, 50);
+      }
+    } catch {}
+  }, [muted, player, uri]);
 
   useEffect(() => {
     if (!player) return;
@@ -126,14 +134,40 @@ const ViewerVideo: React.FC<{ uri: string; playing: boolean }> = React.memo(({
     };
   }, [playing, player]);
 
+  const toggleMute = useCallback(() => {
+    setMuted((m) => !m);
+  }, []);
+
   return (
-    <VideoView
-      style={styles.media}
-      player={player}
-      contentFit="cover"
-      allowsFullscreen={false}
-      allowsPictureInPicture={false}
-    />
+    <View style={{ width: "100%", height: "100%" }}>
+      <VideoView
+        style={styles.media}
+        player={player}
+        contentFit="cover"
+        allowsFullscreen={false}
+        allowsPictureInPicture={false}
+      />
+      {Platform.OS === "web" && playing && (
+        <Pressable
+          onPress={toggleMute}
+          style={{
+            position: "absolute",
+            bottom: 16,
+            right: 16,
+            width: 36,
+            height: 36,
+            borderRadius: 18,
+            backgroundColor: "rgba(0,0,0,0.5)",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 10,
+          }}
+          hitSlop={8}
+        >
+          <Ionicons name={muted ? "volume-mute" : "volume-high"} size={20} color="#fff" />
+        </Pressable>
+      )}
+    </View>
   );
 });
 
@@ -273,7 +307,7 @@ const ViewerPage = React.memo(function ViewerPage({
       {controlsVisible && (
         <>
           {/* Side actions — positioned above comment bar */}
-          <View style={[styles.sideActions, { bottom: commentBarH + 44 }]}>
+          <View style={[styles.sideActions, { bottom: commentBarH + 24 }]}>
             <Pressable onPress={onLike} style={styles.sideButton} hitSlop={10}>
               <Ionicons
                 name={counts.liked ? "heart" : "heart-outline"}
@@ -305,7 +339,7 @@ const ViewerPage = React.memo(function ViewerPage({
           </View>
 
           {/* Footer — user info + caption — above comment bar */}
-          <View style={[styles.footer, { bottom: commentBarH + 8 }]}> 
+          <View style={[styles.footer, { bottom: commentBarH + 2 }]}> 
             <Pressable style={styles.userRow} onPress={onPressUser}>
               {item.avatar_url ? (
                 <Image
