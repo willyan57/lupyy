@@ -4465,19 +4465,6 @@ export default function Profile() {
             }
           />
 
-          <PeopleListSheet
-            visible={peopleSheetVisible}
-            mode={peopleSheetMode}
-            profileId={userId ?? ""}
-            isOwnProfile={isOwnProfile}
-            myRelationshipStatus={myRelationshipStatus}
-            onClose={() => setPeopleSheetVisible(false)}
-            onOpenProfile={(targetId) => {
-              setPeopleSheetVisible(false);
-              handlePressUser(targetId);
-            }}
-          />
-
           <MatchCelebration
             visible={matchCelebrationVisible}
             matchedUserName={matchedUserName}

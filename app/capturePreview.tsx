@@ -48,6 +48,7 @@ import Svg, { Path } from "react-native-svg";
 
 const { width, height } = Dimensions.get("window");
 const isWeb = Platform.OS === "web";
+const isAndroidNative = Platform.OS === "android";
 // Detect Capacitor (APK) — multiple detection methods for reliability
 const isCapacitor = isWeb && (
   typeof (window as any)?.Capacitor !== "undefined" ||
@@ -58,6 +59,7 @@ const isCapacitor = isWeb && (
   navigator?.userAgent?.includes("Capacitor")
 );
 const isNativeApp = !isWeb; // true React Native
+const supportsAdvancedImageTuning = !isAndroidNative && !isCapacitor;
 const previewHeight = isWeb ? height * 0.85 : height;
 
 type CaptureMode = "post" | "story" | "reel";
@@ -228,6 +230,14 @@ export default function CapturePreview() {
   const [bakeJob, setBakeJob] = useState<{
     uri: string; filterId: ExportFilterId; beautify: BeautifyParams; resolve: (u: string) => void;
   } | null>(null);
+  const [androidPreviewJob, setAndroidPreviewJob] = useState<{
+    uri: string;
+    filterId: ExportFilterId;
+    beautify: BeautifyParams;
+    requestKey: string;
+  } | null>(null);
+  const [androidPreviewUri, setAndroidPreviewUri] = useState<string | null>(null);
+  const androidPreviewKeyRef = useRef<string>("");
 
   const activeFilter = useMemo(() => FILTERS.find(f => f.id === filter) ?? FILTERS[0], [filter]);
   const filterIndex = useMemo(() => Math.max(0, FILTERS.findIndex(f => f.id === filter)), [filter]);
@@ -362,9 +372,16 @@ export default function CapturePreview() {
   const glBeautifyParams = debouncedBeautifyParams ?? beautifyParams;
 
   const previewLutSource = useMemo(() => getLutForFilter(mapPreviewFilterToExport(filter)), [filter]);
+  const previewImageUri = useMemo(() => {
+    if (isAndroidNative && !isComparing && mediaType === "image") {
+      return androidPreviewUri || effectiveUri;
+    }
+    return effectiveUri;
+  }, [androidPreviewUri, effectiveUri, isComparing, mediaType]);
 
   const needsGlPreview = useMemo(() => {
     if (mediaType !== "image") return false;
+    if (isAndroidNative) return false;
     // On web, mobile web, AND Capacitor (APK) — GLView causes black screen
     // Use CSS filter approach instead for all web-based runtimes
     if (isWeb) return false;
@@ -498,6 +515,9 @@ export default function CapturePreview() {
     if (!shouldBakeOnExport) return inputUri;
     try {
       if (mediaType === "image") {
+        if (isAndroidNative && androidPreviewUri && inputUri === effectiveUri) {
+          return androidPreviewUri;
+        }
         // On web/Capacitor, use canvas-based CSS filter baking (always preferred)
         if (activeFilter.cssFilter) {
           const baked = await bakeWebCssFilter(inputUri, activeFilter.cssFilter);
@@ -520,6 +540,46 @@ export default function CapturePreview() {
       return inputUri;
     }
   };
+
+  useEffect(() => {
+    if (!isAndroidNative || mediaType !== "image" || !effectiveUri) {
+      setAndroidPreviewJob(null);
+      setAndroidPreviewUri(null);
+      androidPreviewKeyRef.current = "";
+      return;
+    }
+
+    if (!shouldBakeOnExport) {
+      setAndroidPreviewJob(null);
+      setAndroidPreviewUri(null);
+      androidPreviewKeyRef.current = "";
+      return;
+    }
+
+    const requestKey = `${effectiveUri}::${filter}::${quickAdjustment}::${JSON.stringify(beautifyParams)}`;
+    if (androidPreviewKeyRef.current === requestKey && androidPreviewUri) return;
+
+    const timer = setTimeout(() => {
+      androidPreviewKeyRef.current = requestKey;
+      setAndroidPreviewJob({
+        uri: effectiveUri,
+        filterId: mapPreviewFilterToExport(filter),
+        beautify: beautifyParams,
+        requestKey,
+      });
+    }, 120);
+
+    return () => clearTimeout(timer);
+  }, [
+    isAndroidNative,
+    mediaType,
+    effectiveUri,
+    shouldBakeOnExport,
+    filter,
+    quickAdjustment,
+    beautifyParams,
+    androidPreviewUri,
+  ]);
 
   // Effects
   useEffect(() => { setMediaLoaded(false); }, [uri, nonce, mediaType]);
@@ -570,7 +630,7 @@ export default function CapturePreview() {
       try {
         const { data } = await supabase
           .from("profiles")
-          .select("id, username, avatar_url, display_name")
+          .select("id, username, avatar_url, full_name")
           .ilike("username", `%${mentionQuery}%`)
           .limit(10);
         setMentionResults(data ?? []);
@@ -848,7 +908,7 @@ export default function CapturePreview() {
     { key: "text", label: "Texto", icon: "Aa" },
     { key: "stickers", label: "Figurinhas", icon: "☻" },
     { key: "music", label: "Músicas", icon: "♫" },
-    ...(!isCapacitor ? [
+    ...(supportsAdvancedImageTuning ? [
       { key: "beautify", label: "Embelezar", icon: "✧" },
       { key: "adjust", label: "Ajustes", icon: "⚙" },
     ] : []),
@@ -944,6 +1004,19 @@ export default function CapturePreview() {
           onFinish={(u) => { const out = u || bakeJob.uri; const r = bakeJob.resolve; setBakeJob(null); r(out); }}
         />
       )}
+      {androidPreviewJob && (
+        <OffscreenLutRenderer
+          sourceUri={androidPreviewJob.uri}
+          filter={androidPreviewJob.filterId}
+          beautify={androidPreviewJob.beautify}
+          exportWidth={1080}
+          exportHeight={1350}
+          onFinish={(u) => {
+            setAndroidPreviewUri(u || androidPreviewJob.uri);
+            setAndroidPreviewJob((current) => current?.requestKey === androidPreviewJob.requestKey ? null : current);
+          }}
+        />
+      )}
 
       {/* Preview */}
       <Pressable
@@ -967,8 +1040,8 @@ export default function CapturePreview() {
               // On web/Capacitor use native <img> tag for CSS filter support
               <View style={[styles.preview, previewMediaStyle]}>
                 <img
-                  key={`${effectiveUri}::${nonce}::${filter}`}
-                  src={effectiveUri}
+                  key={`${previewImageUri}::${nonce}::${filter}`}
+                  src={previewImageUri}
                   style={{
                     width: "100%",
                     height: "100%",
@@ -982,8 +1055,8 @@ export default function CapturePreview() {
               </View>
             ) : (
               <Image
-                key={`${effectiveUri}::${nonce}::${isComparing ? "orig" : filter}`}
-                source={{ uri: effectiveUri }}
+                key={`${previewImageUri}::${nonce}::${isComparing ? "orig" : filter}`}
+                source={{ uri: previewImageUri }}
                 style={[
                   styles.preview,
                   previewMediaStyle,
@@ -1092,7 +1165,7 @@ export default function CapturePreview() {
         <Text style={styles.filterLabelText}>{activeFilter.name}</Text>
       </Animated.View>
 
-      {((!mediaLoaded) || aiProcessing) && (
+        {((!mediaLoaded) || aiProcessing || (!!androidPreviewJob && !isComparing)) && (
         <View style={styles.loadingOverlay}><ActivityIndicator color="#fff" /></View>
       )}
 
@@ -1352,106 +1425,108 @@ export default function CapturePreview() {
         />
       </View>
 
-      {/* ─── TEXT TOOL MODAL — Premium Instagram-style ─── */}
+      {/* ─── TEXT TOOL MODAL — full-screen composer ─── */}
       <Modal visible={activeToolSheet === "text"} transparent animationType="slide" onRequestClose={() => setActiveToolSheet(null)}>
         <View style={styles.toolModalOverlay}>
-          {/* Preview area with existing image dimmed */}
-          <Pressable style={{ flex: 1 }} onPress={() => setActiveToolSheet(null)} />
-          <View style={[styles.textToolContainer, { paddingBottom: insets.bottom + 24 }]}>
-            <View style={styles.textToolHeader}>
+          <View style={styles.textComposerBackdrop}>
+            <View style={styles.textComposerPreviewShade} />
+            <View style={styles.textComposerTopBar}>
               <TouchableOpacity onPress={() => setActiveToolSheet(null)}><Text style={styles.textToolHeaderButton}>Cancelar</Text></TouchableOpacity>
               <Text style={styles.textToolHeaderTitle}>Texto</Text>
               <TouchableOpacity onPress={addTextOverlay}><Text style={[styles.textToolHeaderButton, { fontWeight: "800" }]}>Adicionar</Text></TouchableOpacity>
             </View>
 
-            {/* Font style row */}
-            <View style={styles.textToolFormattingRow}>
-              {([
-                { w: "400" as const, label: "Light", icon: "Aa" },
-                { w: "700" as const, label: "Bold", icon: "Aa" },
-                { w: "900" as const, label: "Black", icon: "Aa" },
-              ]).map(item => (
-                <TouchableOpacity key={item.w} onPress={() => setEditingTextWeight(item.w)}
-                  style={[styles.textWeightBtn, editingTextWeight === item.w && styles.textWeightBtnActive]}>
-                  <Text style={[styles.textWeightBtnText, { fontWeight: item.w }]}>{item.label}</Text>
-                </TouchableOpacity>
-              ))}
+            <View style={styles.textComposerCenter}>
+              <View style={styles.textComposerSizeRail}>
+                <View style={styles.textComposerSizeTrack} />
+                <View style={[styles.textComposerSizeThumb, { top: `${100 - clamp((((editingText.match(/\n/g)?.length ?? 0) + 1) * 12 + 24 - 18) / 72 * 100, 0, 100)}%` }]} />
+              </View>
+
+              <View style={styles.textComposerInputWrap}>
+                <View style={{
+                  backgroundColor: editingTextBg !== "transparent" ? editingTextBg : "transparent",
+                  borderRadius: 16,
+                  paddingHorizontal: 14,
+                  paddingVertical: 10,
+                  minWidth: width * 0.42,
+                  maxWidth: width * 0.86,
+                }}>
+                  <TextInput
+                    style={[
+                      styles.textComposerInput,
+                      {
+                        color: editingTextColor,
+                        fontWeight: editingTextWeight,
+                        textAlign: editingTextAlign,
+                        backgroundColor: "transparent",
+                      },
+                    ]}
+                    placeholder="Toque para digitar..."
+                    placeholderTextColor="rgba(255,255,255,0.38)"
+                    multiline
+                    value={editingText}
+                    onChangeText={setEditingText}
+                    autoFocus
+                  />
+                </View>
+              </View>
             </View>
 
-            {/* Alignment + Size controls */}
-            <View style={styles.textToolFormattingRow}>
-              {(["left", "center", "right"] as const).map(a => (
-                <TouchableOpacity key={a} onPress={() => setEditingTextAlign(a)}
-                  style={[styles.textWeightBtn, editingTextAlign === a && styles.textWeightBtnActive]}>
-                  <Text style={styles.textWeightBtnText}>{a === "left" ? "◀" : a === "center" ? "▣" : "▶"}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            <View style={[styles.textComposerBottomDock, { paddingBottom: insets.bottom + 16 }]}> 
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }} contentContainerStyle={{ paddingHorizontal: 2 }}>
+                {([
+                  { key: "400", label: "Light" },
+                  { key: "700", label: "Bold" },
+                  { key: "900", label: "Black" },
+                ] as const).map(item => (
+                  <TouchableOpacity
+                    key={item.key}
+                    onPress={() => setEditingTextWeight(item.key)}
+                    style={[styles.textPresetChip, editingTextWeight === item.key && styles.textPresetChipActive]}
+                  >
+                    <Text style={[styles.textPresetChipText, { fontWeight: item.key }]}>{item.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
 
-            {/* Text colors — expanded palette */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
-              {[
-                "#ffffff", "#000000", "#ff3366", "#0095f6", "#ffd700",
-                "#00e676", "#ff6b00", "#9c27b0", "#e91e63", "#00bcd4",
-                "#ff5722", "#8bc34a", "#673ab7", "#f44336", "#03a9f4",
-                "#cddc39", "#ff9800", "#607d8b", "#795548", "#4caf50",
-              ].map(c => (
-                <TouchableOpacity key={c} onPress={() => setEditingTextColor(c)}
-                  style={[styles.textColorDot, { backgroundColor: c }, editingTextColor === c && { borderWidth: 3, borderColor: "#0095f6", transform: [{ scale: 1.15 }] }]} />
-              ))}
-            </ScrollView>
+              <View style={styles.textComposerToolbarRow}>
+                {(["left", "center", "right"] as const).map(a => (
+                  <TouchableOpacity key={a} onPress={() => setEditingTextAlign(a)} style={[styles.textToolbarIconBtn, editingTextAlign === a && styles.textToolbarIconBtnActive]}>
+                    <Text style={styles.textToolbarIcon}>{a === "left" ? "≡" : a === "center" ? "☰" : "≣"}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
 
-            {/* Background styles */}
-            <View style={{ marginBottom: 12 }}>
-              <Text style={{ color: "rgba(255,255,255,0.5)", fontSize: 11, fontWeight: "600", marginBottom: 6, marginLeft: 2 }}>FUNDO</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+                {[
+                  "#ffffff", "#000000", "#ff3366", "#0095f6", "#ffd700",
+                  "#00e676", "#ff6b00", "#9c27b0", "#e91e63", "#00bcd4",
+                  "#ff5722", "#8bc34a", "#673ab7", "#f44336", "#03a9f4",
+                ].map(c => (
+                  <TouchableOpacity key={c} onPress={() => setEditingTextColor(c)} style={[styles.textColorDot, { backgroundColor: c }, editingTextColor === c && styles.textColorDotActive]} />
+                ))}
+              </ScrollView>
+
+              <Text style={styles.textComposerSectionLabel}>FUNDO</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
                 {[
                   "transparent",
-                  "rgba(0,0,0,0.7)",
-                  "rgba(255,255,255,0.9)",
-                  "rgba(255,51,102,0.8)",
-                  "rgba(0,149,246,0.8)",
-                  "rgba(0,0,0,0.4)",
-                  "rgba(255,215,0,0.8)",
-                  "rgba(0,230,118,0.8)",
-                  "rgba(156,39,176,0.8)",
+                  "rgba(0,0,0,0.75)",
+                  "rgba(255,255,255,0.92)",
+                  "rgba(255,51,102,0.82)",
+                  "rgba(0,149,246,0.82)",
+                  "rgba(255,215,0,0.82)",
+                  "rgba(0,230,118,0.82)",
+                  "rgba(156,39,176,0.82)",
                 ].map(c => (
-                  <TouchableOpacity key={c} onPress={() => setEditingTextBg(c)}
-                    style={[styles.textBgDot, { backgroundColor: c === "transparent" ? "#222" : c }, editingTextBg === c && { borderWidth: 3, borderColor: "#0095f6" }]}>
+                  <TouchableOpacity key={c} onPress={() => setEditingTextBg(c)} style={[styles.textBgDot, { backgroundColor: c === "transparent" ? "#111" : c }, editingTextBg === c && styles.textBgDotActive]}>
                     {c === "transparent" && <Text style={{ color: "#fff", fontSize: 10 }}>∅</Text>}
                   </TouchableOpacity>
                 ))}
               </ScrollView>
+
+              <Text style={styles.textComposerHint}>Arraste e use dois dedos para redimensionar na foto</Text>
             </View>
-
-            {/* Live preview of text */}
-            <View style={{ alignItems: "center", marginBottom: 12 }}>
-              <View style={{ 
-                backgroundColor: editingTextBg !== "transparent" ? editingTextBg : "rgba(255,255,255,0.05)", 
-                paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, minWidth: 120 
-              }}>
-                <Text style={{ 
-                  color: editingTextColor, fontSize: 22, fontWeight: editingTextWeight, 
-                  textAlign: editingTextAlign, opacity: editingText ? 1 : 0.4 
-                }}>
-                  {editingText || "Prévia do texto"}
-                </Text>
-              </View>
-            </View>
-
-            <TextInput
-              style={[styles.textToolInput, { color: editingTextColor, fontWeight: editingTextWeight, textAlign: editingTextAlign }]}
-              placeholder="Toque para digitar..."
-              placeholderTextColor="rgba(255,255,255,0.35)"
-              multiline
-              value={editingText}
-              onChangeText={setEditingText}
-              autoFocus
-            />
-
-            <Text style={{ color: "rgba(255,255,255,0.4)", fontSize: 11, textAlign: "center", marginTop: 8 }}>
-              Arraste e use dois dedos para redimensionar na foto
-            </Text>
           </View>
         </View>
       </Modal>
@@ -1496,7 +1571,7 @@ export default function CapturePreview() {
                   </View>
                   <View>
                     <Text style={styles.mentionName}>{user.username}</Text>
-                    {user.display_name && <Text style={styles.mentionSubname}>{user.display_name}</Text>}
+                    {user.full_name && <Text style={styles.mentionSubname}>{user.full_name}</Text>}
                   </View>
                 </TouchableOpacity>
               ))}
@@ -1734,16 +1809,37 @@ const styles = StyleSheet.create({
   sheetDoneText: { color: "#fff", fontWeight: "900", letterSpacing: 0.4 },
   // Tool modals
   toolModalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
+  textComposerBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.78)" },
+  textComposerPreviewShade: { ...StyleSheet.absoluteFillObject as any, backgroundColor: "rgba(0,0,0,0.36)" },
+  textComposerTopBar: { position: "absolute", top: 18, left: 16, right: 16, zIndex: 3, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  textComposerCenter: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", paddingHorizontal: 20, paddingTop: 80, paddingBottom: 170 },
+  textComposerSizeRail: { width: 34, alignItems: "center", justifyContent: "center", marginRight: 8, height: 220 },
+  textComposerSizeTrack: { width: 3, height: 180, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.28)" },
+  textComposerSizeThumb: { position: "absolute", width: 24, height: 24, borderRadius: 999, backgroundColor: "#fff", borderWidth: 2, borderColor: "rgba(0,0,0,0.2)" },
+  textComposerInputWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
+  textComposerInput: { minHeight: 120, fontSize: 28, lineHeight: 36, textAlignVertical: "center", paddingHorizontal: 0, paddingVertical: 0 },
+  textComposerBottomDock: { position: "absolute", left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.96)", borderTopLeftRadius: 26, borderTopRightRadius: 26, paddingTop: 14, paddingHorizontal: 16 },
+  textComposerToolbarRow: { flexDirection: "row", alignItems: "center", marginBottom: 12 },
+  textToolbarIconBtn: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.08)", marginRight: 10 },
+  textToolbarIconBtnActive: { backgroundColor: "rgba(0,149,246,0.24)", borderWidth: 1, borderColor: "rgba(0,149,246,0.8)" },
+  textToolbarIcon: { color: "#fff", fontSize: 18, fontWeight: "800" },
+  textComposerSectionLabel: { color: "rgba(255,255,255,0.45)", fontSize: 11, fontWeight: "700", marginBottom: 6 },
+  textComposerHint: { color: "rgba(255,255,255,0.42)", fontSize: 11, textAlign: "center", marginTop: 2 },
   textToolContainer: { backgroundColor: "#000", paddingTop: 24, paddingHorizontal: 16 },
   textToolHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 },
   textToolHeaderTitle: { color: "#fff", fontSize: 16, fontWeight: "600" },
   textToolHeaderButton: { color: "#0095F6", fontSize: 14, fontWeight: "600" },
   textToolFormattingRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12 },
+  textPresetChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.08)", marginRight: 10 },
+  textPresetChipActive: { backgroundColor: "rgba(0,149,246,0.22)", borderWidth: 1, borderColor: "rgba(0,149,246,0.75)" },
+  textPresetChipText: { color: "#fff", fontSize: 14 },
   textWeightBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.1)" },
   textWeightBtnActive: { backgroundColor: "rgba(0,149,246,0.3)", borderWidth: 1, borderColor: "#0095f6" },
   textWeightBtnText: { color: "#fff", fontSize: 13 },
   textColorDot: { width: 28, height: 28, borderRadius: 99, marginRight: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.2)" },
+  textColorDotActive: { borderWidth: 3, borderColor: "#0095f6", transform: [{ scale: 1.15 }] },
   textBgDot: { width: 28, height: 28, borderRadius: 8, marginRight: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" },
+  textBgDotActive: { borderWidth: 3, borderColor: "#0095f6" },
   textToolInput: { minHeight: 120, fontSize: 22, textAlignVertical: "top", borderRadius: 12, padding: 12 },
   bottomSheet: { backgroundColor: Colors.surface, paddingTop: 8, paddingBottom: 12, paddingHorizontal: 16, borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: height * 0.6 },
   bottomSheetHandle: { alignSelf: "center", width: 40, height: 4, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.28)", marginBottom: 12 },

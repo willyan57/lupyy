@@ -15,6 +15,7 @@ import {
   TouchableOpacity,
   View
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type Mode = "followers" | "following" | "interested";
 
@@ -75,6 +76,7 @@ export default function PeopleListSheet(props: PeopleListSheetProps) {
   } = props;
 
   const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
   const [data, setData] = useState<PersonRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -196,10 +198,10 @@ export default function PeopleListSheet(props: PeopleListSheetProps) {
   const keyExtractor = useCallback((item: PersonRow) => item.follow_id, []);
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose} statusBarTranslucent>
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose} statusBarTranslucent navigationBarTranslucent>
       <Pressable style={s.backdrop} onPress={onClose} />
 
-      <View style={s.sheetContainer}>
+      <View style={[s.sheetContainer, { paddingBottom: Math.max(insets.bottom, 12) }]}> 
         <View style={[s.sheet, { backgroundColor: theme.colors.background }]}>
           {/* ── Handle ── */}
           <View style={s.handleWrap}>
@@ -334,6 +336,7 @@ const s = StyleSheet.create({
     right: 0,
     bottom: 0,
     maxHeight: SHEET_HEIGHT,
+    zIndex: 20,
   },
   sheet: {
     borderTopLeftRadius: 20,

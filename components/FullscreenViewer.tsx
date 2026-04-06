@@ -11,6 +11,8 @@ import {
   Dimensions,
   FlatList,
   Modal,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   Platform,
   Pressable,
   StatusBar,
@@ -60,7 +62,7 @@ type Props = {
 };
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get("window");
-const COMMENT_BAR_HEIGHT = 60;
+const COMMENT_BAR_HEIGHT = 74;
 
 type FilterId = "none" | "warm" | "cool" | "pink" | "gold" | "night";
 
@@ -186,6 +188,7 @@ const ViewerPage = React.memo(function ViewerPage({
   onToggleControls,
   onHideControls,
   onPressUser,
+  themeColor,
 }: {
   item: ViewerItem;
   index: number;
@@ -200,6 +203,7 @@ const ViewerPage = React.memo(function ViewerPage({
   onToggleControls: () => void;
   onHideControls: () => void;
   onPressUser?: () => void;
+  themeColor: string;
 }) {
   const playing = index === current;
   const isVideo = item.media_type === "video";
@@ -244,6 +248,14 @@ const ViewerPage = React.memo(function ViewerPage({
       {/* Bottom dark area behind comment bar */}
       <View style={[styles.commentBarBg, { height: commentBarH }]} />
 
+      {isVideo && controlsVisible && (
+        <View style={[styles.inlineProgressWrap, { bottom: commentBarH + 6 }]}> 
+          <View style={styles.inlineProgressTrack}>
+            <View style={[styles.inlineProgressFill, { backgroundColor: themeColor }]} />
+          </View>
+        </View>
+      )}
+
       {/* Bottom gradient for readability — above comment bar */}
       <LinearGradient
         colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.75)"]}
@@ -261,7 +273,7 @@ const ViewerPage = React.memo(function ViewerPage({
       {controlsVisible && (
         <>
           {/* Side actions — positioned above comment bar */}
-          <View style={[styles.sideActions, { bottom: commentBarH + 20 }]}>
+          <View style={[styles.sideActions, { bottom: commentBarH + 44 }]}>
             <Pressable onPress={onLike} style={styles.sideButton} hitSlop={10}>
               <Ionicons
                 name={counts.liked ? "heart" : "heart-outline"}
@@ -293,7 +305,7 @@ const ViewerPage = React.memo(function ViewerPage({
           </View>
 
           {/* Footer — user info + caption — above comment bar */}
-          <View style={[styles.footer, { bottom: commentBarH + 12 }]}>
+          <View style={[styles.footer, { bottom: commentBarH + 34 }]}> 
             <Pressable style={styles.userRow} onPress={onPressUser}>
               {item.avatar_url ? (
                 <Image
@@ -307,7 +319,7 @@ const ViewerPage = React.memo(function ViewerPage({
                   <Ionicons name="person" size={16} color="rgba(255,255,255,0.6)" />
                 </View>
               )}
-              <TextLite style={styles.username}>{item.username ?? "Usuário"}</TextLite>
+              <TextLite numberOfLines={1} style={styles.username}>{item.username ?? "Usuário"}</TextLite>
             </Pressable>
             {item.caption ? (
               <TextLite numberOfLines={2} style={styles.caption}>
@@ -347,8 +359,10 @@ export default function FullscreenViewer({
   const [fsCommentsOpen, setFsCommentsOpen] = useState(false);
   const [fsCommentsPostId, setFsCommentsPostId] = useState<number | null>(null);
   const [commentText, setCommentText] = useState("");
+  const [loadMoreLocked, setLoadMoreLocked] = useState(false);
 
   const commentBarH = COMMENT_BAR_HEIGHT + Math.max(insets.bottom, 16);
+  const themeColor = "#00C26F";
 
   const data = useMemo(() => items ?? [], [items]);
   const itemCount = data.length;
@@ -491,8 +505,22 @@ export default function FullscreenViewer({
 
   if (!visible) return null;
 
+  const handleScrollEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const offsetY = e.nativeEvent.contentOffset.y || 0;
+    const pageIndex = Math.round(offsetY / SCREEN_H);
+    setCurrent(clampIndex(pageIndex));
+
+    const visibleBottom = offsetY + SCREEN_H * 1.5;
+    const totalHeight = SCREEN_H * itemCount;
+    if (!loadMoreLocked && visibleBottom >= totalHeight) {
+      setLoadMoreLocked(true);
+      onLoadMore?.();
+      setTimeout(() => setLoadMoreLocked(false), 900);
+    }
+  };
+
   return (
-    <Modal visible={visible} onRequestClose={onClose} animationType="fade">
+    <Modal visible={visible} onRequestClose={onClose} animationType="fade" statusBarTranslucent navigationBarTranslucent>
       <View style={styles.container}>
         <StatusBar translucent backgroundColor="#000" barStyle="light-content" />
 
@@ -535,13 +563,15 @@ export default function FullscreenViewer({
             viewabilityConfig={{ itemVisiblePercentThreshold: 60 }}
             initialScrollIndex={Platform.OS === "web" ? initialIndex : undefined}
             getItemLayout={getItemLayout}
-            onMomentumScrollEnd={(e) => {
-              const offsetY = e.nativeEvent.contentOffset.y || 0;
-              const pageIndex = Math.round(offsetY / SCREEN_H);
-              setCurrent(clampIndex(pageIndex));
+            onMomentumScrollEnd={handleScrollEnd}
+            onEndReached={() => {
+              if (!loadMoreLocked) {
+                setLoadMoreLocked(true);
+                onLoadMore?.();
+                setTimeout(() => setLoadMoreLocked(false), 900);
+              }
             }}
-            onEndReached={() => onLoadMore?.()}
-            onEndReachedThreshold={2}
+            onEndReachedThreshold={0.6}
             windowSize={5}
             maxToRenderPerBatch={3}
             removeClippedSubviews={Platform.OS !== "web"}
@@ -561,6 +591,7 @@ export default function FullscreenViewer({
                 onPressUser={() => item.user_id && onPressUser?.(item.user_id)}
                 onToggleControls={toggleControls}
                 onHideControls={onHideControls}
+                themeColor={themeColor}
               />
             )}
           />
@@ -742,6 +773,7 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
+    zIndex: 1,
     overflow: "hidden" as any,
   },
   media: { width: "100%", height: "100%" },
@@ -780,7 +812,7 @@ const styles = StyleSheet.create({
   footer: {
     position: "absolute",
     left: 16,
-    right: 80,
+    right: 92,
     zIndex: 5,
   },
   userRow: {
@@ -811,6 +843,7 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "800",
     fontSize: 15,
+    flexShrink: 1,
     textShadowColor: "rgba(0,0,0,0.5)",
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
@@ -911,6 +944,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#000",
     paddingHorizontal: 12,
     paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.08)",
     ...(Platform.OS === "web" ? { maxWidth: 500, alignSelf: "center" as const, width: "100%" as any } : {}),
   },
   commentInputRow: {
@@ -952,5 +987,22 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.12)",
     alignItems: "center",
     justifyContent: "center",
+  },
+  inlineProgressWrap: {
+    position: "absolute",
+    left: 16,
+    right: 16,
+    zIndex: 6,
+  },
+  inlineProgressTrack: {
+    height: 3,
+    borderRadius: 999,
+    overflow: "hidden",
+    backgroundColor: "rgba(255,255,255,0.14)",
+  },
+  inlineProgressFill: {
+    width: "38%",
+    height: "100%",
+    borderRadius: 999,
   },
 });
