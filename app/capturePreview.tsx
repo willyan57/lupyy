@@ -14,6 +14,7 @@ import type { BeautifyParams } from "@/lib/gl/LutRenderer";
 import LutRenderer from "@/lib/gl/LutRenderer";
 import { OffscreenLutRenderer } from "@/lib/gl/OffscreenLutRenderer";
 import { getFilterShaderParams, getLutForFilter } from "@/lib/gl/filterLuts";
+import { EFFECTS as WEBGL_EFFECTS, type EffectId as WebglEffectId, applyCanvasEffect, getEffectCSSFilter } from "@/lib/gl/webglEffects";
 import { compressImage, prepareVideo } from "@/lib/media";
 import type { FilterId as ExportFilterId } from "@/lib/mediaFilters/applyFilterAndExport";
 import { supabase } from "@/lib/supabase";
@@ -253,6 +254,10 @@ export default function CapturePreview() {
   const [androidPreviewUri, setAndroidPreviewUri] = useState<string | null>(null);
   const androidPreviewKeyRef = useRef<string>("");
 
+  // Capacitor: pre-baked filter preview URI (canvas-rendered, no live CSS filter)
+  const [capacitorPreviewUri, setCapacitorPreviewUri] = useState<string | null>(null);
+  const capacitorPreviewKeyRef = useRef<string>("");
+
   const activeFilter = useMemo(() => FILTERS.find(f => f.id === filter) ?? FILTERS[0], [filter]);
   const filterIndex = useMemo(() => Math.max(0, FILTERS.findIndex(f => f.id === filter)), [filter]);
 
@@ -276,6 +281,8 @@ export default function CapturePreview() {
   const [quickAdjustment, setQuickAdjustment] = useState<"none" | "bright" | "dark" | "punch">("none");
   const [effectsOpen, setEffectsOpen] = useState(false);
   const [showEffectsPanel, setShowEffectsPanel] = useState(false);
+  const [activeWebglEffect, setActiveWebglEffect] = useState<WebglEffectId>("none");
+  const [effectsTab, setEffectsTab] = useState<"filters" | "fx" | "ar">("filters");
 
   // Beautify
   const [showBeautifyPanel, setShowBeautifyPanel] = useState(false);
@@ -440,11 +447,12 @@ export default function CapturePreview() {
   const shouldBakeOnExport = useMemo(() => {
     if (mediaType !== "image") return false;
     if (aiTempUri || filter !== "none" || quickAdjustment !== "none") return true;
+    if (activeWebglEffect !== "none") return true;
     if ((beautifyValues["Suavizar"] ?? 60) !== 60 || (beautifyValues["Contraste"] ?? 60) !== 60) return true;
     if (adjustValues.sharpness !== 0 || adjustValues.temperature !== 0 || adjustValues.vignette !== 0) return true;
     if (adjustValues.grain !== 0 || adjustValues.fade !== 0 || adjustValues.highlights !== 0 || adjustValues.shadows !== 0) return true;
     return false;
-  }, [mediaType, aiTempUri, filter, quickAdjustment, beautifyValues, adjustValues]);
+  }, [mediaType, aiTempUri, filter, quickAdjustment, beautifyValues, adjustValues, activeWebglEffect]);
 
   const bakeImageWithLut = useCallback(
     (bakeUri: string, filterId: ExportFilterId, bParams: BeautifyParams) => {
@@ -549,27 +557,36 @@ export default function CapturePreview() {
     if (!shouldBakeOnExport) return inputUri;
     try {
       if (mediaType === "image") {
+        let bakedUri = inputUri;
+
         if (isAndroidNative && androidPreviewUri && inputUri === effectiveUri) {
-          return androidPreviewUri;
-        }
-        // On web/Capacitor, use canvas-based CSS filter baking (always preferred)
-        if (activeFilter.cssFilter) {
-          // On Capacitor, prefer the stable blob URL for baking to avoid CORS/file access issues
+          bakedUri = androidPreviewUri;
+        } else if (activeFilter.cssFilter) {
           const bakeSource = isCapacitor && stableImageUri ? stableImageUri : inputUri;
           const baked = await bakeWebCssFilter(bakeSource, activeFilter.cssFilter);
-          if (baked && baked !== inputUri) return baked;
-        }
-        // On true native (not web/capacitor), use GLView-based LUT baking
-        if (!isWeb) {
+          if (baked && baked !== inputUri) bakedUri = baked;
+        } else if (!isWeb) {
           const exportFilterId = mapPreviewFilterToExport(filter);
           const baked = await bakeImageWithLut(inputUri, exportFilterId, beautifyParams);
           if (baked && baked !== inputUri) {
             try {
               const info = await FileSystem.getInfoAsync(baked);
-              if (info.exists && (info as any).size > 0) return baked;
+              if (info.exists && (info as any).size > 0) bakedUri = baked;
             } catch {}
           }
         }
+
+        // Apply WebGL effect on top of filter (Canvas 2D — works everywhere)
+        if (activeWebglEffect !== "none" && isWeb) {
+          try {
+            const effectBaked = await applyCanvasEffect(bakedUri, activeWebglEffect, 1.0);
+            if (effectBaked && effectBaked !== bakedUri) bakedUri = effectBaked;
+          } catch (err) {
+            console.log("WebGL effect bake error:", err);
+          }
+        }
+
+        return bakedUri;
       }
       return inputUri;
     } catch {
@@ -616,6 +633,9 @@ export default function CapturePreview() {
     beautifyParams,
     androidPreviewUri,
   ]);
+
+  // Capacitor: no longer needs canvas pre-baking for preview — using live CSS filters on <img> now
+  // The bakeWebCssFilter is still used for EXPORT only (when publishing)
 
   // Effects
   useEffect(() => { setMediaLoaded(false); }, [uri, nonce, mediaType]);
@@ -1072,17 +1092,20 @@ export default function CapturePreview() {
               onReady={() => setMediaLoaded(true)}
             />
           ) : mediaType === "image" ? (
-            isWeb && !isComparing && activeFilter.cssFilter ? (
-              // On web/Capacitor use native <img> tag for CSS filter support
+            isWeb && !isComparing && (activeFilter.cssFilter || activeWebglEffect !== "none") ? (
+              // On web AND Capacitor (APK) use native <img> tag with live CSS filters — instant like Instagram
               <View style={[styles.preview, previewMediaStyle]}>
                 <img
-                  key={`${isCapacitor ? "cap" : previewImageUri}::${nonce}`}
-                  src={isCapacitor && stableImageUri ? stableImageUri : previewImageUri}
+                  key={`${nonce}::stable`}
+                  src={(isCapacitor && stableImageUri) ? stableImageUri : previewImageUri}
                   style={{
                     width: "100%",
                     height: "100%",
                     objectFit: "cover",
-                    filter: activeFilter.cssFilter,
+                    filter: [
+                      activeFilter.cssFilter || "",
+                      getEffectCSSFilter(activeWebglEffect) || "",
+                    ].filter(Boolean).join(" ") || undefined,
                     transform: isFrontCamera ? "scaleX(-1)" : undefined,
                   } as any}
                   onLoad={() => setMediaLoaded(true)}
@@ -1090,17 +1113,35 @@ export default function CapturePreview() {
                 />
               </View>
             ) : (
-              <Image
-                key={`${previewImageUri}::${nonce}::${isComparing ? "orig" : filter}`}
-                source={{ uri: previewImageUri }}
-                style={[
-                  styles.preview,
-                  previewMediaStyle,
-                  isFrontCamera && { transform: [{ scaleX: -1 }] },
-                ].filter(Boolean) as any}
-                resizeMode="cover"
-                onLoadEnd={() => setMediaLoaded(true)}
-              />
+              isWeb ? (
+                // Web/Capacitor without CSS filter (original or comparing) — still use <img> for stability
+                <View style={[styles.preview, previewMediaStyle]}>
+                  <img
+                    key={`${nonce}::nofilter`}
+                    src={(isCapacitor && stableImageUri) ? stableImageUri : previewImageUri}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                      transform: isFrontCamera ? "scaleX(-1)" : undefined,
+                    } as any}
+                    onLoad={() => setMediaLoaded(true)}
+                    onError={() => setMediaLoaded(true)}
+                  />
+                </View>
+              ) : (
+                <Image
+                  key={`${previewImageUri}::${nonce}::${isComparing ? "orig" : filter}`}
+                  source={{ uri: previewImageUri }}
+                  style={[
+                    styles.preview,
+                    previewMediaStyle,
+                    isFrontCamera && { transform: [{ scaleX: -1 }] },
+                  ].filter(Boolean) as any}
+                  resizeMode="cover"
+                  onLoadEnd={() => setMediaLoaded(true)}
+                />
+              )
             )
           ) : (
             <Video
@@ -1215,6 +1256,11 @@ export default function CapturePreview() {
           <View style={styles.topBadge}>
             <Text style={styles.topBadgeText}>{mode === "story" ? "Story" : mode === "reel" ? "Reel" : "Post"}</Text>
           </View>
+          {activeWebglEffect !== "none" && (
+            <View style={[styles.locationBadge, { backgroundColor: "rgba(255,51,85,0.6)" }]}>
+              <Text style={styles.locationBadgeText}>⚡ {WEBGL_EFFECTS.find(e => e.id === activeWebglEffect)?.name ?? activeWebglEffect}</Text>
+            </View>
+          )}
           {selectedLocation && (
             <TouchableOpacity onPress={() => setSelectedLocation(null)} style={styles.locationBadge}>
               <Text style={styles.locationBadgeText}>📍 {selectedLocation}</Text>
@@ -1256,7 +1302,7 @@ export default function CapturePreview() {
           <TouchableOpacity key={tool.key} activeOpacity={0.9} onPress={() => handleToolPress(tool.key)} style={styles.rightToolButton}>
             {!toolsCollapsed && tool.key !== "more" && <Text style={styles.rightToolLabel}>{tool.label}</Text>}
             {!toolsCollapsed && tool.key === "more" && <Text style={styles.rightToolLabel}>{tool.label}</Text>}
-            <View style={[styles.rightToolCircle, (isDrawing && tool.key === "draw") && { backgroundColor: "rgba(255,51,85,0.4)" }]}>
+            <View style={[styles.rightToolCircle, (isDrawing && tool.key === "draw") && { backgroundColor: "rgba(255,51,85,0.4)" }, (showEffectsPanel && tool.key === "effects") && { backgroundColor: "rgba(255,51,85,0.4)" }, (activeWebglEffect !== "none" && tool.key === "effects") && { borderWidth: 2, borderColor: "#ff3355" }]}>
               <Text style={styles.rightToolIcon}>{tool.icon}</Text>
             </View>
           </TouchableOpacity>
@@ -1267,25 +1313,148 @@ export default function CapturePreview() {
 
       {/* Bottom panel */}
       <View style={[styles.bottomPanel, { paddingBottom: insets.bottom + 16 }]}>
-        {/* Effects inline panel — Instagram-style horizontal scroll */}
+        {/* Effects panel — Premium tabbed: Filtros / FX / AR */}
         {showEffectsPanel && (
           <View style={styles.beautifyPanel}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 4, gap: 4 }} style={{ marginBottom: 6 }}>
-              {FILTERS.map(f => {
-                const active = f.id === filter;
-                const thumbBg = f.id === "none" ? "rgba(255,255,255,0.08)" : f.accent + "30";
-                const thumbBorder = active ? (f.accent !== "transparent" ? f.accent : "#fff") : "transparent";
-                return (
-                  <TouchableOpacity key={f.id} activeOpacity={0.85} onPress={() => { setFilter(f.id); setFilterIntensity(1.0); }} style={styles.effectFilterItem}>
-                    <View style={[styles.effectFilterThumb, { backgroundColor: thumbBg, borderColor: thumbBorder, borderWidth: active ? 2.5 : 1, borderStyle: "solid" as any }]}>
-                      {f.id !== "none" && <View style={{ width: 30, height: 30, borderRadius: 99, backgroundColor: f.accent, opacity: 0.7 }} />}
-                      {active && <Text style={[styles.effectFilterCheck, { position: "absolute" }]}>✓</Text>}
-                    </View>
-                    <Text style={[styles.effectFilterName, active && styles.effectFilterNameActive]} numberOfLines={1}>{f.name}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
+            {/* Tab bar */}
+            <View style={{ flexDirection: "row", marginBottom: 10, paddingHorizontal: 4 }}>
+              {([
+                { key: "filters" as const, label: "Filtros", icon: "◑" },
+                { key: "fx" as const, label: "Efeitos", icon: "⚡" },
+                { key: "ar" as const, label: "AR & Make", icon: "✨" },
+              ]).map(tab => (
+                <TouchableOpacity
+                  key={tab.key}
+                  activeOpacity={0.85}
+                  onPress={() => setEffectsTab(tab.key)}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 8,
+                    borderRadius: 999,
+                    backgroundColor: effectsTab === tab.key ? "rgba(255,51,85,0.2)" : "rgba(255,255,255,0.06)",
+                    marginHorizontal: 3,
+                    alignItems: "center",
+                    borderWidth: effectsTab === tab.key ? 1 : 0,
+                    borderColor: "rgba(255,51,85,0.5)",
+                  }}
+                >
+                  <Text style={{ color: effectsTab === tab.key ? "#fff" : "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: "800" }}>
+                    {tab.icon} {tab.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Filters tab */}
+            {effectsTab === "filters" && (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 4, gap: 4 }} style={{ marginBottom: 6 }}>
+                {FILTERS.map(f => {
+                  const active = f.id === filter;
+                  const thumbBg = f.id === "none" ? "rgba(255,255,255,0.08)" : f.accent + "30";
+                  const thumbBorder = active ? (f.accent !== "transparent" ? f.accent : "#fff") : "transparent";
+                  return (
+                    <TouchableOpacity key={f.id} activeOpacity={0.85} onPress={() => { setFilter(f.id); setFilterIntensity(1.0); }} style={styles.effectFilterItem}>
+                      <View style={[styles.effectFilterThumb, { backgroundColor: thumbBg, borderColor: thumbBorder, borderWidth: active ? 2.5 : 1, borderStyle: "solid" as any }]}>
+                        {f.id !== "none" && <View style={{ width: 30, height: 30, borderRadius: 99, backgroundColor: f.accent, opacity: 0.7 }} />}
+                        {active && <Text style={[styles.effectFilterCheck, { position: "absolute" }]}>✓</Text>}
+                      </View>
+                      <Text style={[styles.effectFilterName, active && styles.effectFilterNameActive]} numberOfLines={1}>{f.name}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            )}
+
+            {/* FX tab — WebGL effects */}
+            {effectsTab === "fx" && (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 4, gap: 4 }} style={{ marginBottom: 6 }}>
+                {WEBGL_EFFECTS.map(fx => {
+                  const active = fx.id === activeWebglEffect;
+                  return (
+                    <TouchableOpacity
+                      key={fx.id}
+                      activeOpacity={0.85}
+                      onPress={() => setActiveWebglEffect(active ? "none" : fx.id)}
+                      style={styles.effectFilterItem}
+                    >
+                      <View style={[styles.effectFilterThumb, {
+                        backgroundColor: active ? "rgba(255,51,85,0.15)" : "rgba(255,255,255,0.06)",
+                        borderColor: active ? "#ff3355" : "rgba(255,255,255,0.1)",
+                        borderWidth: active ? 2.5 : 1,
+                      }]}>
+                        <Text style={{ fontSize: 22 }}>{fx.icon}</Text>
+                        {active && <Text style={[styles.effectFilterCheck, { position: "absolute", bottom: 2, right: 2 }]}>✓</Text>}
+                      </View>
+                      <Text style={[styles.effectFilterName, active && styles.effectFilterNameActive]} numberOfLines={1}>{fx.name}</Text>
+                      <Text style={{ color: "rgba(255,255,255,0.35)", fontSize: 8, textAlign: "center" as any }} numberOfLines={1}>{fx.category}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            )}
+
+            {/* AR & Makeup tab */}
+            {effectsTab === "ar" && (
+              <View>
+                <Text style={{ color: "rgba(255,255,255,0.5)", fontSize: 10, fontWeight: "700", marginBottom: 6, paddingHorizontal: 4, letterSpacing: 1 }}>
+                  💄 MAQUIAGEM WebGL — presets profissionais
+                </Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 4, gap: 4 }} style={{ marginBottom: 8 }}>
+                  {[
+                    { id: "none", name: "Nenhum", icon: "⊘", tag: "" },
+                    { id: "makeup_natural_glow", name: "Natural Glow", icon: "🌸", tag: "WebGL" },
+                    { id: "makeup_glam_night", name: "Glam Night", icon: "✨", tag: "WebGL" },
+                    { id: "makeup_soft_pink", name: "Soft Pink", icon: "💗", tag: "WebGL" },
+                    { id: "makeup_bold_red", name: "Bold Red", icon: "💋", tag: "WebGL" },
+                    { id: "makeup_sunset_vibes", name: "Sunset", icon: "🌅", tag: "WebGL" },
+                    { id: "makeup_ice_queen", name: "Ice Queen", icon: "❄️", tag: "WebGL" },
+                  ].map(ar => (
+                    <TouchableOpacity key={ar.id} activeOpacity={0.85} onPress={() => {}}
+                      style={styles.effectFilterItem}>
+                      <View style={[styles.effectFilterThumb, { backgroundColor: "rgba(255,255,255,0.06)", borderColor: ar.tag ? "rgba(0,149,246,0.3)" : "rgba(255,255,255,0.1)", borderWidth: ar.tag ? 1.5 : 1 }]}>
+                        <Text style={{ fontSize: 22 }}>{ar.icon}</Text>
+                      </View>
+                      <Text style={styles.effectFilterName} numberOfLines={1}>{ar.name}</Text>
+                      {ar.tag ? <Text style={{ color: "rgba(0,149,246,0.8)", fontSize: 7, fontWeight: "800" }}>{ar.tag}</Text> : null}
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+
+                <Text style={{ color: "rgba(255,255,255,0.5)", fontSize: 10, fontWeight: "700", marginBottom: 6, paddingHorizontal: 4, letterSpacing: 1 }}>
+                  🎭 AR FACE — efeitos ao vivo na câmera
+                </Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 4, gap: 4 }} style={{ marginBottom: 6 }}>
+                  {[
+                    { id: "makeup_lipstick", name: "Batom", icon: "💄" },
+                    { id: "makeup_blush", name: "Blush", icon: "🌺" },
+                    { id: "makeup_eyeshadow", name: "Sombra", icon: "👁️" },
+                    { id: "makeup_contour", name: "Contorno", icon: "🎭" },
+                    { id: "makeup_full", name: "Make Completa", icon: "💋" },
+                    { id: "beauty_glow", name: "Glow", icon: "✨" },
+                    { id: "neon_outline", name: "Neon Face", icon: "💡" },
+                    { id: "heart_eyes", name: "Heart Eyes", icon: "😍" },
+                    { id: "crown", name: "Coroa", icon: "👑" },
+                    { id: "sunglasses", name: "Óculos", icon: "🕶️" },
+                    { id: "cat_ears", name: "Gato", icon: "🐱" },
+                    { id: "dog_nose", name: "Cachorro", icon: "🐶" },
+                    { id: "angel_halo", name: "Anjo", icon: "😇" },
+                    { id: "sparkles", name: "Brilhos", icon: "⭐" },
+                    { id: "butterfly", name: "Borboleta", icon: "🦋" },
+                  ].map(ar => (
+                    <TouchableOpacity key={ar.id} activeOpacity={0.85} onPress={() => {}}
+                      style={styles.effectFilterItem}>
+                      <View style={[styles.effectFilterThumb, { backgroundColor: "rgba(255,255,255,0.06)", borderColor: "rgba(255,255,255,0.1)", borderWidth: 1 }]}>
+                        <Text style={{ fontSize: 22 }}>{ar.icon}</Text>
+                      </View>
+                      <Text style={styles.effectFilterName} numberOfLines={1}>{ar.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+                <Text style={{ color: "rgba(255,255,255,0.35)", fontSize: 10, textAlign: "center" as any, paddingVertical: 4 }}>
+                  💡 Efeitos AR funcionam ao vivo na câmera — volte à captura para usar
+                </Text>
+              </View>
+            )}
           </View>
         )}
 

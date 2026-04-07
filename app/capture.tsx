@@ -1,4 +1,9 @@
-// app/capture.tsx — Premium Instagram-style Camera with Layout Collage & Video
+// app/capture.tsx — Premium Instagram-style Camera with Layout Collage, Video, Live Filters, AR & Effects
+import FaceAROverlay from "@/components/FaceAROverlay";
+import LiveFilterCarousel, { LIVE_FILTERS, type LiveFilterDef } from "@/components/LiveFilterCarousel";
+import type { AREffectId } from "@/lib/ar/faceDetection";
+import { EFFECTS, getEffectCSSFilter, type EffectId } from "@/lib/gl/webglEffects";
+import { createVideoRecorder, type VideoRecorderInstance } from "@/lib/videoRecorder";
 import { useFocusEffect } from "@react-navigation/native";
 import { CameraType, CameraView, useCameraPermissions } from "expo-camera";
 import { Image } from "expo-image";
@@ -25,6 +30,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const { width: W, height: H } = Dimensions.get("window");
 const isWeb = Platform.OS === "web";
+const isCapacitor = isWeb && (
+  typeof (window as any)?.Capacitor !== "undefined" ||
+  typeof (window as any)?.AndroidBridge !== "undefined" ||
+  document?.URL?.startsWith("http://localhost") ||
+  navigator?.userAgent?.includes("Capacitor")
+);
 
 type CaptureMode = "post" | "story" | "reel";
 type FilterId = "none" | "warm" | "cool" | "night" | "pink" | "gold";
@@ -98,6 +109,22 @@ export default function CaptureScreen() {
   const [loadingCapture, setLoadingCapture] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
   const recordTimerRef = useRef<any>(null);
+
+  // ── Live filter (Instagram-style, applied before capture) ──
+  const [liveFilter, setLiveFilter] = useState<LiveFilterDef>(LIVE_FILTERS[0]);
+  const [showFilterCarousel, setShowFilterCarousel] = useState(true);
+
+  // ── AR Face effects ──
+  const [arEffect, setArEffect] = useState<AREffectId>("none");
+  const [showARPicker, setShowARPicker] = useState(false);
+  const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  // ── WebGL Effects ──
+  const [activeEffect, setActiveEffect] = useState<EffectId>("none");
+  const [showEffectsPicker, setShowEffectsPicker] = useState(false);
+
+  // ── Video Recorder (MediaRecorder API for APK) ──
+  const videoRecorderRef = useRef<VideoRecorderInstance | null>(null);
 
   const [showGrid, setShowGrid] = useState(false);
   const [timerSeconds, setTimerSeconds] = useState(0);
@@ -386,6 +413,9 @@ export default function CaptureScreen() {
             mode,
             filter,
             facing,
+            liveFilter: liveFilter.id !== "none" ? liveFilter.id : undefined,
+            liveFilterCSS: liveFilter.cssFilter !== "none" ? liveFilter.cssFilter : undefined,
+            activeEffect: activeEffect !== "none" ? activeEffect : undefined,
             aspectRatio: "9:16",
             width: previewWidth > 0 ? String(previewWidth) : undefined,
             height: previewHeight > 0 ? String(previewHeight) : undefined,
@@ -402,7 +432,57 @@ export default function CaptureScreen() {
   };
 
   const startRecording = async (maxDuration: number) => {
-    if (!cameraRef.current || recording) return;
+    if (recording) return;
+
+    // On Web/Capacitor: use MediaRecorder API (reliable in WebView)
+    if (isWeb || isCapacitor) {
+      try {
+        setRecording(true);
+        setRecordSeconds(0);
+        Animated.spring(shotScale, { toValue: 1.2, useNativeDriver: true }).start();
+
+        const recorder = await createVideoRecorder({
+          maxDuration,
+          quality: "720p",
+          facingMode: facing === "front" ? "user" : "environment",
+          onStart: () => {},
+          onTick: (s) => setRecordSeconds(s),
+          onComplete: (uri) => {
+            setRecording(false);
+            setRecordSeconds(0);
+            Animated.spring(shotScale, { toValue: 1, useNativeDriver: true }).start();
+            videoRecorderRef.current = null;
+            router.push({
+              pathname: "/capturePreview" as any,
+              params: { uri, mediaType: "video", mode, filter, nonce: String(Date.now()) },
+            });
+          },
+          onError: (err) => {
+            setRecording(false);
+            setRecordSeconds(0);
+            Animated.spring(shotScale, { toValue: 1, useNativeDriver: true }).start();
+            videoRecorderRef.current = null;
+            window.alert(`Erro na gravação: ${err}`);
+          },
+        });
+
+        if (recorder) {
+          videoRecorderRef.current = recorder;
+          recorder.start();
+        } else {
+          setRecording(false);
+          Animated.spring(shotScale, { toValue: 1, useNativeDriver: true }).start();
+        }
+      } catch (err: any) {
+        setRecording(false);
+        Animated.spring(shotScale, { toValue: 1, useNativeDriver: true }).start();
+        window.alert(`Erro: ${err?.message || err}`);
+      }
+      return;
+    }
+
+    // Native: use CameraView.recordAsync
+    if (!cameraRef.current) return;
     try {
       setRecording(true);
       setRecordSeconds(0);
@@ -413,7 +493,7 @@ export default function CaptureScreen() {
 
       const video: any = await cameraRef.current.recordAsync({
         maxDuration,
-        ...(Platform.OS !== "web" ? { quality: "1080p" } : {}),
+        quality: "1080p",
       } as any);
 
       if (video?.uri) {
@@ -424,12 +504,8 @@ export default function CaptureScreen() {
       }
     } catch (err: any) {
       const msg = String(err?.message || err).toLowerCase();
-      if (!msg.includes("stop") && !msg.includes("cancel") && !msg.includes("not supported") && !msg.includes("not available") && !msg.includes("not implemented")) {
-        if (Platform.OS === "web") {
-          window.alert("Não foi possível gravar o vídeo. A gravação de vídeo pode não ser suportada no navegador.");
-        } else {
-          Alert.alert("Erro na gravação", "Não foi possível gravar o vídeo.");
-        }
+      if (!msg.includes("stop") && !msg.includes("cancel") && !msg.includes("not supported")) {
+        Alert.alert("Erro na gravação", "Não foi possível gravar o vídeo.");
       }
     } finally {
       if (recordTimerRef.current) { clearInterval(recordTimerRef.current); recordTimerRef.current = null; }
@@ -440,6 +516,12 @@ export default function CaptureScreen() {
   };
 
   const stopRecording = () => {
+    // Web/Capacitor: use MediaRecorder stop
+    if (videoRecorderRef.current) {
+      videoRecorderRef.current.stop();
+      return;
+    }
+    // Native: use CameraView
     if (cameraRef.current && recording) {
       try { cameraRef.current.stopRecording(); } catch {}
     }
@@ -501,10 +583,20 @@ export default function CaptureScreen() {
 
   const flipRotation = flipAnim.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "90deg"] });
 
+  // Compute combined CSS filter for live preview
+  const liveCSSFilter = (() => {
+    let f = liveFilter.cssFilter !== "none" ? liveFilter.cssFilter : "";
+    const effectCSS = getEffectCSSFilter(activeEffect);
+    if (effectCSS) f = f ? `${f} ${effectCSS}` : effectCSS;
+    return f || undefined;
+  })();
+
   const rightTools = [
     { key: "flash", icon: flashOn ? "⚡" : "⚡︎", label: flashOn ? "On" : "Off", onPress: toggleFlash, active: flashOn },
     { key: "timer", icon: "⏱", label: timerSeconds === 0 ? "Timer" : `${timerSeconds}s`, onPress: cycleTimer, active: timerSeconds > 0 },
     { key: "grid", icon: "⊞", label: "Grid", onPress: toggleGrid, active: showGrid },
+    { key: "effects", icon: "✦", label: "Efeitos", onPress: () => { setShowEffectsPicker(p => !p); setShowARPicker(false); }, active: activeEffect !== "none" },
+    { key: "ar", icon: "😀", label: "AR", onPress: () => { setShowARPicker(p => !p); setShowEffectsPicker(false); }, active: arEffect !== "none" },
     { key: "collage", icon: "⊡", label: "Layout", onPress: () => setShowCollageMenu(p => !p), active: isCollageMode },
   ];
 
@@ -606,6 +698,34 @@ export default function CaptureScreen() {
             mode={isVideoMode ? "video" : "picture"}
             onCameraReady={() => setCameraReady(true)}
           />
+          {/* Live CSS filter overlay on camera (Instagram-style) */}
+          {isWeb && liveCSSFilter && (
+            <div
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                backdropFilter: liveCSSFilter,
+                WebkitBackdropFilter: liveCSSFilter,
+                pointerEvents: "none",
+                zIndex: 2,
+                mixBlendMode: "normal",
+              } as any}
+            />
+          )}
+          {/* AR Face overlay */}
+          {isWeb && arEffect !== "none" && (
+            <FaceAROverlay
+              videoRef={cameraVideoRef}
+              activeEffect={arEffect}
+              onEffectChange={setArEffect}
+              showPicker={false}
+              canvasWidth={cameraWidth}
+              canvasHeight={cameraHeight}
+            />
+          )}
         </Animated.View>
       )}
 
@@ -880,10 +1000,56 @@ export default function CaptureScreen() {
         </TouchableOpacity>
       </Modal>
 
+      {/* ── Effects picker (WebGL effects) ── */}
+      {showEffectsPicker && !isCollageMode && (
+        <View style={styles.effectsPickerOverlay}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 8, gap: 4 }}>
+            {EFFECTS.map(effect => {
+              const isActive = effect.id === activeEffect;
+              return (
+                <TouchableOpacity
+                  key={effect.id}
+                  activeOpacity={0.8}
+                  onPress={() => { setActiveEffect(effect.id); if (effect.id !== "none") setShowEffectsPicker(false); }}
+                  style={[styles.effectPickerItem, isActive && styles.effectPickerItemActive]}
+                >
+                  <Text style={styles.effectPickerIcon}>{effect.icon}</Text>
+                  <Text style={[styles.effectPickerLabel, isActive && { color: "#fff" }]} numberOfLines={1}>{effect.name}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
+
+      {/* ── AR Face effects picker ── */}
+      {showARPicker && !isCollageMode && (
+        <View style={styles.effectsPickerOverlay}>
+          <FaceAROverlay
+            videoRef={cameraVideoRef}
+            activeEffect={arEffect}
+            onEffectChange={(eff) => { setArEffect(eff); if (eff !== "none") setShowARPicker(false); }}
+            showPicker={true}
+            canvasWidth={cameraWidth}
+            canvasHeight={cameraHeight}
+          />
+        </View>
+      )}
+
       {/* Bottom (not in collage mode) */}
       {!isCollageMode && !isPostMode ? (
         <View style={[styles.bottomStory, { paddingBottom: (Platform.OS === "android" ? Math.max(insets.bottom, 18) + 20 : insets.bottom + 10) }]}>
           <LinearGradient colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.8)"]} style={styles.bottomGradientInner} />
+
+          {/* ── Live filter carousel (Instagram-style, before capture) ── */}
+          {!recording && showFilterCarousel && (
+            <View style={{ marginBottom: 8 }}>
+              <LiveFilterCarousel
+                activeFilter={liveFilter.id}
+                onFilterChange={(f) => setLiveFilter(f)}
+              />
+            </View>
+          )}
 
           <View style={styles.captureRow}>
             <TouchableOpacity
@@ -1216,4 +1382,37 @@ const styles = StyleSheet.create({
   permissionText: { color: "#fff", fontSize: 15, textAlign: "center", marginBottom: 20, lineHeight: 22 },
   permissionButton: { borderRadius: 99, overflow: "hidden", backgroundColor: "#3897f0", paddingHorizontal: 24, paddingVertical: 12 },
   permissionButtonText: { color: "#fff", fontWeight: "700", fontSize: 15 },
+
+  // Effects picker overlay
+  effectsPickerOverlay: {
+    position: "absolute",
+    bottom: 200,
+    left: 0,
+    right: 0,
+    zIndex: 15,
+    backgroundColor: "rgba(0,0,0,0.85)",
+    borderRadius: 20,
+    marginHorizontal: 8,
+    paddingVertical: 12,
+  },
+  effectPickerItem: {
+    alignItems: "center",
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    width: 72,
+  },
+  effectPickerItemActive: {
+    backgroundColor: "rgba(255,255,255,0.15)",
+  },
+  effectPickerIcon: {
+    fontSize: 24,
+    marginBottom: 4,
+  },
+  effectPickerLabel: {
+    color: "rgba(255,255,255,0.6)",
+    fontSize: 10,
+    fontWeight: "600",
+    textAlign: "center",
+  },
 });
