@@ -204,14 +204,24 @@ export default function CaptureScreen() {
     })();
   }, []);
 
-  // APK/WebView: prewarm recorder so hold-to-record starts instantly (Instagram-like).
+  // Prewarm MediaRecorder only when the CameraView <video> already has a MediaStream.
+  // Never call getUserMedia here — a second stream freezes/blocks the preview on mobile web & desktop.
   useEffect(() => {
     if (!(isWeb || isCapacitor) || !cameraReady || recording) return;
 
     let cancelled = false;
-    const prewarm = async () => {
-      if (prewarmedRecorderRef.current) return;
+    let attempts = 0;
+    const maxAttempts = 24;
+    let pollId: ReturnType<typeof setInterval> | null = null;
+
+    const tryPrewarm = async () => {
+      if (cancelled || prewarmedRecorderRef.current || recording) return;
       const existingStream = getActiveCameraStream();
+      if (!existingStream) {
+        attempts += 1;
+        return;
+      }
+
       const recorder = await createVideoRecorder({
         maxDuration: mode === "story" ? 30 : 60,
         quality: "720p",
@@ -238,13 +248,29 @@ export default function CaptureScreen() {
           videoRecorderRef.current = null;
         },
       });
-      if (!cancelled && recorder) prewarmedRecorderRef.current = recorder;
+      if (!cancelled && recorder) {
+        prewarmedRecorderRef.current = recorder;
+        if (pollId) {
+          clearInterval(pollId);
+          pollId = null;
+        }
+      }
     };
 
-    const timer = setTimeout(prewarm, 180);
+    const timer = setTimeout(tryPrewarm, 300);
+    pollId = setInterval(() => {
+      if (cancelled || prewarmedRecorderRef.current || attempts >= maxAttempts) {
+        if (pollId) clearInterval(pollId);
+        pollId = null;
+        return;
+      }
+      void tryPrewarm();
+    }, 400);
+
     return () => {
       cancelled = true;
       clearTimeout(timer);
+      if (pollId) clearInterval(pollId);
       if (!recording && prewarmedRecorderRef.current) {
         prewarmedRecorderRef.current.destroy();
         prewarmedRecorderRef.current = null;
