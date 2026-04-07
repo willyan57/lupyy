@@ -336,6 +336,16 @@ export default function CaptureScreen() {
     }
   }, [recording]);
 
+  // Unmount cleanup: must run every render (same order as other hooks) — never place after permission early-returns.
+  useEffect(() => {
+    return () => {
+      if (prewarmedRecorderRef.current) {
+        prewarmedRecorderRef.current.destroy();
+        prewarmedRecorderRef.current = null;
+      }
+    };
+  }, []);
+
   const loadGalleryAssets = async (albumId?: string) => {
     try {
       const opts: MediaLibrary.AssetsOptions = {
@@ -699,15 +709,6 @@ export default function CaptureScreen() {
       try { cameraRef.current.stopRecording(); } catch {}
     }
   };
-
-  useEffect(() => {
-    return () => {
-      if (prewarmedRecorderRef.current) {
-        prewarmedRecorderRef.current.destroy();
-        prewarmedRecorderRef.current = null;
-      }
-    };
-  }, []);
 
   const handleShotPress = () => {
     if (!cameraRef.current || loadingCapture || !cameraReady) return;
