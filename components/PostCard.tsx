@@ -3,7 +3,6 @@ import { Feather, Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import { VideoView, useVideoPlayer } from "expo-video";
 import { memo, useCallback, useEffect, useState } from "react";
 import {
   Platform,
@@ -22,6 +21,7 @@ import Animated, {
   withSequence,
   withTiming,
 } from "react-native-reanimated";
+import { CrossPlatformVideo } from "./CrossPlatformVideo";
 
 export type PostCardProps = {
   id: number | string;
@@ -87,64 +87,12 @@ function _PostCard(props: PostCardProps) {
   const isWeb = Platform.OS === "web";
   const { width: windowWidth } = useWindowDimensions();
 
-  const player = useVideoPlayer(media_url, (p) => {
-    p.loop = true;
-    p.muted = !!muted;
-  });
-
   const [paused, setPaused] = useState(!isVisible);
 
   useEffect(() => {
     if (media_type !== "video") return;
-    if (isVisible) {
-      setPaused(false);
-      player.play();
-    } else {
-      setPaused(true);
-      player.pause();
-    }
-  }, [isVisible, player, media_type]);
-
-  useEffect(() => {
-    if (media_type !== "video") return;
-    if (paused) {
-      player.pause();
-    } else if (isVisible) {
-      player.play();
-    }
-  }, [paused, isVisible, player, media_type]);
-
-  useEffect(() => {
-    if (media_type !== "video") return;
-    try {
-      player.muted = !!muted;
-      // On web, also reach into the underlying <video> element directly
-      // to bypass expo-video's Web Audio API (which CORS blocks)
-      if (Platform.OS === "web") {
-        const videoEl = document.querySelector(`video[src="${media_url}"]`) as HTMLVideoElement | null;
-        if (videoEl) {
-          videoEl.muted = !!muted;
-          videoEl.volume = 1;
-        }
-        // Fallback: try all videos if src doesn't match directly
-        if (!videoEl) {
-          const allVideos = document.querySelectorAll("video");
-          allVideos.forEach((v) => {
-            if (v.currentSrc?.includes(media_url?.split("/").pop() || "__none__")) {
-              v.muted = !!muted;
-              v.volume = 1;
-            }
-          });
-        }
-      }
-    } catch {}
-  }, [muted, player, media_type, media_url]);
-
-  useEffect(() => {
-    return () => {
-      try { player.pause(); } catch {}
-    };
-  }, [player]);
+    setPaused(!isVisible);
+  }, [isVisible, media_type]);
 
   const heartScale = useSharedValue(0);
   const heartOpacity = useSharedValue(0);
@@ -202,7 +150,7 @@ function _PostCard(props: PostCardProps) {
   const composedGesture = Gesture.Exclusive(doubleTap, singleTap);
 
   const likeIconColor = liked ? Colors.brandStart : Colors.text;
-  const shouldShowVideo = media_type === "video" && isVisible && !paused;
+  const shouldRenderVideo = media_type === "video" && isVisible;
 
   const cardStyle = [
     styles.card,
@@ -215,8 +163,15 @@ function _PostCard(props: PostCardProps) {
     <>
       {media_type === "image" ? (
         <Image source={{ uri: media_url }} style={styles.media} contentFit="cover" cachePolicy="disk" />
-      ) : shouldShowVideo ? (
-        <VideoView style={styles.media} player={player} contentFit="cover" />
+      ) : shouldRenderVideo ? (
+        <CrossPlatformVideo
+          uri={media_url}
+          posterUri={thumb_url}
+          style={styles.media}
+          contentFit="cover"
+          playing={!paused}
+          muted={!!muted}
+        />
       ) : thumb_url ? (
         <Image source={{ uri: thumb_url }} style={styles.media} contentFit="cover" cachePolicy="disk" />
       ) : (

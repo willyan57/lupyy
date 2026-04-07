@@ -3,7 +3,6 @@ import { Feather, Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import { VideoView, useVideoPlayer } from "expo-video";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ViewToken } from "react-native";
 import {
@@ -24,6 +23,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import CommentsSheet from "./CommentsSheet";
+import { CrossPlatformVideo } from "./CrossPlatformVideo";
 
 export type ViewerItem = {
   id: string | number;
@@ -95,54 +95,17 @@ const ViewerVideo: React.FC<{ uri: string; playing: boolean }> = React.memo(({
 }) => {
   const [muted, setMuted] = useState(Platform.OS === "web");
 
-  const player = useVideoPlayer(uri, (p) => {
-    p.loop = true;
-    p.muted = Platform.OS === "web";
-    if (playing) p.play();
-  });
-
-  useEffect(() => {
-    if (!player) return;
-    try {
-      player.muted = muted;
-      // Directly access the HTML video element to bypass CORS-blocked Web Audio API
-      if (Platform.OS === "web") {
-        setTimeout(() => {
-          try {
-            const allVideos = document.querySelectorAll("video");
-            allVideos.forEach((v) => {
-              if (v.currentSrc?.includes(uri?.split("/").pop() || "__none__")) {
-                v.muted = muted;
-                v.volume = 1;
-              }
-            });
-          } catch {}
-        }, 50);
-      }
-    } catch {}
-  }, [muted, player, uri]);
-
-  useEffect(() => {
-    if (!player) return;
-    if (playing) {
-      player.play();
-    } else {
-      player.pause();
-    }
-    return () => {
-      try { player.pause(); } catch {}
-    };
-  }, [playing, player]);
-
   const toggleMute = useCallback(() => {
     setMuted((m) => !m);
   }, []);
 
   return (
     <View style={{ width: "100%", height: "100%" }}>
-      <VideoView
+      <CrossPlatformVideo
+        uri={uri}
+        playing={playing}
+        muted={muted}
         style={styles.media}
-        player={player}
         contentFit="cover"
         allowsFullscreen={false}
         allowsPictureInPicture={false}
