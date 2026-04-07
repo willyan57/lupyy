@@ -62,6 +62,20 @@ const isNativeApp = !isWeb; // true React Native
 const supportsAdvancedImageTuning = !isAndroidNative && !isCapacitor;
 const previewHeight = isWeb ? height * 0.85 : height;
 
+/** Convert a URI to a stable blob URL for Capacitor where file:// URIs can become invalid on re-render */
+async function toStableBlobUrl(uri: string): Promise<string> {
+  if (!uri) return uri;
+  // Already a data URL or blob URL — stable enough
+  if (uri.startsWith("data:") || uri.startsWith("blob:")) return uri;
+  try {
+    const resp = await fetch(uri);
+    const blob = await resp.blob();
+    return URL.createObjectURL(blob);
+  } catch {
+    return uri;
+  }
+}
+
 type CaptureMode = "post" | "story" | "reel";
 type FilterId = "none" | "face_enhance" | "studio_glow" | "cartoon_soft" | "bw_art" | "soft_skin_ig" | "clean_portrait" | "cinematic_gold" | "blue_teal_2026" | "pastel_dream" | "tokyo_night" | "desert_warm" | "vintage_film" | "sakura" | "neon_glow" | "miami_vibes" | "deep_contrast" | "moody_forest" | "winter_lowsat" | "summer_pop" | "aqua_fresh" | "pink_rose" | "sepia_clean" | "urban_grit" | "cream_tone";
 type ExtendedBeautifyParams = BeautifyParams & {
@@ -314,6 +328,26 @@ export default function CapturePreview() {
     hasNormalizedDimensions ? { width: normalizedWidthParam, height: normalizedHeightParam } : null
   );
 
+  // Capacitor: convert image URI to stable blob URL to prevent black screen on filter changes
+  const [stableImageUri, setStableImageUri] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isCapacitor || mediaType !== "image" || !effectiveUri) {
+      setStableImageUri(null);
+      return;
+    }
+    let cancelled = false;
+    toStableBlobUrl(effectiveUri).then((blobUrl) => {
+      if (!cancelled) setStableImageUri(blobUrl);
+    });
+    return () => {
+      cancelled = true;
+      // Revoke old blob URL to prevent memory leaks
+      if (stableImageUri && stableImageUri.startsWith("blob:")) {
+        try { URL.revokeObjectURL(stableImageUri); } catch {}
+      }
+    };
+  }, [effectiveUri, mediaType]);
+
   useEffect(() => {
     setMediaDimensions(hasNormalizedDimensions ? { width: normalizedWidthParam, height: normalizedHeightParam } : null);
   }, [hasNormalizedDimensions, normalizedWidthParam, normalizedHeightParam]);
@@ -520,7 +554,9 @@ export default function CapturePreview() {
         }
         // On web/Capacitor, use canvas-based CSS filter baking (always preferred)
         if (activeFilter.cssFilter) {
-          const baked = await bakeWebCssFilter(inputUri, activeFilter.cssFilter);
+          // On Capacitor, prefer the stable blob URL for baking to avoid CORS/file access issues
+          const bakeSource = isCapacitor && stableImageUri ? stableImageUri : inputUri;
+          const baked = await bakeWebCssFilter(bakeSource, activeFilter.cssFilter);
           if (baked && baked !== inputUri) return baked;
         }
         // On true native (not web/capacitor), use GLView-based LUT baking
@@ -1040,8 +1076,8 @@ export default function CapturePreview() {
               // On web/Capacitor use native <img> tag for CSS filter support
               <View style={[styles.preview, previewMediaStyle]}>
                 <img
-                  key={`${previewImageUri}::${nonce}::${filter}`}
-                  src={previewImageUri}
+                  key={`${isCapacitor ? "cap" : previewImageUri}::${nonce}`}
+                  src={isCapacitor && stableImageUri ? stableImageUri : previewImageUri}
                   style={{
                     width: "100%",
                     height: "100%",

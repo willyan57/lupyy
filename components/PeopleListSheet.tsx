@@ -61,8 +61,13 @@ function isCommitted(status?: string | null) {
   return status === "committed" || status === "other";
 }
 
-const SCREEN_HEIGHT = Dimensions.get("window").height;
-const SHEET_HEIGHT = Math.min(SCREEN_HEIGHT * 0.82, 720);
+// Use dynamic height that works reliably across web, mobile web, and Capacitor (APK)
+function getSheetHeight() {
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    return Math.min(window.innerHeight * 0.82, 720);
+  }
+  return Math.min(Dimensions.get("window").height * 0.82, 720);
+}
 
 export default function PeopleListSheet(props: PeopleListSheetProps) {
   const {
@@ -77,11 +82,19 @@ export default function PeopleListSheet(props: PeopleListSheetProps) {
 
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
+  const [sheetHeight, setSheetHeight] = useState(() => getSheetHeight());
   const [data, setData] = useState<PersonRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const searchRef = useRef<TextInput>(null);
+
+  // Recalculate height on mount and when visible changes (handles Capacitor viewport)
+  useEffect(() => {
+    if (visible) {
+      setSheetHeight(getSheetHeight());
+    }
+  }, [visible]);
 
   const title = useMemo(() => getTitle(mode, isOwnProfile), [mode, isOwnProfile]);
   const isCrushBlocked = mode === "interested" && isCommitted(myRelationshipStatus);
@@ -198,11 +211,12 @@ export default function PeopleListSheet(props: PeopleListSheetProps) {
   const keyExtractor = useCallback((item: PersonRow) => item.follow_id, []);
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose} statusBarTranslucent navigationBarTranslucent>
-      <Pressable style={s.backdrop} onPress={onClose} />
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose} statusBarTranslucent>
+      <View style={s.modalRoot}>
+        <Pressable style={s.backdrop} onPress={onClose} />
 
-      <View style={[s.sheetContainer, { paddingBottom: Math.max(insets.bottom, 12) }]}> 
-        <View style={[s.sheet, { backgroundColor: theme.colors.background }]}>
+        <View style={[s.sheetContainer, { maxHeight: sheetHeight, paddingBottom: Math.max(insets.bottom, 12) }]}> 
+          <View style={[s.sheet, { backgroundColor: theme.colors.background, maxHeight: sheetHeight }]}>
           {/* ── Handle ── */}
           <View style={s.handleWrap}>
             <View style={[s.handle, { backgroundColor: theme.colors.border }]} />
@@ -319,6 +333,7 @@ export default function PeopleListSheet(props: PeopleListSheetProps) {
               )}
             </View>
           )}
+          </View>
         </View>
       </View>
     </Modal>
@@ -326,23 +341,22 @@ export default function PeopleListSheet(props: PeopleListSheetProps) {
 }
 
 const s = StyleSheet.create({
-  backdrop: {
+  modalRoot: {
     flex: 1,
+    justifyContent: "flex-end",
+  },
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0,0,0,0.5)",
   },
   sheetContainer: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    maxHeight: SHEET_HEIGHT,
+    width: "100%",
     zIndex: 20,
   },
   sheet: {
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     overflow: "hidden",
-    maxHeight: SHEET_HEIGHT,
     ...Platform.select({
       web: {
         boxShadow: "0 -4px 30px rgba(0,0,0,0.3)",

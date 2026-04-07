@@ -245,14 +245,6 @@ const ViewerPage = React.memo(function ViewerPage({
       {/* Bottom dark area behind comment bar */}
       <View style={[styles.commentBarBg, { height: commentBarH }]} />
 
-      {isVideo && controlsVisible && (
-        <View style={[styles.inlineProgressWrap, { bottom: commentBarH + 6 }]}> 
-          <View style={styles.inlineProgressTrack}>
-            <View style={[styles.inlineProgressFill, { backgroundColor: themeColor }]} />
-          </View>
-        </View>
-      )}
-
       {/* Bottom gradient for readability — above comment bar */}
       <LinearGradient
         colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.75)"]}
@@ -984,22 +976,5 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.12)",
     alignItems: "center",
     justifyContent: "center",
-  },
-  inlineProgressWrap: {
-    position: "absolute",
-    left: 16,
-    right: 16,
-    zIndex: 6,
-  },
-  inlineProgressTrack: {
-    height: 3,
-    borderRadius: 999,
-    overflow: "hidden",
-    backgroundColor: "rgba(255,255,255,0.14)",
-  },
-  inlineProgressFill: {
-    width: "38%",
-    height: "100%",
-    borderRadius: 999,
   },
 });
