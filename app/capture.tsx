@@ -1,6 +1,6 @@
 // app/capture.tsx — Premium Instagram-style Camera with Layout Collage, Video, Live Filters, AR & Effects
 import FaceAROverlay from "@/components/FaceAROverlay";
-import LiveFilterCarousel, { LIVE_FILTERS, type LiveFilterDef } from "@/components/LiveFilterCarousel";
+import { LIVE_FILTERS, type LiveFilterDef } from "@/components/LiveFilterCarousel";
 import type { AREffectId } from "@/lib/ar/faceDetection";
 import { EFFECTS, getEffectCSSFilter, type EffectId } from "@/lib/gl/webglEffects";
 import { createVideoRecorder, type VideoRecorderInstance } from "@/lib/videoRecorder";
@@ -112,7 +112,7 @@ export default function CaptureScreen() {
 
   // ── Live filter (Instagram-style, applied before capture) ──
   const [liveFilter, setLiveFilter] = useState<LiveFilterDef>(LIVE_FILTERS[0]);
-  const [showFilterCarousel, setShowFilterCarousel] = useState(true);
+  const [showLiveFiltersPicker, setShowLiveFiltersPicker] = useState(false);
 
   // ── AR Face effects ──
   const [arEffect, setArEffect] = useState<AREffectId>("none");
@@ -590,13 +590,20 @@ export default function CaptureScreen() {
     if (effectCSS) f = f ? `${f} ${effectCSS}` : effectCSS;
     return f || undefined;
   })();
+  const liveCameraWebFilterStyle = isWeb && liveCSSFilter
+    ? ({ filter: liveCSSFilter, WebkitFilter: liveCSSFilter } as any)
+    : undefined;
+  const liveTintOverlay = liveFilter.id !== "none"
+    ? (liveFilter.accent || "rgba(255,255,255,0.18)")
+    : undefined;
 
   const rightTools = [
     { key: "flash", icon: flashOn ? "⚡" : "⚡︎", label: flashOn ? "On" : "Off", onPress: toggleFlash, active: flashOn },
     { key: "timer", icon: "⏱", label: timerSeconds === 0 ? "Timer" : `${timerSeconds}s`, onPress: cycleTimer, active: timerSeconds > 0 },
     { key: "grid", icon: "⊞", label: "Grid", onPress: toggleGrid, active: showGrid },
-    { key: "effects", icon: "✦", label: "Efeitos", onPress: () => { setShowEffectsPicker(p => !p); setShowARPicker(false); }, active: activeEffect !== "none" },
-    { key: "ar", icon: "😀", label: "AR", onPress: () => { setShowARPicker(p => !p); setShowEffectsPicker(false); }, active: arEffect !== "none" },
+    { key: "filters", icon: "◑", label: "Filtros", onPress: () => { setShowLiveFiltersPicker(p => !p); setShowEffectsPicker(false); setShowARPicker(false); }, active: liveFilter.id !== "none" },
+    { key: "effects", icon: "✦", label: "Efeitos", onPress: () => { setShowEffectsPicker(p => !p); setShowARPicker(false); setShowLiveFiltersPicker(false); }, active: activeEffect !== "none" },
+    { key: "ar", icon: "😀", label: "AR", onPress: () => { setShowARPicker(p => !p); setShowEffectsPicker(false); setShowLiveFiltersPicker(false); }, active: arEffect !== "none" },
     { key: "collage", icon: "⊡", label: "Layout", onPress: () => setShowCollageMenu(p => !p), active: isCollageMode },
   ];
 
@@ -687,32 +694,26 @@ export default function CaptureScreen() {
               alignSelf: "center",
               transform: [{ rotateY: flipRotation }],
             },
+            liveCameraWebFilterStyle,
           ]}
         >
           <CameraView
             key={`cam-${cameraKey}`}
             ref={(ref: any) => { cameraRef.current = ref; }}
-            style={StyleSheet.absoluteFill}
+            style={[StyleSheet.absoluteFill, liveCameraWebFilterStyle]}
             facing={facing}
             enableTorch={flashOn && facing === "back"}
             mode={isVideoMode ? "video" : "picture"}
             onCameraReady={() => setCameraReady(true)}
           />
-          {/* Live CSS filter overlay on camera (Instagram-style) */}
-          {isWeb && liveCSSFilter && (
-            <div
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                backdropFilter: liveCSSFilter,
-                WebkitBackdropFilter: liveCSSFilter,
-                pointerEvents: "none",
-                zIndex: 2,
-                mixBlendMode: "normal",
-              } as any}
+          {/* Fallback tint for APK WebView where CSS filter may be ignored */}
+          {isWeb && liveTintOverlay && (
+            <View
+              pointerEvents="none"
+              style={[
+                StyleSheet.absoluteFill,
+                { backgroundColor: liveTintOverlay, opacity: 0.08, zIndex: 2 },
+              ]}
             />
           )}
           {/* AR Face overlay */}
@@ -1001,6 +1002,46 @@ export default function CaptureScreen() {
       </Modal>
 
       {/* ── Effects picker (WebGL effects) ── */}
+      {showLiveFiltersPicker && !isCollageMode && (
+        <View style={styles.effectsPickerOverlay}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 8, gap: 4 }}>
+            {LIVE_FILTERS.map(f => {
+              const isActive = f.id === liveFilter.id;
+              const thumbCss = f.cssFilter && f.cssFilter !== "none" ? f.cssFilter : undefined;
+              return (
+                <TouchableOpacity
+                  key={f.id}
+                  activeOpacity={0.8}
+                  onPress={() => { setLiveFilter(f); if (f.id !== "none") setShowLiveFiltersPicker(false); }}
+                  style={[styles.effectPickerItem, isActive && styles.effectPickerItemActive]}
+                >
+                  <View style={styles.liveFilterThumb}>
+                    <LinearGradient
+                      colors={["#222", "#666", "#b9a58f"]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={[
+                        styles.liveFilterThumbBase,
+                        isWeb && thumbCss ? ({ filter: thumbCss, WebkitFilter: thumbCss } as any) : null,
+                      ]}
+                    />
+                    <View style={styles.liveFilterThumbShine} />
+                    <View style={[styles.liveFilterThumbAccent, { backgroundColor: f.accent || "rgba(255,255,255,0.25)" }]} />
+                    {f.id === "none" && (
+                      <View style={styles.liveFilterThumbNone}>
+                        <Text style={styles.liveFilterThumbNoneText}>N</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={[styles.effectPickerLabel, isActive && { color: "#fff" }]} numberOfLines={1}>{f.name}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
+
+      {/* ── Effects picker (WebGL effects) ── */}
       {showEffectsPicker && !isCollageMode && (
         <View style={styles.effectsPickerOverlay}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 8, gap: 4 }}>
@@ -1040,16 +1081,6 @@ export default function CaptureScreen() {
       {!isCollageMode && !isPostMode ? (
         <View style={[styles.bottomStory, { paddingBottom: (Platform.OS === "android" ? Math.max(insets.bottom, 18) + 20 : insets.bottom + 10) }]}>
           <LinearGradient colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.8)"]} style={styles.bottomGradientInner} />
-
-          {/* ── Live filter carousel (Instagram-style, before capture) ── */}
-          {!recording && showFilterCarousel && (
-            <View style={{ marginBottom: 8 }}>
-              <LiveFilterCarousel
-                activeFilter={liveFilter.id}
-                onFilterChange={(f) => setLiveFilter(f)}
-              />
-            </View>
-          )}
 
           <View style={styles.captureRow}>
             <TouchableOpacity
@@ -1414,5 +1445,49 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "600",
     textAlign: "center",
+  },
+  liveFilterThumb: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    marginBottom: 6,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.38)",
+    backgroundColor: "rgba(255,255,255,0.1)",
+  },
+  liveFilterThumbBase: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  liveFilterThumbShine: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: "42%",
+    backgroundColor: "rgba(255,255,255,0.18)",
+  },
+  liveFilterThumbAccent: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: "34%",
+    opacity: 0.45,
+  },
+  liveFilterThumbNone: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.22)",
+  },
+  liveFilterThumbNoneText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "800",
   },
 });

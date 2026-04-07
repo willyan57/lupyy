@@ -222,6 +222,10 @@ export default function CapturePreview() {
     const raw = String(params.filter ?? "none");
     return (FILTERS.some(f => f.id === raw) ? raw as FilterId : "none");
   }, [params.filter]);
+  const incomingLiveFilterCss = useMemo(() => {
+    const raw = String(params.liveFilterCSS ?? "");
+    return raw && raw !== "none" ? raw : "";
+  }, [params.liveFilterCSS]);
 
   const [filter, setFilter] = useState<FilterId>(initialFilter);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -259,6 +263,10 @@ export default function CapturePreview() {
   const capacitorPreviewKeyRef = useRef<string>("");
 
   const activeFilter = useMemo(() => FILTERS.find(f => f.id === filter) ?? FILTERS[0], [filter]);
+  const effectiveCaptureCssFilter = useMemo(() => {
+    // Preserve capture-time live filter in preview/export until user picks a preview filter.
+    return filter === "none" ? incomingLiveFilterCss : "";
+  }, [filter, incomingLiveFilterCss]);
   const filterIndex = useMemo(() => Math.max(0, FILTERS.findIndex(f => f.id === filter)), [filter]);
 
   const transition = useRef(new Animated.Value(1)).current;
@@ -446,13 +454,13 @@ export default function CapturePreview() {
 
   const shouldBakeOnExport = useMemo(() => {
     if (mediaType !== "image") return false;
-    if (aiTempUri || filter !== "none" || quickAdjustment !== "none") return true;
+    if (aiTempUri || filter !== "none" || quickAdjustment !== "none" || !!effectiveCaptureCssFilter) return true;
     if (activeWebglEffect !== "none") return true;
     if ((beautifyValues["Suavizar"] ?? 60) !== 60 || (beautifyValues["Contraste"] ?? 60) !== 60) return true;
     if (adjustValues.sharpness !== 0 || adjustValues.temperature !== 0 || adjustValues.vignette !== 0) return true;
     if (adjustValues.grain !== 0 || adjustValues.fade !== 0 || adjustValues.highlights !== 0 || adjustValues.shadows !== 0) return true;
     return false;
-  }, [mediaType, aiTempUri, filter, quickAdjustment, beautifyValues, adjustValues, activeWebglEffect]);
+  }, [mediaType, aiTempUri, filter, quickAdjustment, beautifyValues, adjustValues, activeWebglEffect, effectiveCaptureCssFilter]);
 
   const bakeImageWithLut = useCallback(
     (bakeUri: string, filterId: ExportFilterId, bParams: BeautifyParams) => {
@@ -561,9 +569,10 @@ export default function CapturePreview() {
 
         if (isAndroidNative && androidPreviewUri && inputUri === effectiveUri) {
           bakedUri = androidPreviewUri;
-        } else if (activeFilter.cssFilter) {
+        } else if (activeFilter.cssFilter || effectiveCaptureCssFilter) {
           const bakeSource = isCapacitor && stableImageUri ? stableImageUri : inputUri;
-          const baked = await bakeWebCssFilter(bakeSource, activeFilter.cssFilter);
+          const combinedCss = [effectiveCaptureCssFilter, activeFilter.cssFilter].filter(Boolean).join(" ").trim();
+          const baked = await bakeWebCssFilter(bakeSource, combinedCss);
           if (baked && baked !== inputUri) bakedUri = baked;
         } else if (!isWeb) {
           const exportFilterId = mapPreviewFilterToExport(filter);
@@ -1092,7 +1101,7 @@ export default function CapturePreview() {
               onReady={() => setMediaLoaded(true)}
             />
           ) : mediaType === "image" ? (
-            isWeb && !isComparing && (activeFilter.cssFilter || activeWebglEffect !== "none") ? (
+            isWeb && !isComparing && (activeFilter.cssFilter || effectiveCaptureCssFilter || activeWebglEffect !== "none") ? (
               // On web AND Capacitor (APK) use native <img> tag with live CSS filters — instant like Instagram
               <View style={[styles.preview, previewMediaStyle]}>
                 <img
@@ -1103,6 +1112,7 @@ export default function CapturePreview() {
                     height: "100%",
                     objectFit: "cover",
                     filter: [
+                      effectiveCaptureCssFilter || "",
                       activeFilter.cssFilter || "",
                       getEffectCSSFilter(activeWebglEffect) || "",
                     ].filter(Boolean).join(" ") || undefined,
