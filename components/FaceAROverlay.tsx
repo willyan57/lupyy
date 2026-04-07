@@ -50,10 +50,19 @@ export default function FaceAROverlay({
     if (!isEffectActive) return;
 
     const detect = async () => {
-      if (!videoRef.current || !isEffectActive) return;
+      if (!isEffectActive) return;
+      const videoEl = videoRef.current;
+      if (!videoEl || videoEl.readyState < 2) {
+        if (isEffectActive) {
+          detectTimeoutRef.current = setTimeout(() => {
+            animFrameRef.current = requestAnimationFrame(detect);
+          }, 180);
+        }
+        return;
+      }
 
       try {
-        const faces = await detectFaces(videoRef.current);
+        const faces = await detectFaces(videoEl);
         facesRef.current = faces;
         setFaceDetected(faces.length > 0);
       } catch {

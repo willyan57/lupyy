@@ -181,6 +181,37 @@ export default function CaptureScreen() {
     })();
   }, []);
 
+  // Web/APK: bind the actual camera <video> element for AR detection.
+  useEffect(() => {
+    if (!isWeb || arEffect === "none") {
+      cameraVideoRef.current = null;
+      return;
+    }
+
+    let cancelled = false;
+    const bindVideo = () => {
+      if (cancelled) return;
+      try {
+        const videos = Array.from(document.querySelectorAll("video")) as HTMLVideoElement[];
+        if (!videos.length) return;
+        const best = videos
+          .map((v) => ({
+            el: v,
+            area: (v.videoWidth || v.clientWidth || 0) * (v.videoHeight || v.clientHeight || 0),
+          }))
+          .sort((a, b) => b.area - a.area)[0]?.el;
+        if (best) cameraVideoRef.current = best;
+      } catch {}
+    };
+
+    bindVideo();
+    const interval = setInterval(bindVideo, 450);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [arEffect, cameraKey]);
+
   // Initialize collage photos array when layout changes
   useEffect(() => {
     if (isCollageMode) {
@@ -1065,7 +1096,7 @@ export default function CaptureScreen() {
 
       {/* ── AR Face effects picker ── */}
       {showARPicker && !isCollageMode && (
-        <View style={styles.effectsPickerOverlay}>
+        <View style={styles.arPickerOverlay}>
           <FaceAROverlay
             videoRef={cameraVideoRef}
             activeEffect={arEffect}
@@ -1425,6 +1456,13 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     marginHorizontal: 8,
     paddingVertical: 12,
+  },
+  arPickerOverlay: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 178,
+    zIndex: 15,
   },
   effectPickerItem: {
     alignItems: "center",
