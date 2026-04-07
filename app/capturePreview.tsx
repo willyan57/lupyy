@@ -17,6 +17,7 @@ import { getFilterShaderParams, getLutForFilter } from "@/lib/gl/filterLuts";
 import { EFFECTS as WEBGL_EFFECTS, type EffectId as WebglEffectId, applyCanvasEffect, getEffectCSSFilter } from "@/lib/gl/webglEffects";
 import { compressImage, prepareVideo } from "@/lib/media";
 import type { FilterId as ExportFilterId } from "@/lib/mediaFilters/applyFilterAndExport";
+import { clearCollageDraft, readCollageDraft } from "@/lib/captureDraftStore";
 import { supabase } from "@/lib/supabase";
 import { ResizeMode, Video } from "expo-av";
 import { BlurView } from "expo-blur";
@@ -88,6 +89,12 @@ type TextOverlay = {
   id: string; text: string; color: string; fontSize: number;
   fontWeight: "400" | "700" | "900"; align: "left" | "center" | "right";
   x: number; y: number; bg?: string;
+};
+type TaggedUserOverlay = {
+  id: string;
+  username: string;
+  x: number;
+  y: number;
 };
 
 type DrawPath = { d: string; color: string; width: number };
@@ -180,6 +187,11 @@ export default function CapturePreview() {
   const mode = useMemo(() => String(params.mode ?? "post") as CaptureMode, [params.mode]);
   const nonce = useMemo(() => String(params.nonce ?? ""), [params.nonce]);
   const collageUris = useMemo(() => {
+    const draftId = String(params.collageDraftId ?? "");
+    if (draftId) {
+      const draftUris = readCollageDraft(draftId).filter((item): item is string => typeof item === "string" && !!item);
+      if (draftUris.length > 0) return draftUris;
+    }
     const raw = params.collageUris;
     if (typeof raw !== "string") return [] as string[];
     try {
@@ -188,7 +200,9 @@ export default function CapturePreview() {
     } catch {
       return [] as string[];
     }
-  }, [params.collageUris]);
+  }, [params.collageDraftId, params.collageUris]);
+  const [collagePreviewIndex, setCollagePreviewIndex] = useState(0);
+  const hasCollagePreview = mediaType === "image" && collageUris.length > 1;
   const facing = useMemo(() => String(params.facing ?? "back"), [params.facing]);
   const isFrontCamera = facing === "front";
   const cameFromCamera = facing === "front" || facing === "back";
@@ -241,6 +255,8 @@ export default function CapturePreview() {
 
   // Compare
   const [isComparing, setIsComparing] = useState(false);
+  const [showTagOverlays, setShowTagOverlays] = useState(true);
+  const tagOpacity = useRef(new Animated.Value(1)).current;
 
   // GL debounce — increased to prevent flicker
   const [debouncedBeautifyParams, setDebouncedBeautifyParams] = useState<ExtendedBeautifyParams | null>(null);
@@ -323,12 +339,14 @@ export default function CapturePreview() {
   const [editingTextBg, setEditingTextBg] = useState("transparent");
   const [editingTextWeight, setEditingTextWeight] = useState<"400" | "700" | "900">("700");
   const [editingTextAlign, setEditingTextAlign] = useState<"left" | "center" | "right">("center");
+  const [editingTextSize, setEditingTextSize] = useState(32);
   const textGestureStateRef = useRef<Record<string, { startX: number; startY: number; startFontSize: number; startPageX: number; startPageY: number; startDistance: number }>>({});
 
   // Mention
   const [mentionQuery, setMentionQuery] = useState("");
   const [mentionResults, setMentionResults] = useState<any[]>([]);
-  const [taggedUsers, setTaggedUsers] = useState<{ id: string; username: string }[]>([]);
+  const [taggedUsers, setTaggedUsers] = useState<TaggedUserOverlay[]>([]);
+  const taggedGestureStateRef = useRef<Record<string, { startX: number; startY: number; startPageX: number; startPageY: number }>>({});
 
   // Location
   const [locationQuery, setLocationQuery] = useState("");
@@ -570,7 +588,7 @@ export default function CapturePreview() {
         if (isAndroidNative && androidPreviewUri && inputUri === effectiveUri) {
           bakedUri = androidPreviewUri;
         } else if (activeFilter.cssFilter || effectiveCaptureCssFilter) {
-          const bakeSource = isCapacitor && stableImageUri ? stableImageUri : inputUri;
+          const bakeSource = isCapacitor && stableImageUri && inputUri === effectiveUri ? stableImageUri : inputUri;
           const combinedCss = [effectiveCaptureCssFilter, activeFilter.cssFilter].filter(Boolean).join(" ").trim();
           const baked = await bakeWebCssFilter(bakeSource, combinedCss);
           if (baked && baked !== inputUri) bakedUri = baked;
@@ -853,6 +871,8 @@ export default function CapturePreview() {
       }
 
       setSending(false);
+      const draftId = String(params.collageDraftId ?? "");
+      if (draftId) clearCollageDraft(draftId);
       router.replace("/feed");
     } catch (err) {
       console.log("Post error:", err);
@@ -924,7 +944,7 @@ export default function CapturePreview() {
     if (!editingText.trim()) return;
     setTextOverlays(prev => [...prev, {
       id: String(Date.now()), text: editingText, color: editingTextColor,
-      fontSize: 24, fontWeight: editingTextWeight, align: editingTextAlign,
+      fontSize: editingTextSize, fontWeight: editingTextWeight, align: editingTextAlign,
       x: width / 2 - 80, y: height * 0.3, bg: editingTextBg !== "transparent" ? editingTextBg : undefined,
     }]);
     setEditingText("");
@@ -933,7 +953,12 @@ export default function CapturePreview() {
 
   const addTaggedUser = (user: any) => {
     if (taggedUsers.find(t => t.id === user.id)) return;
-    setTaggedUsers(prev => [...prev, { id: user.id, username: user.username }]);
+    setTaggedUsers(prev => [...prev, {
+      id: user.id,
+      username: user.username,
+      x: width * 0.28 + (prev.length % 2) * 70,
+      y: height * 0.32 + Math.min(prev.length, 3) * 38,
+    }]);
     setCaption(prev => prev + (prev ? " " : "") + `@${user.username}`);
     setActiveToolSheet(null);
   };
@@ -1046,6 +1071,16 @@ export default function CapturePreview() {
     setActiveToolSheet(prev => prev === key ? null : key as any);
   };
 
+  const toggleTagVisibility = () => {
+    const next = !showTagOverlays;
+    setShowTagOverlays(next);
+    Animated.timing(tagOpacity, {
+      toValue: next ? 1 : 0,
+      duration: 180,
+      useNativeDriver: true,
+    }).start();
+  };
+
   function getBeautifyIcon(option: string) {
     const icons: Record<string, string> = { "Ativado": "✨", "Suavizar": "💧", "Contraste": "☀️", "Dente": "😁", "Base": "🧴", "Batom": "💄", "Sombra": "👁️", "Blush": "🌸", "Contorno": "🎭" };
     return icons[option] || "●";
@@ -1053,6 +1088,8 @@ export default function CapturePreview() {
 
   const sliderFillWidth = sliderAnimValue.interpolate({ inputRange: [0, 1], outputRange: ["0%", "100%"] });
   const sliderThumbLeft = sliderAnimValue.interpolate({ inputRange: [0, 1], outputRange: ["0%", "100%"] });
+  const textSizeRatio = (editingTextSize - 18) / (72 - 18);
+  const textSizeThumbTop = (1 - clamp(textSizeRatio, 0, 1)) * 180;
 
   const adjustTrackWidthRef = useRef(width - 36 - 60);
 
@@ -1088,10 +1125,11 @@ export default function CapturePreview() {
         style={styles.previewStage}
         onPressIn={() => { if (needsGlPreview || filter !== "none") setIsComparing(true); }}
         onPressOut={() => setIsComparing(false)}
+        onPress={toggleTagVisibility}
         {...(isDrawing ? drawPanResponder.panHandlers : {})}
       >
         <View style={styles.previewAbsolute}>
-          {isPreparingImage ? null : mediaType === "image" && needsGlPreview && !isComparing ? (
+          {isPreparingImage ? null : mediaType === "image" && needsGlPreview && !isComparing && !hasCollagePreview ? (
             <LutRenderer
               sourceUri={effectiveUri}
               lut={previewLutSource}
@@ -1101,6 +1139,47 @@ export default function CapturePreview() {
               onReady={() => setMediaLoaded(true)}
             />
           ) : mediaType === "image" ? (
+            hasCollagePreview ? (
+              <View style={[styles.preview, previewMediaStyle]}>
+                <FlatList
+                  data={collageUris}
+                  keyExtractor={(item, idx) => `${item}-${idx}`}
+                  horizontal
+                  pagingEnabled
+                  showsHorizontalScrollIndicator={false}
+                  onMomentumScrollEnd={(e) => {
+                    const idx = Math.round((e.nativeEvent.contentOffset.x || 0) / width);
+                    setCollagePreviewIndex(Math.max(0, Math.min(collageUris.length - 1, idx)));
+                  }}
+                  renderItem={({ item }) => (
+                    isWeb ? (
+                      <View style={{ width, height: previewHeight }}>
+                        <img
+                          src={item}
+                          style={{
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover",
+                            filter: !isComparing
+                              ? [effectiveCaptureCssFilter || "", activeFilter.cssFilter || "", getEffectCSSFilter(activeWebglEffect) || ""].filter(Boolean).join(" ") || undefined
+                              : undefined,
+                          } as any}
+                          onLoad={() => setMediaLoaded(true)}
+                          onError={() => setMediaLoaded(true)}
+                        />
+                      </View>
+                    ) : (
+                      <Image
+                        source={{ uri: item }}
+                        style={{ width, height: previewHeight }}
+                        resizeMode="cover"
+                        onLoadEnd={() => setMediaLoaded(true)}
+                      />
+                    )
+                  )}
+                />
+              </View>
+            ) : (
             isWeb && !isComparing && (activeFilter.cssFilter || effectiveCaptureCssFilter || activeWebglEffect !== "none") ? (
               // On web AND Capacitor (APK) use native <img> tag with live CSS filters — instant like Instagram
               <View style={[styles.preview, previewMediaStyle]}>
@@ -1152,7 +1231,7 @@ export default function CapturePreview() {
                   onLoadEnd={() => setMediaLoaded(true)}
                 />
               )
-            )
+            ))
           ) : (
             <Video
               key={`${uri}::${nonce}`}
@@ -1219,10 +1298,64 @@ export default function CapturePreview() {
           </View>
         ))}
 
+        {/* Tagged people overlays — draggable pins */}
+        {taggedUsers.map((u) => (
+          <Animated.View
+            key={`tag-${u.id}`}
+            style={[styles.tagOverlayItem, { left: u.x, top: u.y, opacity: tagOpacity }]}
+            pointerEvents={showTagOverlays ? "auto" : "none"}
+            onStartShouldSetResponder={() => !isDrawing}
+            onMoveShouldSetResponder={() => !isDrawing}
+            onResponderGrant={(e) => {
+              taggedGestureStateRef.current[u.id] = {
+                startX: u.x,
+                startY: u.y,
+                startPageX: e.nativeEvent.pageX,
+                startPageY: e.nativeEvent.pageY,
+              };
+            }}
+            onResponderMove={(e) => {
+              const gs = taggedGestureStateRef.current[u.id];
+              if (!gs) return;
+              const dx = e.nativeEvent.pageX - gs.startPageX;
+              const dy = e.nativeEvent.pageY - gs.startPageY;
+              const maxX = width - 150;
+              const maxY = previewHeight - 50;
+              setTaggedUsers(prev => prev.map(item =>
+                item.id === u.id
+                  ? { ...item, x: clamp(gs.startX + dx, 8, maxX), y: clamp(gs.startY + dy, 20, maxY) }
+                  : item
+              ));
+            }}
+            onResponderRelease={() => { delete taggedGestureStateRef.current[u.id]; }}
+          >
+            <View style={styles.tagOverlayDot} />
+            <Text style={styles.tagOverlayText}>@{u.username}</Text>
+            <TouchableOpacity
+              style={styles.tagOverlayRemove}
+              onPress={() => setTaggedUsers(prev => prev.filter(p => p.id !== u.id))}
+            >
+              <Text style={styles.tagOverlayRemoveText}>✕</Text>
+            </TouchableOpacity>
+          </Animated.View>
+        ))}
+
         {isComparing && (
           <View style={styles.comparingLabel}><Text style={styles.comparingLabelText}>Original</Text></View>
         )}
       </Pressable>
+      {hasCollagePreview && (
+        <View style={styles.collageCounterBadge}>
+          <Text style={styles.collageCounterText}>{collagePreviewIndex + 1}/{collageUris.length}</Text>
+        </View>
+      )}
+      {taggedUsers.length > 0 && (
+        <View pointerEvents="none" style={styles.tagHintBadge}>
+          <Text style={styles.tagHintBadgeText}>
+            {showTagOverlays ? "Toque para ocultar tags" : "Toque para mostrar tags"}
+          </Text>
+        </View>
+      )}
 
       {/* Visual overlays */}
       {!needsGlPreview && prevOverlay && (
@@ -1312,8 +1445,21 @@ export default function CapturePreview() {
           <TouchableOpacity key={tool.key} activeOpacity={0.9} onPress={() => handleToolPress(tool.key)} style={styles.rightToolButton}>
             {!toolsCollapsed && tool.key !== "more" && <Text style={styles.rightToolLabel}>{tool.label}</Text>}
             {!toolsCollapsed && tool.key === "more" && <Text style={styles.rightToolLabel}>{tool.label}</Text>}
-            <View style={[styles.rightToolCircle, (isDrawing && tool.key === "draw") && { backgroundColor: "rgba(255,51,85,0.4)" }, (showEffectsPanel && tool.key === "effects") && { backgroundColor: "rgba(255,51,85,0.4)" }, (activeWebglEffect !== "none" && tool.key === "effects") && { borderWidth: 2, borderColor: "#ff3355" }]}>
+            <View style={[
+              styles.rightToolCircle,
+              (isDrawing && tool.key === "draw") && { backgroundColor: "rgba(255,51,85,0.4)" },
+              (showEffectsPanel && tool.key === "effects") && { backgroundColor: "rgba(255,51,85,0.4)" },
+              (activeWebglEffect !== "none" && tool.key === "effects") && { borderWidth: 2, borderColor: "#ff3355" },
+              (tool.key === "mention" && taggedUsers.length > 0) && { borderWidth: 2, borderColor: "#0095f6" },
+              (tool.key === "text" && textOverlays.length > 0) && { borderWidth: 2, borderColor: "#00c853" },
+            ]}>
               <Text style={styles.rightToolIcon}>{tool.icon}</Text>
+              {tool.key === "mention" && taggedUsers.length > 0 && (
+                <View style={styles.toolBadge}><Text style={styles.toolBadgeText}>{taggedUsers.length}</Text></View>
+              )}
+              {tool.key === "text" && textOverlays.length > 0 && (
+                <View style={[styles.toolBadge, { backgroundColor: "#00c853" }]}><Text style={styles.toolBadgeText}>{textOverlays.length}</Text></View>
+              )}
             </View>
           </TouchableOpacity>
         ))}
@@ -1603,6 +1749,20 @@ export default function CapturePreview() {
             multiline
           />
         </View>
+        {(taggedUsers.length > 0 || textOverlays.length > 0) && (
+          <View style={styles.appliedRow}>
+            {taggedUsers.length > 0 && (
+              <View style={styles.appliedChip}>
+                <Text style={styles.appliedChipText}>@ {taggedUsers.length} pessoa(s) marcada(s)</Text>
+              </View>
+            )}
+            {textOverlays.length > 0 && (
+              <View style={[styles.appliedChip, { backgroundColor: "rgba(0,200,83,0.18)", borderColor: "rgba(0,200,83,0.45)" }]}>
+                <Text style={styles.appliedChipText}>Aa {textOverlays.length} texto(s)</Text>
+              </View>
+            )}
+          </View>
+        )}
 
         {/* Audience + send */}
         <View style={styles.audienceRow}>
@@ -1653,8 +1813,23 @@ export default function CapturePreview() {
 
             <View style={styles.textComposerCenter}>
               <View style={styles.textComposerSizeRail}>
-                <View style={styles.textComposerSizeTrack} />
-                <View style={[styles.textComposerSizeThumb, { top: `${100 - clamp((((editingText.match(/\n/g)?.length ?? 0) + 1) * 12 + 24 - 18) / 72 * 100, 0, 100)}%` }]} />
+                <View
+                  style={styles.textComposerSizeTrack}
+                  onStartShouldSetResponder={() => true}
+                  onMoveShouldSetResponder={() => true}
+                  onResponderGrant={(e) => {
+                    const y = e.nativeEvent.locationY;
+                    const ratio = 1 - clamp(y / 180, 0, 1);
+                    setEditingTextSize(Math.round(18 + ratio * (72 - 18)));
+                  }}
+                  onResponderMove={(e) => {
+                    const y = e.nativeEvent.locationY;
+                    const ratio = 1 - clamp(y / 180, 0, 1);
+                    setEditingTextSize(Math.round(18 + ratio * (72 - 18)));
+                  }}
+                />
+                <View style={[styles.textComposerSizeThumb, { top: textSizeThumbTop }]} />
+                <Text style={styles.textSizeValue}>{editingTextSize}</Text>
               </View>
 
               <View style={styles.textComposerInputWrap}>
@@ -1673,6 +1848,8 @@ export default function CapturePreview() {
                         color: editingTextColor,
                         fontWeight: editingTextWeight,
                         textAlign: editingTextAlign,
+                        fontSize: editingTextSize,
+                        lineHeight: Math.round(editingTextSize * 1.28),
                         backgroundColor: "transparent",
                       },
                     ]}
@@ -1788,6 +1965,9 @@ export default function CapturePreview() {
                     <Text style={styles.mentionName}>{user.username}</Text>
                     {user.full_name && <Text style={styles.mentionSubname}>{user.full_name}</Text>}
                   </View>
+                  {taggedUsers.some(t => t.id === user.id) && (
+                    <View style={styles.mentionAddedBadge}><Text style={styles.mentionAddedBadgeText}>Marcado</Text></View>
+                  )}
                 </TouchableOpacity>
               ))}
               {mentionQuery.length >= 2 && mentionResults.length === 0 && (
@@ -1922,6 +2102,8 @@ const styles = StyleSheet.create({
   previewAbsolute: { position: "absolute", top: 0, left: 0, width, height: previewHeight },
   comparingLabel: { position: "absolute", top: "50%" as any, alignSelf: "center", paddingHorizontal: 20, paddingVertical: 10, borderRadius: 999, backgroundColor: "rgba(0,0,0,0.6)" },
   comparingLabelText: { color: "#fff", fontWeight: "900", fontSize: 14 },
+  collageCounterBadge: { position: "absolute", top: 76, right: 16, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, backgroundColor: "rgba(0,0,0,0.6)", borderWidth: 1, borderColor: "rgba(255,255,255,0.15)" },
+  collageCounterText: { color: "#fff", fontSize: 12, fontWeight: "800" },
   preview: { width, height: previewHeight },
   videoPreview: { width, height: previewHeight },
   loadingOverlay: { ...StyleSheet.absoluteFillObject as any, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.55)" },
@@ -1947,6 +2129,8 @@ const styles = StyleSheet.create({
   rightToolCircle: { width: 40, height: 40, borderRadius: 999, backgroundColor: "rgba(0,0,0,0.65)", alignItems: "center", justifyContent: "center", marginLeft: 8 },
   rightToolIcon: { color: "#fff", fontSize: 18, fontWeight: "800" },
   rightToolLabel: { color: "#fff", fontSize: 13, fontWeight: "700" },
+  toolBadge: { position: "absolute", top: -5, right: -5, minWidth: 16, height: 16, borderRadius: 10, backgroundColor: "#0095f6", alignItems: "center", justifyContent: "center", paddingHorizontal: 3 },
+  toolBadgeText: { color: "#fff", fontSize: 9, fontWeight: "900" },
   // Drawing
   drawToolbar: { position: "absolute", top: 80, left: 16, right: 60, zIndex: 20, backgroundColor: "rgba(0,0,0,0.8)", borderRadius: 16, padding: 10 },
   drawColorRow: { flexDirection: "row", gap: 8, marginBottom: 8, justifyContent: "center" },
@@ -1959,6 +2143,53 @@ const styles = StyleSheet.create({
   drawUndoBtnText: { color: "#fff", fontSize: 16, fontWeight: "700" },
   // Text overlays
   textOverlayItem: { position: "absolute", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, maxWidth: width * 0.7 },
+  tagOverlayItem: {
+    position: "absolute",
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.62)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.22)",
+    borderRadius: 999,
+    paddingLeft: 8,
+    paddingRight: 8,
+    height: 32,
+    maxWidth: 150,
+  },
+  tagOverlayDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: "#0095f6",
+    marginRight: 6,
+  },
+  tagOverlayText: { color: "#fff", fontSize: 12, fontWeight: "800", maxWidth: 92 },
+  tagOverlayRemove: {
+    marginLeft: 6,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.18)",
+  },
+  tagOverlayRemoveText: { color: "#fff", fontSize: 10, fontWeight: "900" },
+  tagHintBadge: {
+    position: "absolute",
+    top: height * 0.56,
+    alignSelf: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: "rgba(0,0,0,0.52)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+  },
+  tagHintBadgeText: {
+    color: "rgba(255,255,255,0.86)",
+    fontSize: 11,
+    fontWeight: "700",
+  },
   // Intensity
   intensityBar: { position: "absolute", bottom: 220, left: 18, right: 18, backgroundColor: "rgba(0,0,0,0.6)", borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10 },
   intensityLabel: { color: "#fff", fontSize: 12, fontWeight: "600", textAlign: "center", marginBottom: 6 },
@@ -1977,6 +2208,9 @@ const styles = StyleSheet.create({
   quickAdjustTextActive: { color: "#fff" },
   legendRow: { borderRadius: 18, backgroundColor: "rgba(0,0,0,0.6)", paddingHorizontal: 14, paddingVertical: 8, marginBottom: 10 },
   legendInput: { color: "#fff", fontSize: 14, maxHeight: 70 },
+  appliedRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 10 },
+  appliedChip: { paddingHorizontal: 12, height: 30, borderRadius: 999, backgroundColor: "rgba(0,149,246,0.18)", borderWidth: 1, borderColor: "rgba(0,149,246,0.45)", alignItems: "center", justifyContent: "center" },
+  appliedChipText: { color: "#fff", fontSize: 11, fontWeight: "700" },
   audienceRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   audienceChip: { flex: 1, height: 40, borderRadius: 999, backgroundColor: "#fff", alignItems: "center", justifyContent: "center", marginRight: 8 },
   audienceChipText: { color: "#000", fontWeight: "800", fontSize: 13 },
@@ -2031,6 +2265,7 @@ const styles = StyleSheet.create({
   textComposerSizeRail: { width: 34, alignItems: "center", justifyContent: "center", marginRight: 8, height: 220 },
   textComposerSizeTrack: { width: 3, height: 180, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.28)" },
   textComposerSizeThumb: { position: "absolute", width: 24, height: 24, borderRadius: 999, backgroundColor: "#fff", borderWidth: 2, borderColor: "rgba(0,0,0,0.2)" },
+  textSizeValue: { color: "#fff", fontSize: 10, fontWeight: "700", marginTop: 192, opacity: 0.75 },
   textComposerInputWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
   textComposerInput: { minHeight: 120, fontSize: 28, lineHeight: 36, textAlignVertical: "center", paddingHorizontal: 0, paddingVertical: 0 },
   textComposerBottomDock: { position: "absolute", left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.96)", borderTopLeftRadius: 26, borderTopRightRadius: 26, paddingTop: 14, paddingHorizontal: 16 },
@@ -2078,6 +2313,8 @@ const styles = StyleSheet.create({
   mentionAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.15)", marginRight: 10 },
   mentionName: { color: Colors.text, fontSize: 14, fontWeight: "600" },
   mentionSubname: { color: "rgba(255,255,255,0.5)", fontSize: 12 },
+  mentionAddedBadge: { marginLeft: "auto", paddingHorizontal: 8, height: 24, borderRadius: 999, backgroundColor: "rgba(0,149,246,0.18)", borderWidth: 1, borderColor: "rgba(0,149,246,0.5)", alignItems: "center", justifyContent: "center" },
+  mentionAddedBadgeText: { color: "#fff", fontSize: 10, fontWeight: "800" },
   mentionEmpty: { color: "rgba(255,255,255,0.4)", fontSize: 13, textAlign: "center", marginTop: 20 },
   taggedRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 10 },
   taggedChip: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(0,149,246,0.2)", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },

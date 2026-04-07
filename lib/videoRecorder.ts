@@ -17,6 +17,8 @@ export type VideoRecorderOptions = {
   onComplete?: (uri: string) => void;
   /** Called on error */
   onError?: (error: string) => void;
+  /** Reuse existing camera stream when available (APK/WebView safer) */
+  existingStream?: MediaStream | null;
 };
 
 export type VideoRecorderInstance = {
@@ -45,6 +47,7 @@ export async function createVideoRecorder(
     onTick,
     onComplete,
     onError,
+    existingStream,
   } = options;
 
   // Check browser support
@@ -58,6 +61,20 @@ export async function createVideoRecorder(
     return null;
   }
 
+  // Reuse existing active camera stream when possible (avoids camera-in-use errors on WebView/APK)
+  let stream: MediaStream | null = null;
+  if (existingStream && existingStream.getVideoTracks().length > 0) {
+    try {
+      stream = new MediaStream(existingStream.getVideoTracks());
+      const audioTracks = existingStream.getAudioTracks();
+      if (audioTracks.length > 0) {
+        stream.addTrack(audioTracks[0]);
+      }
+    } catch {
+      stream = null;
+    }
+  }
+
   // Get camera stream
   const constraints: MediaStreamConstraints = {
     video: {
@@ -68,19 +85,20 @@ export async function createVideoRecorder(
     audio: true,
   };
 
-  let stream: MediaStream;
-  try {
-    stream = await navigator.mediaDevices.getUserMedia(constraints);
-  } catch (err: any) {
-    // Try without audio
+  if (!stream) {
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: constraints.video,
-        audio: false,
-      });
-    } catch (err2: any) {
-      onError?.(`Não foi possível acessar a câmera: ${err2.message || err2}`);
-      return null;
+      stream = await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (err: any) {
+      // Try without audio
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: constraints.video,
+          audio: false,
+        });
+      } catch (err2: any) {
+        onError?.(`Não foi possível acessar a câmera: ${err2.message || err2}`);
+        return null;
+      }
     }
   }
 
@@ -316,14 +334,23 @@ export function recordFromStream(
 }
 
 function getSupportedMimeType(): string | null {
+  const isCapacitorLike =
+    typeof window !== "undefined" &&
+    (
+      typeof (window as any)?.Capacitor !== "undefined" ||
+      typeof (window as any)?.AndroidBridge !== "undefined" ||
+      document?.URL?.startsWith("http://localhost") ||
+      navigator?.userAgent?.includes("Capacitor")
+    );
   const candidates = [
+    // APK/WebView: MP4 is usually the most reliable for record/playback/upload
+    ...(isCapacitorLike ? ["video/mp4;codecs=h264,aac", "video/mp4"] : []),
     "video/webm;codecs=vp9,opus",
     "video/webm;codecs=vp8,opus",
     "video/webm;codecs=vp9",
     "video/webm;codecs=vp8",
     "video/webm",
-    "video/mp4;codecs=h264,aac",
-    "video/mp4",
+    ...(isCapacitorLike ? [] : ["video/mp4;codecs=h264,aac", "video/mp4"]),
   ];
   for (const mime of candidates) {
     if (MediaRecorder.isTypeSupported(mime)) return mime;

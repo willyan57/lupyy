@@ -4,6 +4,7 @@ import { LIVE_FILTERS, type LiveFilterDef } from "@/components/LiveFilterCarouse
 import type { AREffectId } from "@/lib/ar/faceDetection";
 import { EFFECTS, getEffectCSSFilter, type EffectId } from "@/lib/gl/webglEffects";
 import { createVideoRecorder, type VideoRecorderInstance } from "@/lib/videoRecorder";
+import { saveCollageDraft } from "@/lib/captureDraftStore";
 import { useFocusEffect } from "@react-navigation/native";
 import { CameraType, CameraView, useCameraPermissions } from "expo-camera";
 import { Image } from "expo-image";
@@ -26,6 +27,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import DraggableFlatList, { RenderItemParams } from "react-native-draggable-flatlist";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const { width: W, height: H } = Dimensions.get("window");
@@ -106,6 +108,7 @@ export default function CaptureScreen() {
   const [mode, setMode] = useState<CaptureMode>("story");
   const [filter] = useState<FilterId>("none");
   const [recording, setRecording] = useState(false);
+  const [recordLocked, setRecordLocked] = useState(false);
   const [loadingCapture, setLoadingCapture] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
   const recordTimerRef = useRef<any>(null);
@@ -125,6 +128,7 @@ export default function CaptureScreen() {
 
   // ── Video Recorder (MediaRecorder API for APK) ──
   const videoRecorderRef = useRef<VideoRecorderInstance | null>(null);
+  const prewarmedRecorderRef = useRef<VideoRecorderInstance | null>(null);
 
   const [showGrid, setShowGrid] = useState(false);
   const [timerSeconds, setTimerSeconds] = useState(0);
@@ -136,6 +140,8 @@ export default function CaptureScreen() {
   const [showCollageMenu, setShowCollageMenu] = useState(false);
   const [activeSlot, setActiveSlot] = useState<number | null>(null); // which slot is being filled
   const [slotActionModal, setSlotActionModal] = useState<number | null>(null); // show camera/gallery picker for slot
+  const [showCollageConfirm, setShowCollageConfirm] = useState(false);
+  const [collageConfirmUris, setCollageConfirmUris] = useState<string[]>([]);
   const isCollageMode = collageLayout !== "none";
   const collageConfig = COLLAGE_CONFIGS[collageLayout];
 
@@ -157,6 +163,23 @@ export default function CaptureScreen() {
   const recordPulse = useRef(new Animated.Value(1)).current;
 
   const cameraRef = useRef<any>(null);
+
+  const getActiveCameraStream = useCallback((): MediaStream | null => {
+    if (!isWeb) return null;
+    try {
+      const videos = Array.from(document.querySelectorAll("video")) as HTMLVideoElement[];
+      const bestVideo = videos
+        .map((v) => ({
+          el: v,
+          area: (v.videoWidth || v.clientWidth || 0) * (v.videoHeight || v.clientHeight || 0),
+        }))
+        .sort((a, b) => b.area - a.area)[0]?.el;
+      const srcObj = bestVideo?.srcObject;
+      return srcObj instanceof MediaStream ? srcObj : null;
+    } catch {
+      return null;
+    }
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -180,6 +203,54 @@ export default function CaptureScreen() {
       }
     })();
   }, []);
+
+  // APK/WebView: prewarm recorder so hold-to-record starts instantly (Instagram-like).
+  useEffect(() => {
+    if (!(isWeb || isCapacitor) || !cameraReady || recording) return;
+
+    let cancelled = false;
+    const prewarm = async () => {
+      if (prewarmedRecorderRef.current) return;
+      const existingStream = getActiveCameraStream();
+      const recorder = await createVideoRecorder({
+        maxDuration: mode === "story" ? 30 : 60,
+        quality: "720p",
+        facingMode: facing === "front" ? "user" : "environment",
+        existingStream,
+        onStart: () => {},
+        onTick: (s) => setRecordSeconds(s),
+        onComplete: (uri) => {
+          setRecording(false);
+          setRecordLocked(false);
+          setRecordSeconds(0);
+          Animated.spring(shotScale, { toValue: 1, useNativeDriver: true }).start();
+          videoRecorderRef.current = null;
+          router.push({
+            pathname: "/capturePreview" as any,
+            params: { uri, mediaType: "video", mode, filter, nonce: String(Date.now()) },
+          });
+        },
+        onError: () => {
+          setRecording(false);
+          setRecordLocked(false);
+          setRecordSeconds(0);
+          Animated.spring(shotScale, { toValue: 1, useNativeDriver: true }).start();
+          videoRecorderRef.current = null;
+        },
+      });
+      if (!cancelled && recorder) prewarmedRecorderRef.current = recorder;
+    };
+
+    const timer = setTimeout(prewarm, 180);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      if (!recording && prewarmedRecorderRef.current) {
+        prewarmedRecorderRef.current.destroy();
+        prewarmedRecorderRef.current = null;
+      }
+    };
+  }, [cameraReady, facing, mode, recording, getActiveCameraStream, router, filter, shotScale]);
 
   // Web/APK: bind the actual camera <video> element for AR detection.
   useEffect(() => {
@@ -324,9 +395,29 @@ export default function CaptureScreen() {
 
   /* ── Capture a photo for a collage slot (via camera) ── */
   const captureForSlot = async (slotIndex: number) => {
-    // On web/Capacitor, camera capture for hidden views often fails
-    // Fall back to gallery picker
-    if (isWeb || !cameraRef.current || !cameraReady) {
+    // Web/APK: prefer device camera picker for reliable "tirar na hora"
+    if (isWeb) {
+      try {
+        const result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          quality: 1,
+          allowsEditing: false,
+        });
+        if (!result.canceled && result.assets?.[0]?.uri) {
+          const newPhotos = [...collagePhotos];
+          newPhotos[slotIndex] = result.assets[0].uri;
+          setCollagePhotos(newPhotos);
+          const nextEmpty = newPhotos.findIndex((p) => !p);
+          setSlotActionModal(nextEmpty >= 0 ? nextEmpty : null);
+        } else {
+          setSlotActionModal(null);
+        }
+      } catch {
+        pickGalleryForSlot(slotIndex);
+      }
+      return;
+    }
+    if (!cameraRef.current || !cameraReady) {
       pickGalleryForSlot(slotIndex);
       return;
     }
@@ -350,6 +441,8 @@ export default function CaptureScreen() {
         const newPhotos = [...collagePhotos];
         newPhotos[slotIndex] = finalUri;
         setCollagePhotos(newPhotos);
+        const nextEmpty = newPhotos.findIndex((p) => !p);
+        if (nextEmpty >= 0) setSlotActionModal(nextEmpty);
       }
     } catch {
       // If camera fails, fall back to gallery
@@ -372,6 +465,9 @@ export default function CaptureScreen() {
         const newPhotos = [...collagePhotos];
         newPhotos[slotIndex] = result.assets[0].uri;
         setCollagePhotos(newPhotos);
+        const nextEmpty = newPhotos.findIndex((p) => !p);
+        setSlotActionModal(nextEmpty >= 0 ? nextEmpty : null);
+        return;
       }
     } catch {}
     setSlotActionModal(null);
@@ -382,12 +478,19 @@ export default function CaptureScreen() {
 
   const handleCollageNext = () => {
     if (!collageAllFilled) return;
-    const uris = collagePhotos.filter(Boolean) as string[];
+    setCollageConfirmUris(collagePhotos.filter(Boolean) as string[]);
+    setShowCollageConfirm(true);
+  };
+
+  const confirmCollageAndProceed = () => {
+    const uris = collageConfirmUris.length > 0 ? collageConfirmUris : (collagePhotos.filter(Boolean) as string[]);
+    if (!uris.length) return;
+    const collageDraftId = saveCollageDraft(uris);
     router.push({
       pathname: "/capturePreview" as any,
       params: {
         uri: uris[0],
-        collageUris: JSON.stringify(uris),
+        collageDraftId,
         collageLayout,
         mediaType: "image",
         mode,
@@ -397,6 +500,7 @@ export default function CaptureScreen() {
       },
     });
     setCollagePhotos(new Array(collageConfig.slots.length).fill(null));
+    setShowCollageConfirm(false);
   };
 
   const executeCapture = async () => {
@@ -472,14 +576,24 @@ export default function CaptureScreen() {
         setRecordSeconds(0);
         Animated.spring(shotScale, { toValue: 1.2, useNativeDriver: true }).start();
 
+        if (prewarmedRecorderRef.current) {
+          videoRecorderRef.current = prewarmedRecorderRef.current;
+          prewarmedRecorderRef.current.start();
+          return;
+        }
+
+        const existingStream = getActiveCameraStream();
+
         const recorder = await createVideoRecorder({
           maxDuration,
           quality: "720p",
           facingMode: facing === "front" ? "user" : "environment",
+          existingStream,
           onStart: () => {},
           onTick: (s) => setRecordSeconds(s),
           onComplete: (uri) => {
             setRecording(false);
+            setRecordLocked(false);
             setRecordSeconds(0);
             Animated.spring(shotScale, { toValue: 1, useNativeDriver: true }).start();
             videoRecorderRef.current = null;
@@ -490,10 +604,11 @@ export default function CaptureScreen() {
           },
           onError: (err) => {
             setRecording(false);
+            setRecordLocked(false);
             setRecordSeconds(0);
             Animated.spring(shotScale, { toValue: 1, useNativeDriver: true }).start();
             videoRecorderRef.current = null;
-            window.alert(`Erro na gravação: ${err}`);
+            Alert.alert("Erro na gravação", String(err || "Não foi possível gravar no APK."));
           },
         });
 
@@ -507,7 +622,7 @@ export default function CaptureScreen() {
       } catch (err: any) {
         setRecording(false);
         Animated.spring(shotScale, { toValue: 1, useNativeDriver: true }).start();
-        window.alert(`Erro: ${err?.message || err}`);
+        Alert.alert("Erro", String(err?.message || err || "Falha ao iniciar gravação"));
       }
       return;
     }
@@ -541,6 +656,7 @@ export default function CaptureScreen() {
     } finally {
       if (recordTimerRef.current) { clearInterval(recordTimerRef.current); recordTimerRef.current = null; }
       setRecording(false);
+      setRecordLocked(false);
       setRecordSeconds(0);
       Animated.spring(shotScale, { toValue: 1, useNativeDriver: true }).start();
     }
@@ -557,6 +673,15 @@ export default function CaptureScreen() {
       try { cameraRef.current.stopRecording(); } catch {}
     }
   };
+
+  useEffect(() => {
+    return () => {
+      if (prewarmedRecorderRef.current) {
+        prewarmedRecorderRef.current.destroy();
+        prewarmedRecorderRef.current = null;
+      }
+    };
+  }, []);
 
   const handleShotPress = () => {
     if (!cameraRef.current || loadingCapture || !cameraReady) return;
@@ -588,7 +713,7 @@ export default function CaptureScreen() {
   };
 
   const handleShotPressOut = () => {
-    if ((mode === "story" || mode === "post") && recording) stopRecording();
+    if ((mode === "story" || mode === "post") && recording && !recordLocked) stopRecording();
   };
 
   const handleOpenGallery = () => {
@@ -1032,6 +1157,66 @@ export default function CaptureScreen() {
         </TouchableOpacity>
       </Modal>
 
+      <Modal
+        visible={showCollageConfirm}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowCollageConfirm(false)}
+      >
+        <View style={styles.confirmBackdrop}>
+          <View style={styles.confirmSheet}>
+            <View style={styles.confirmHandle} />
+            <Text style={styles.confirmTitle}>Confirmar sequencia</Text>
+            <Text style={styles.confirmSubtitle}>
+              Revise suas {collagePhotos.filter(Boolean).length} fotos antes de abrir o preview.
+            </Text>
+
+            <View style={styles.confirmGrid}>
+              <DraggableFlatList
+                data={collageConfirmUris.map((uri, index) => ({ key: `confirm-${index}-${uri}`, uri }))}
+                keyExtractor={(item) => item.key}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                activationDistance={8}
+                contentContainerStyle={styles.confirmListContent}
+                onDragEnd={({ data }) => setCollageConfirmUris(data.map((item) => item.uri))}
+                renderItem={({ item, getIndex, drag, isActive }: RenderItemParams<{ key: string; uri: string }>) => (
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onLongPress={drag}
+                    delayLongPress={160}
+                    style={[styles.confirmItem, isActive && styles.confirmItemActive]}
+                  >
+                    <Image source={{ uri: item.uri }} style={styles.confirmItemImage} contentFit="cover" />
+                    <View style={styles.confirmIndexBadge}>
+                      <Text style={styles.confirmIndexBadgeText}>{(getIndex?.() ?? 0) + 1}</Text>
+                    </View>
+                  </TouchableOpacity>
+                )}
+              />
+            </View>
+
+            <View style={styles.confirmActions}>
+              <TouchableOpacity
+                style={styles.confirmBackBtn}
+                activeOpacity={0.85}
+                onPress={() => setShowCollageConfirm(false)}
+              >
+                <Text style={styles.confirmBackBtnText}>Editar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.confirmNextBtn, !collageAllFilled && { opacity: 0.45 }]}
+                activeOpacity={0.9}
+                disabled={!collageAllFilled}
+                onPress={confirmCollageAndProceed}
+              >
+                <Text style={styles.confirmNextBtnText}>Continuar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* ── Effects picker (WebGL effects) ── */}
       {showLiveFiltersPicker && !isCollageMode && (
         <View style={styles.effectsPickerOverlay}>
@@ -1141,6 +1326,16 @@ export default function CaptureScreen() {
               </TouchableOpacity>
             </Animated.View>
 
+            {recording && mode === "story" && (
+              <TouchableOpacity
+                onPress={() => setRecordLocked((p) => !p)}
+                activeOpacity={0.8}
+                style={[styles.recordLockBtn, recordLocked && styles.recordLockBtnActive]}
+              >
+                <Text style={styles.recordLockIcon}>{recordLocked ? "🔒" : "🔓"}</Text>
+              </TouchableOpacity>
+            )}
+
             <TouchableOpacity onPress={toggleFacing} activeOpacity={0.7} style={styles.bottomFlipBtn}>
               <Text style={styles.bottomFlipIcon}>↺</Text>
             </TouchableOpacity>
@@ -1148,6 +1343,11 @@ export default function CaptureScreen() {
 
           {!recording && mode !== "reel" && (
             <Text style={styles.videoHint}>Segure para gravar vídeo</Text>
+          )}
+          {recording && mode === "story" && (
+            <Text style={styles.videoHint}>
+              {recordLocked ? "Gravacao travada - toque no cadeado para parar" : "Segure para gravar ou toque no cadeado para travar"}
+            </Text>
           )}
 
           <View style={styles.modesRow}>
@@ -1383,6 +1583,78 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   slotModalCancelText: { color: "#fff", fontSize: 16, fontWeight: "600" },
+  confirmBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.72)",
+    justifyContent: "flex-end",
+  },
+  confirmSheet: {
+    backgroundColor: "#121212",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 18,
+    paddingTop: 10,
+    paddingBottom: 24,
+  },
+  confirmHandle: {
+    width: 38,
+    height: 4,
+    borderRadius: 99,
+    backgroundColor: "rgba(255,255,255,0.25)",
+    alignSelf: "center",
+    marginBottom: 12,
+  },
+  confirmTitle: { color: "#fff", fontSize: 18, fontWeight: "800", textAlign: "center" },
+  confirmSubtitle: { color: "rgba(255,255,255,0.62)", fontSize: 13, textAlign: "center", marginTop: 6, marginBottom: 14 },
+  confirmGrid: { marginBottom: 16 },
+  confirmListContent: { paddingHorizontal: 2, gap: 10 },
+  confirmItem: {
+    width: Math.min(122, (W - 18 * 2 - 20) / 3),
+    aspectRatio: 1,
+    borderRadius: 12,
+    overflow: "hidden",
+    backgroundColor: "rgba(255,255,255,0.07)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+  },
+  confirmItemActive: {
+    transform: [{ scale: 1.04 }],
+    borderColor: "rgba(56,151,240,0.9)",
+  },
+  confirmItemImage: { width: "100%", height: "100%" },
+  confirmItemEmpty: { flex: 1, alignItems: "center", justifyContent: "center" },
+  confirmItemEmptyText: { color: "rgba(255,255,255,0.55)", fontSize: 26, fontWeight: "300" },
+  confirmIndexBadge: {
+    position: "absolute",
+    top: 6,
+    left: 6,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  confirmIndexBadgeText: { color: "#fff", fontSize: 11, fontWeight: "800" },
+  confirmActions: { flexDirection: "row", gap: 10 },
+  confirmBackBtn: {
+    flex: 1,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  confirmBackBtnText: { color: "#fff", fontSize: 15, fontWeight: "700" },
+  confirmNextBtn: {
+    flex: 1,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: "#3897f0",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  confirmNextBtnText: { color: "#fff", fontSize: 15, fontWeight: "800" },
 
   // Video hint
   videoHint: { color: "rgba(255,255,255,0.4)", fontSize: 11, textAlign: "center", marginBottom: 4, fontWeight: "600" },
@@ -1401,6 +1673,9 @@ const styles = StyleSheet.create({
 
   bottomFlipBtn: { width: 48, height: 48, borderRadius: 99, backgroundColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center" },
   bottomFlipIcon: { color: "#fff", fontSize: 22 },
+  recordLockBtn: { width: 48, height: 48, borderRadius: 99, backgroundColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center" },
+  recordLockBtnActive: { backgroundColor: "rgba(255,51,85,0.32)", borderWidth: 1.5, borderColor: "rgba(255,51,85,0.75)" },
+  recordLockIcon: { color: "#fff", fontSize: 18 },
 
   modesRow: { flexDirection: "row", justifyContent: "center", gap: 6, paddingTop: 4, paddingBottom: 2 },
   modeItem: { paddingHorizontal: 14, paddingVertical: 6 },
