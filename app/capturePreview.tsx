@@ -10,6 +10,10 @@
 // - Collage support
 
 import Colors from "@/constants/Colors";
+import { EffectBakeWebView, dataUrlToCacheFile, type EffectBakeJob } from "@/components/EffectBakeWebView";
+import { LIVE_FILTERS } from "@/components/LiveFilterCarousel";
+import { cssFilterStringToShaderBoost, mergeBeautifyWithCssBoost } from "@/lib/cssFilterToShaderBoost";
+import { getPreviewTintLayers } from "@/lib/livePreviewTint";
 import type { BeautifyParams } from "@/lib/gl/LutRenderer";
 import LutRenderer from "@/lib/gl/LutRenderer";
 import { OffscreenLutRenderer } from "@/lib/gl/OffscreenLutRenderer";
@@ -241,6 +245,11 @@ export default function CapturePreview() {
     return raw && raw !== "none" ? raw : "";
   }, [params.liveFilterCSS]);
 
+  const incomingLiveFilterDef = useMemo(() => {
+    const id = String(params.liveFilter ?? "");
+    return LIVE_FILTERS.find((f) => f.id === id) ?? LIVE_FILTERS[0];
+  }, [params.liveFilter]);
+
   const [filter, setFilter] = useState<FilterId>(initialFilter);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [showInlineFilters, setShowInlineFilters] = useState(false);
@@ -306,7 +315,14 @@ export default function CapturePreview() {
   const [effectsOpen, setEffectsOpen] = useState(false);
   const [showEffectsPanel, setShowEffectsPanel] = useState(false);
   const [activeWebglEffect, setActiveWebglEffect] = useState<WebglEffectId>("none");
+  const [nativeEffectBakeJob, setNativeEffectBakeJob] = useState<EffectBakeJob | null>(null);
+  const nativeEffectBakeResolverRef = useRef<((uri: string) => void) | null>(null);
   const [effectsTab, setEffectsTab] = useState<"filters" | "fx" | "ar">("filters");
+
+  useEffect(() => {
+    const raw = String(params.activeEffect ?? "");
+    if (WEBGL_EFFECTS.some((e) => e.id === raw)) setActiveWebglEffect(raw as WebglEffectId);
+  }, [params.activeEffect]);
 
   // Beautify
   const [showBeautifyPanel, setShowBeautifyPanel] = useState(false);
@@ -426,6 +442,12 @@ export default function CapturePreview() {
       shadows: clamp(adjustValues.shadows + (fp.shadows ?? 0), -0.4, 0.4),
     };
   }, [beautifyValues, quickAdjustment, filter, adjustValues, activeFilter]);
+
+  const captureCssBoost = useMemo(() => cssFilterStringToShaderBoost(incomingLiveFilterCss), [incomingLiveFilterCss]);
+  const beautifyForNativeExport = useMemo(
+    () => mergeBeautifyWithCssBoost(beautifyParams, captureCssBoost) as ExtendedBeautifyParams,
+    [beautifyParams, captureCssBoost]
+  );
 
   // Debounce — longer interval for smoother transitions
   useEffect(() => {
@@ -579,22 +601,33 @@ export default function CapturePreview() {
     });
   }, []);
 
+  const runNativeCanvasEffectBake = useCallback((fileUri: string, effectId: WebglEffectId): Promise<string> => {
+    if (effectId === "none" || isWeb) return Promise.resolve(fileUri);
+    return new Promise((resolve) => {
+      nativeEffectBakeResolverRef.current = resolve;
+      setNativeEffectBakeJob({ fileUri, effectId });
+    });
+  }, []);
+
   const maybeBakeMedia = async (inputUri: string) => {
     if (!shouldBakeOnExport) return inputUri;
     try {
       if (mediaType === "image") {
         let bakedUri = inputUri;
 
+        const canUseDomCssBake = typeof document !== "undefined";
+        const hasCssToBake = !!(activeFilter.cssFilter || effectiveCaptureCssFilter);
+
         if (isAndroidNative && androidPreviewUri && inputUri === effectiveUri) {
           bakedUri = androidPreviewUri;
-        } else if (activeFilter.cssFilter || effectiveCaptureCssFilter) {
+        } else if (hasCssToBake && canUseDomCssBake) {
           const bakeSource = isCapacitor && stableImageUri && inputUri === effectiveUri ? stableImageUri : inputUri;
           const combinedCss = [effectiveCaptureCssFilter, activeFilter.cssFilter].filter(Boolean).join(" ").trim();
           const baked = await bakeWebCssFilter(bakeSource, combinedCss);
           if (baked && baked !== inputUri) bakedUri = baked;
         } else if (!isWeb) {
           const exportFilterId = mapPreviewFilterToExport(filter);
-          const baked = await bakeImageWithLut(inputUri, exportFilterId, beautifyParams);
+          const baked = await bakeImageWithLut(inputUri, exportFilterId, beautifyForNativeExport);
           if (baked && baked !== inputUri) {
             try {
               const info = await FileSystem.getInfoAsync(baked);
@@ -603,13 +636,21 @@ export default function CapturePreview() {
           }
         }
 
-        // Apply WebGL effect on top of filter (Canvas 2D — works everywhere)
-        if (activeWebglEffect !== "none" && isWeb) {
-          try {
-            const effectBaked = await applyCanvasEffect(bakedUri, activeWebglEffect, 1.0);
-            if (effectBaked && effectBaked !== bakedUri) bakedUri = effectBaked;
-          } catch (err) {
-            console.log("WebGL effect bake error:", err);
+        if (activeWebglEffect !== "none") {
+          if (isWeb || isCapacitor) {
+            try {
+              const effectBaked = await applyCanvasEffect(bakedUri, activeWebglEffect, 1.0);
+              if (effectBaked && effectBaked !== bakedUri) bakedUri = effectBaked;
+            } catch (err) {
+              console.log("WebGL effect bake error:", err);
+            }
+          } else if (isNativeApp) {
+            try {
+              const effectBaked = await runNativeCanvasEffectBake(bakedUri, activeWebglEffect);
+              if (effectBaked && effectBaked !== bakedUri) bakedUri = effectBaked;
+            } catch (err) {
+              console.log("Native effect bake error:", err);
+            }
           }
         }
 
@@ -636,7 +677,7 @@ export default function CapturePreview() {
       return;
     }
 
-    const requestKey = `${effectiveUri}::${filter}::${quickAdjustment}::${JSON.stringify(beautifyParams)}`;
+    const requestKey = `${effectiveUri}::${filter}::${quickAdjustment}::${incomingLiveFilterCss}::${activeWebglEffect}::${JSON.stringify(beautifyForNativeExport)}`;
     if (androidPreviewKeyRef.current === requestKey && androidPreviewUri) return;
 
     const timer = setTimeout(() => {
@@ -644,7 +685,7 @@ export default function CapturePreview() {
       setAndroidPreviewJob({
         uri: effectiveUri,
         filterId: mapPreviewFilterToExport(filter),
-        beautify: beautifyParams,
+        beautify: beautifyForNativeExport,
         requestKey,
       });
     }, 120);
@@ -657,7 +698,9 @@ export default function CapturePreview() {
     shouldBakeOnExport,
     filter,
     quickAdjustment,
-    beautifyParams,
+    beautifyForNativeExport,
+    incomingLiveFilterCss,
+    activeWebglEffect,
     androidPreviewUri,
   ]);
 
@@ -1119,6 +1162,25 @@ export default function CapturePreview() {
           }}
         />
       )}
+      <EffectBakeWebView
+        job={nativeEffectBakeJob}
+        onFinish={(out) => {
+          const resolve = nativeEffectBakeResolverRef.current;
+          nativeEffectBakeResolverRef.current = null;
+          setNativeEffectBakeJob(null);
+          (async () => {
+            let uri = out;
+            if (out.startsWith("data:image")) {
+              try {
+                uri = await dataUrlToCacheFile(out);
+              } catch {
+                uri = out;
+              }
+            }
+            resolve?.(uri);
+          })();
+        }}
+      />
 
       {/* Preview */}
       <Pressable
@@ -1219,17 +1281,34 @@ export default function CapturePreview() {
                   />
                 </View>
               ) : (
-                <Image
-                  key={`${previewImageUri}::${nonce}::${isComparing ? "orig" : filter}`}
-                  source={{ uri: previewImageUri }}
-                  style={[
-                    styles.preview,
-                    previewMediaStyle,
-                    isFrontCamera && { transform: [{ scaleX: -1 }] },
-                  ].filter(Boolean) as any}
-                  resizeMode="cover"
-                  onLoadEnd={() => setMediaLoaded(true)}
-                />
+                <View style={[styles.preview, previewMediaStyle]}>
+                  <Image
+                    key={`${previewImageUri}::${nonce}::${isComparing ? "orig" : filter}`}
+                    source={{ uri: previewImageUri }}
+                    style={[
+                      StyleSheet.absoluteFillObject,
+                      isFrontCamera && { transform: [{ scaleX: -1 }] },
+                    ].filter(Boolean) as any}
+                    resizeMode="cover"
+                    onLoadEnd={() => setMediaLoaded(true)}
+                  />
+                  {!isComparing &&
+                    getPreviewTintLayers({
+                      isWeb: false,
+                      isCapacitor: false,
+                      liveFilter: incomingLiveFilterDef,
+                      activeEffect: activeWebglEffect,
+                    }).map((layer, i) => (
+                      <View
+                        key={`pv-tint-${i}`}
+                        pointerEvents="none"
+                        style={[
+                          StyleSheet.absoluteFillObject,
+                          { backgroundColor: layer.color, opacity: layer.opacity, zIndex: 2 + i },
+                        ]}
+                      />
+                    ))}
+                </View>
               )
             ))
           ) : (

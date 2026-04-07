@@ -208,15 +208,28 @@ export default function PeopleListSheet(props: PeopleListSheetProps) {
     [mode, onClose, onOpenProfile, theme]
   );
 
-  const keyExtractor = useCallback((item: PersonRow) => item.follow_id, []);
+  const keyExtractor = useCallback(
+    (item: PersonRow, index: number) => item.follow_id || `${item.user_id}-${index}`,
+    []
+  );
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose} statusBarTranslucent>
       <View style={s.modalRoot}>
         <Pressable style={s.backdrop} onPress={onClose} />
 
-        <View style={[s.sheetContainer, { maxHeight: sheetHeight, paddingBottom: Math.max(insets.bottom, 12) }]}> 
-          <View style={[s.sheet, { backgroundColor: theme.colors.background, maxHeight: sheetHeight }]}>
+        {/* Android/Capacitor: fixed height is required — maxHeight + flex:1 alone collapses FlatList to 0 */}
+        <View
+          style={[
+            s.sheetContainer,
+            {
+              height: sheetHeight,
+              maxHeight: sheetHeight,
+              paddingBottom: Math.max(insets.bottom, 12),
+            },
+          ]}
+        >
+          <View style={[s.sheet, { backgroundColor: theme.colors.background, flex: 1 }]}>
           {/* ── Handle ── */}
           <View style={s.handleWrap}>
             <View style={[s.handle, { backgroundColor: theme.colors.border }]} />
@@ -231,8 +244,8 @@ export default function PeopleListSheet(props: PeopleListSheetProps) {
             </TouchableOpacity>
           </View>
 
-          {/* ── Search ── */}
-          {!isCrushBlocked && data.length > 0 && (
+          {/* ── Search (always when list allowed — not gated on data.length; avoids blank gap while loading on native) ── */}
+          {!isCrushBlocked && (
             <View style={[s.searchWrap, { borderBottomColor: theme.colors.border }]}>
               <View style={[s.searchBox, { backgroundColor: theme.colors.surface }]}>
                 <Text style={[s.searchIcon, { color: theme.colors.textMuted }]}>🔍</Text>
@@ -318,12 +331,14 @@ export default function PeopleListSheet(props: PeopleListSheetProps) {
                   data={filtered}
                   keyExtractor={keyExtractor}
                   renderItem={renderItem}
+                  style={s.flatList}
                   contentContainerStyle={s.listContent}
                   keyboardShouldPersistTaps="handled"
                   showsVerticalScrollIndicator={false}
                   initialNumToRender={15}
                   maxToRenderPerBatch={20}
                   windowSize={10}
+                  removeClippedSubviews={Platform.OS !== "android"}
                   getItemLayout={(_, index) => ({
                     length: 64,
                     offset: 64 * index,
@@ -354,6 +369,7 @@ const s = StyleSheet.create({
     zIndex: 20,
   },
   sheet: {
+    minHeight: 280,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     overflow: "hidden",
@@ -435,7 +451,10 @@ const s = StyleSheet.create({
   },
   listArea: {
     flex: 1,
-    minHeight: 200,
+    minHeight: 120,
+  },
+  flatList: {
+    flex: 1,
   },
   center: {
     paddingVertical: 32,

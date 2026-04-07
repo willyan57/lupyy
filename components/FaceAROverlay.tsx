@@ -145,7 +145,39 @@ export default function FaceAROverlay({
     };
   }, []);
 
-  if (Platform.OS !== "web" || !available) return null;
+  const picker = showPicker ? (
+    <View style={styles.pickerContainer}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pickerScroll}>
+        {AR_EFFECTS.map((effect) => {
+          const isActive = effect.id === activeEffect;
+          return (
+            <TouchableOpacity
+              key={effect.id}
+              activeOpacity={0.8}
+              onPress={() => onEffectChange(effect.id)}
+              style={[styles.effectItem, isActive && styles.effectItemActive]}
+            >
+              <View style={[styles.effectIcon, isActive && styles.effectIconActive]}>
+                <Text style={styles.effectEmoji}>{effect.icon}</Text>
+              </View>
+              <Text style={[styles.effectLabel, isActive && styles.effectLabelActive]} numberOfLines={1}>
+                {effect.name}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+    </View>
+  ) : null;
+
+  // Native (Expo APK): show AR picker; live face mesh runs only on web where <video> + MediaPipe exist.
+  if (Platform.OS !== "web") {
+    return picker;
+  }
+
+  if (!available) {
+    return picker;
+  }
 
   return (
     <>
@@ -186,38 +218,7 @@ export default function FaceAROverlay({
         </View>
       )}
 
-      {showPicker && (
-        <View style={styles.pickerContainer}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.pickerScroll}
-          >
-            {AR_EFFECTS.map((effect) => {
-              const isActive = effect.id === activeEffect;
-
-              return (
-                <TouchableOpacity
-                  key={effect.id}
-                  activeOpacity={0.8}
-                  onPress={() => onEffectChange(effect.id)}
-                  style={[styles.effectItem, isActive && styles.effectItemActive]}
-                >
-                  <View style={[styles.effectIcon, isActive && styles.effectIconActive]}>
-                    <Text style={styles.effectEmoji}>{effect.icon}</Text>
-                  </View>
-                  <Text
-                    style={[styles.effectLabel, isActive && styles.effectLabelActive]}
-                    numberOfLines={1}
-                  >
-                    {effect.name}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </View>
-      )}
+      {picker}
     </>
   );
 }

@@ -141,6 +141,16 @@ export function getEffectCSSFilter(effectId: EffectId): string | null {
     case "neon_edges": return "contrast(1.5) brightness(1.1) saturate(1.5)";
     case "halftone": return "contrast(1.3) grayscale(0.4)";
     case "light_leaks": return "brightness(1.08) contrast(0.95) saturate(1.15)";
+    // Lightweight approximations so live preview changes in browser (full quality is canvas export)
+    case "glitch": return "contrast(1.25) saturate(1.4) hue-rotate(8deg) brightness(1.03)";
+    case "chromatic": return "saturate(1.45) contrast(1.12) hue-rotate(-6deg)";
+    case "prism": return "saturate(1.25) brightness(1.06) hue-rotate(12deg)";
+    case "pixelate": return "contrast(1.1) saturate(0.85)";
+    case "rgb_split": return "saturate(1.35) contrast(1.1) hue-rotate(4deg)";
+    case "mirror": return "contrast(1.05) saturate(1.1)";
+    case "kaleidoscope": return "saturate(1.5) contrast(1.08) hue-rotate(25deg)";
+    case "fisheye": return "saturate(1.15) contrast(1.08)";
+    case "wave_distort": return "saturate(1.2) contrast(1.05) hue-rotate(-4deg)";
     default: return null;
   }
 }

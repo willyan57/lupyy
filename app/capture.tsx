@@ -3,6 +3,7 @@ import FaceAROverlay from "@/components/FaceAROverlay";
 import { LIVE_FILTERS, type LiveFilterDef } from "@/components/LiveFilterCarousel";
 import type { AREffectId } from "@/lib/ar/faceDetection";
 import { EFFECTS, getEffectCSSFilter, type EffectId } from "@/lib/gl/webglEffects";
+import { getPreviewTintLayers } from "@/lib/livePreviewTint";
 import { createVideoRecorder, type VideoRecorderInstance } from "@/lib/videoRecorder";
 import { saveCollageDraft } from "@/lib/captureDraftStore";
 import { useFocusEffect } from "@react-navigation/native";
@@ -181,6 +182,15 @@ export default function CaptureScreen() {
     }
   }, []);
 
+  const capturePreviewMediaParams = {
+    liveFilter: liveFilter.id !== "none" ? liveFilter.id : undefined,
+    liveFilterCSS: liveFilter.cssFilter !== "none" ? liveFilter.cssFilter : undefined,
+    activeEffect: activeEffect !== "none" ? activeEffect : undefined,
+    arEffect: arEffect !== "none" ? arEffect : undefined,
+  };
+  const capturePreviewMediaParamsRef = useRef(capturePreviewMediaParams);
+  capturePreviewMediaParamsRef.current = capturePreviewMediaParams;
+
   useFocusEffect(
     useCallback(() => {
       setCameraReady(false);
@@ -237,7 +247,15 @@ export default function CaptureScreen() {
           videoRecorderRef.current = null;
           router.push({
             pathname: "/capturePreview" as any,
-            params: { uri, mediaType: "video", mode, filter, nonce: String(Date.now()) },
+            params: {
+              uri,
+              mediaType: "video",
+              mode,
+              filter,
+              facing,
+              nonce: String(Date.now()),
+              ...capturePreviewMediaParamsRef.current,
+            },
           });
         },
         onError: () => {
@@ -533,6 +551,7 @@ export default function CaptureScreen() {
         filter,
         facing,
         nonce: String(Date.now()),
+        ...capturePreviewMediaParams,
       },
     });
     setCollagePhotos(new Array(collageConfig.slots.length).fill(null));
@@ -584,10 +603,8 @@ export default function CaptureScreen() {
             mode,
             filter,
             facing,
-            liveFilter: liveFilter.id !== "none" ? liveFilter.id : undefined,
-            liveFilterCSS: liveFilter.cssFilter !== "none" ? liveFilter.cssFilter : undefined,
-            activeEffect: activeEffect !== "none" ? activeEffect : undefined,
             aspectRatio: "9:16",
+            ...capturePreviewMediaParams,
             width: previewWidth > 0 ? String(previewWidth) : undefined,
             height: previewHeight > 0 ? String(previewHeight) : undefined,
             nonce: String(Date.now()),
@@ -635,7 +652,15 @@ export default function CaptureScreen() {
             videoRecorderRef.current = null;
             router.push({
               pathname: "/capturePreview" as any,
-              params: { uri, mediaType: "video", mode, filter, nonce: String(Date.now()) },
+              params: {
+                uri,
+                mediaType: "video",
+                mode,
+                filter,
+                facing,
+                nonce: String(Date.now()),
+                ...capturePreviewMediaParamsRef.current,
+              },
             });
           },
           onError: (err) => {
@@ -681,7 +706,15 @@ export default function CaptureScreen() {
       if (video?.uri) {
         router.push({
           pathname: "/capturePreview" as any,
-          params: { uri: video.uri, mediaType: "video", mode, filter, nonce: String(Date.now()) },
+          params: {
+            uri: video.uri,
+            mediaType: "video",
+            mode,
+            filter,
+            facing,
+            nonce: String(Date.now()),
+            ...capturePreviewMediaParamsRef.current,
+          },
         });
       }
     } catch (err: any) {
@@ -724,7 +757,15 @@ export default function CaptureScreen() {
     if (selectedGalleryUri) {
       router.push({
         pathname: "/capturePreview" as any,
-        params: { uri: selectedGalleryUri, mediaType: "image", mode, filter, nonce: String(Date.now()) },
+        params: {
+          uri: selectedGalleryUri,
+          mediaType: "image",
+          mode,
+          filter,
+          facing,
+          nonce: String(Date.now()),
+          ...capturePreviewMediaParams,
+        },
       });
       return;
     }
@@ -776,9 +817,12 @@ export default function CaptureScreen() {
   const liveCameraWebFilterStyle = isWeb && liveCSSFilter
     ? ({ filter: liveCSSFilter, WebkitFilter: liveCSSFilter } as any)
     : undefined;
-  const liveTintOverlay = liveFilter.id !== "none"
-    ? (liveFilter.accent || "rgba(255,255,255,0.18)")
-    : undefined;
+  const previewTintLayers = getPreviewTintLayers({
+    isWeb,
+    isCapacitor,
+    liveFilter,
+    activeEffect,
+  });
 
   const rightTools = [
     { key: "flash", icon: flashOn ? "⚡" : "⚡︎", label: flashOn ? "On" : "Off", onPress: toggleFlash, active: flashOn },
@@ -889,16 +933,17 @@ export default function CaptureScreen() {
             mode={isVideoMode ? "video" : "picture"}
             onCameraReady={() => setCameraReady(true)}
           />
-          {/* Fallback tint for APK WebView where CSS filter may be ignored */}
-          {isWeb && liveTintOverlay && (
+          {/* Native APK / Capacitor: CSS filter does not affect the camera surface — use tint layers */}
+          {previewTintLayers.map((layer, i) => (
             <View
+              key={`preview-tint-${i}`}
               pointerEvents="none"
               style={[
                 StyleSheet.absoluteFill,
-                { backgroundColor: liveTintOverlay, opacity: 0.08, zIndex: 2 },
+                { backgroundColor: layer.color, opacity: layer.opacity, zIndex: 2 + i },
               ]}
             />
-          )}
+          ))}
           {/* AR Face overlay */}
           {isWeb && arEffect !== "none" && (
             <FaceAROverlay
@@ -995,7 +1040,15 @@ export default function CaptureScreen() {
             if (selectedGalleryUri) {
               router.push({
                 pathname: "/capturePreview" as any,
-                params: { uri: selectedGalleryUri, mediaType: "image", mode, filter, nonce: String(Date.now()) },
+                params: {
+                  uri: selectedGalleryUri,
+                  mediaType: "image",
+                  mode,
+                  filter,
+                  facing,
+                  nonce: String(Date.now()),
+                  ...capturePreviewMediaParams,
+                },
               });
             }
           }}>
