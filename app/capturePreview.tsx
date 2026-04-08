@@ -393,6 +393,10 @@ export default function CapturePreview() {
   const [mediaDimensions, setMediaDimensions] = useState<{ width: number; height: number } | null>(
     hasNormalizedDimensions ? { width: normalizedWidthParam, height: normalizedHeightParam } : null
   );
+  const primarySendUri = useMemo(() => {
+    if (mediaType === "image" && collageUris.length > 0) return collageUris[0];
+    return effectiveUri;
+  }, [mediaType, collageUris, effectiveUri]);
 
   // Capacitor: convert image URI to stable blob URL to prevent black screen on filter changes
   const [stableImageUri, setStableImageUri] = useState<string | null>(null);
@@ -636,7 +640,7 @@ export default function CapturePreview() {
       const total = Math.min(uris.length, slots.length);
       if (total <= 0) { resolve(null); return; }
       for (let i = 0; i < total; i++) {
-        const img = new Image();
+        const img = new (window as any).Image() as HTMLImageElement;
         img.crossOrigin = "anonymous";
         img.onload = () => {
           images[i] = img;
@@ -667,7 +671,7 @@ export default function CapturePreview() {
     if (!isWeb || mediaType !== "image") return inputUri;
     if (textOverlays.length === 0 && taggedUsers.length === 0 && drawPaths.length === 0) return inputUri;
     return new Promise((resolve) => {
-      const img = new Image();
+      const img = new (window as any).Image() as HTMLImageElement;
       img.crossOrigin = "anonymous";
       img.onload = () => {
         try {
@@ -971,12 +975,12 @@ export default function CapturePreview() {
   }
 
   const performSendWithUri = async (finalUri: string) => {
-    if (!finalUri) return;
+    if (!finalUri && !(mediaType === "image" && collageUris.length > 0)) return;
     if (mode === "reel") {
       router.push({ pathname: "/new" as any, params: { source: "camera", uri: finalUri, mediaType, filter } });
       return;
     }
-    let workingUri = finalUri;
+    let workingUri = finalUri || collageUris[0] || "";
     if (mediaType === "image" && collageUris.length > 1) {
       const merged = await bakeCollageWeb(collageUris, collageLayout);
       if (merged) workingUri = merged;
@@ -1150,8 +1154,12 @@ export default function CapturePreview() {
   }
 
   const handleSend = () => {
-    if (!effectiveUri || sending || aiProcessing) return;
-    void performSendWithUri(effectiveUri);
+    if (sending || aiProcessing) return;
+    if (!primarySendUri) {
+      Alert.alert("Aguarde", "Ainda estamos preparando as fotos.");
+      return;
+    }
+    void performSendWithUri(primarySendUri);
   };
 
   const addTextOverlay = () => {
