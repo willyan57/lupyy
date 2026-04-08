@@ -181,7 +181,11 @@ export async function createVideoRecorder(
       recording = true;
 
       try {
-        recorder.start(1000); // Collect data every second
+        try {
+          recorder.start(1000); // Collect data every second
+        } catch {
+          recorder.start();
+        }
       } catch (err: any) {
         recording = false;
         onError?.(`Erro ao iniciar gravação: ${err.message || err}`);
@@ -343,8 +347,8 @@ function getSupportedMimeType(): string | null {
       navigator?.userAgent?.includes("Capacitor")
     );
   const candidates = [
-    // APK/WebView: MP4 is usually the most reliable for record/playback/upload
-    ...(isCapacitorLike ? ["video/mp4;codecs=h264,aac", "video/mp4"] : []),
+    // APK/WebView: prioritize plain H264 MP4; AAC variant fails on some Android WebViews.
+    ...(isCapacitorLike ? ["video/mp4;codecs=h264", "video/mp4", "video/mp4;codecs=h264,aac"] : []),
     "video/webm;codecs=vp9,opus",
     "video/webm;codecs=vp8,opus",
     "video/webm;codecs=vp9",

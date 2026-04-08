@@ -83,10 +83,20 @@ async function toStableBlobUrl(uri: string): Promise<string> {
 }
 
 type CaptureMode = "post" | "story" | "reel";
+type CollageLayout = "none" | "2x1" | "1x2" | "2x2" | "3x1" | "1x3";
 type FilterId = "none" | "face_enhance" | "studio_glow" | "cartoon_soft" | "bw_art" | "soft_skin_ig" | "clean_portrait" | "cinematic_gold" | "blue_teal_2026" | "pastel_dream" | "tokyo_night" | "desert_warm" | "vintage_film" | "sakura" | "neon_glow" | "miami_vibes" | "deep_contrast" | "moody_forest" | "winter_lowsat" | "summer_pop" | "aqua_fresh" | "pink_rose" | "sepia_clean" | "urban_grit" | "cream_tone";
 type ExtendedBeautifyParams = BeautifyParams & {
   sharpness?: number; temperature?: number; vignette?: number;
   grain?: number; fade?: number; highlights?: number; shadows?: number;
+};
+type SlotGeo = { x: number; y: number; w: number; h: number };
+const COLLAGE_CONFIGS: Record<CollageLayout, { slots: SlotGeo[] }> = {
+  none: { slots: [{ x: 0, y: 0, w: 1, h: 1 }] },
+  "2x1": { slots: [{ x: 0, y: 0, w: 0.5, h: 1 }, { x: 0.5, y: 0, w: 0.5, h: 1 }] },
+  "1x2": { slots: [{ x: 0, y: 0, w: 1, h: 0.5 }, { x: 0, y: 0.5, w: 1, h: 0.5 }] },
+  "2x2": { slots: [{ x: 0, y: 0, w: 0.5, h: 0.5 }, { x: 0.5, y: 0, w: 0.5, h: 0.5 }, { x: 0, y: 0.5, w: 0.5, h: 0.5 }, { x: 0.5, y: 0.5, w: 0.5, h: 0.5 }] },
+  "3x1": { slots: [{ x: 0, y: 0, w: 1 / 3, h: 1 }, { x: 1 / 3, y: 0, w: 1 / 3, h: 1 }, { x: 2 / 3, y: 0, w: 1 / 3, h: 1 }] },
+  "1x3": { slots: [{ x: 0, y: 0, w: 1, h: 1 / 3 }, { x: 0, y: 1 / 3, w: 1, h: 1 / 3 }, { x: 0, y: 2 / 3, w: 1, h: 1 / 3 }] },
 };
 
 type TextOverlay = {
@@ -205,8 +215,15 @@ export default function CapturePreview() {
       return [] as string[];
     }
   }, [params.collageDraftId, params.collageUris]);
-  const [collagePreviewIndex, setCollagePreviewIndex] = useState(0);
   const hasCollagePreview = mediaType === "image" && collageUris.length > 1;
+  const collageLayout = useMemo(
+    () => (String(params.collageLayout ?? "none") as CollageLayout),
+    [params.collageLayout]
+  );
+  const collageSlots = useMemo(
+    () => COLLAGE_CONFIGS[collageLayout]?.slots ?? COLLAGE_CONFIGS.none.slots,
+    [collageLayout]
+  );
   const facing = useMemo(() => String(params.facing ?? "back"), [params.facing]);
   const isFrontCamera = facing === "front";
   const cameFromCamera = facing === "front" || facing === "back";
@@ -317,7 +334,6 @@ export default function CapturePreview() {
   const [activeWebglEffect, setActiveWebglEffect] = useState<WebglEffectId>("none");
   const [nativeEffectBakeJob, setNativeEffectBakeJob] = useState<EffectBakeJob | null>(null);
   const nativeEffectBakeResolverRef = useRef<((uri: string) => void) | null>(null);
-  const [effectsTab, setEffectsTab] = useState<"filters" | "fx" | "ar">("filters");
 
   useEffect(() => {
     const raw = String(params.activeEffect ?? "");
@@ -462,11 +478,13 @@ export default function CapturePreview() {
 
   const previewLutSource = useMemo(() => getLutForFilter(mapPreviewFilterToExport(filter)), [filter]);
   const previewImageUri = useMemo(() => {
-    if (isAndroidNative && !isComparing && mediaType === "image") {
+    // On Android, avoid swapping to offscreen-rendered URI while FX is active:
+    // that path can produce transient black frames in some GPU/WebView combinations.
+    if (isAndroidNative && !isComparing && mediaType === "image" && activeWebglEffect === "none") {
       return androidPreviewUri || effectiveUri;
     }
     return effectiveUri;
-  }, [androidPreviewUri, effectiveUri, isComparing, mediaType]);
+  }, [androidPreviewUri, effectiveUri, isComparing, mediaType, activeWebglEffect]);
 
   const needsGlPreview = useMemo(() => {
     if (mediaType !== "image") return false;
@@ -601,6 +619,130 @@ export default function CapturePreview() {
     });
   }, []);
 
+  const bakeCollageWeb = useCallback(async (uris: string[], layout: CollageLayout): Promise<string | null> => {
+    if (!isWeb || uris.length === 0) return null;
+    const slots = COLLAGE_CONFIGS[layout]?.slots ?? COLLAGE_CONFIGS.none.slots;
+    return new Promise((resolve) => {
+      const canvas = document.createElement("canvas");
+      const outW = 1080;
+      const outH = 1920;
+      canvas.width = outW;
+      canvas.height = outH;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) { resolve(null); return; }
+      const images: HTMLImageElement[] = [];
+      let done = 0;
+      const total = Math.min(uris.length, slots.length);
+      if (total <= 0) { resolve(null); return; }
+      for (let i = 0; i < total; i++) {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => {
+          images[i] = img;
+          done += 1;
+          if (done === total) {
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, outW, outH);
+            for (let j = 0; j < total; j++) {
+              const slot = slots[j];
+              if (!slot || !images[j]) continue;
+              const x = Math.round(slot.x * outW);
+              const y = Math.round(slot.y * outH);
+              const w = Math.round(slot.w * outW);
+              const h = Math.round(slot.h * outH);
+              ctx.drawImage(images[j], x, y, w, h);
+            }
+            try { resolve(canvas.toDataURL("image/jpeg", 0.92)); } catch { resolve(null); }
+          }
+        };
+        img.onerror = () => { done += 1; if (done === total) resolve(null); };
+        img.src = uris[i];
+      }
+      setTimeout(() => resolve(null), 12000);
+    });
+  }, []);
+
+  const bakeOverlaysWeb = useCallback(async (inputUri: string): Promise<string> => {
+    if (!isWeb || mediaType !== "image") return inputUri;
+    if (textOverlays.length === 0 && taggedUsers.length === 0 && drawPaths.length === 0) return inputUri;
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = img.naturalWidth || 1080;
+          canvas.height = img.naturalHeight || 1920;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) { resolve(inputUri); return; }
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          const sx = canvas.width / width;
+          const sy = canvas.height / previewHeight;
+
+          for (const p of drawPaths) {
+            const tokens = p.d.match(/[ML][^ML]*/g) ?? [];
+            if (tokens.length === 0) continue;
+            ctx.beginPath();
+            for (const tk of tokens) {
+              const cmd = tk[0];
+              const pair = tk.slice(1).split(",");
+              const px = Number(pair[0]) * sx;
+              const py = Number(pair[1]) * sy;
+              if (!Number.isFinite(px) || !Number.isFinite(py)) continue;
+              if (cmd === "M") ctx.moveTo(px, py);
+              else ctx.lineTo(px, py);
+            }
+            ctx.strokeStyle = p.color || "#fff";
+            ctx.lineWidth = (p.width || 4) * Math.max(sx, sy);
+            ctx.lineCap = "round";
+            ctx.lineJoin = "round";
+            ctx.stroke();
+          }
+
+          for (const t of textOverlays) {
+            const x = t.x * sx;
+            const y = t.y * sy;
+            const fs = (t.fontSize || 32) * Math.max(sx, sy);
+            const text = t.text || "";
+            if (!text) continue;
+            ctx.font = `${t.fontWeight || "700"} ${Math.round(fs)}px sans-serif`;
+            ctx.textBaseline = "top";
+            const pad = 10 * Math.max(sx, sy);
+            const mw = Math.max(...text.split("\n").map((ln) => ctx.measureText(ln).width));
+            const mh = text.split("\n").length * fs * 1.15;
+            if (t.bg && t.bg !== "transparent") {
+              ctx.fillStyle = t.bg;
+              ctx.fillRect(x - pad, y - pad, mw + pad * 2, mh + pad * 2);
+            }
+            ctx.fillStyle = t.color || "#fff";
+            text.split("\n").forEach((ln, i) => ctx.fillText(ln, x, y + i * fs * 1.15));
+          }
+
+          for (const u of taggedUsers) {
+            const label = `@${u.username}`;
+            const x = u.x * sx;
+            const y = u.y * sy;
+            ctx.font = `${Math.round(24 * Math.max(sx, sy))}px sans-serif`;
+            const tw = ctx.measureText(label).width;
+            const th = 34 * Math.max(sx, sy);
+            ctx.fillStyle = "rgba(0,0,0,0.65)";
+            ctx.fillRect(x, y, tw + 26 * Math.max(sx, sy), th);
+            ctx.fillStyle = "#fff";
+            ctx.textBaseline = "middle";
+            ctx.fillText(label, x + 12 * Math.max(sx, sy), y + th / 2);
+          }
+
+          resolve(canvas.toDataURL("image/jpeg", 0.92));
+        } catch {
+          resolve(inputUri);
+        }
+      };
+      img.onerror = () => resolve(inputUri);
+      img.src = inputUri;
+      setTimeout(() => resolve(inputUri), 12000);
+    });
+  }, [drawPaths, mediaType, taggedUsers, textOverlays]);
+
   const runNativeCanvasEffectBake = useCallback((fileUri: string, effectId: WebglEffectId): Promise<string> => {
     if (effectId === "none" || isWeb) return Promise.resolve(fileUri);
     return new Promise((resolve) => {
@@ -663,7 +805,7 @@ export default function CapturePreview() {
   };
 
   useEffect(() => {
-    if (!isAndroidNative || mediaType !== "image" || !effectiveUri) {
+    if (!isAndroidNative || mediaType !== "image" || !effectiveUri || activeWebglEffect !== "none") {
       setAndroidPreviewJob(null);
       setAndroidPreviewUri(null);
       androidPreviewKeyRef.current = "";
@@ -833,7 +975,13 @@ export default function CapturePreview() {
       router.push({ pathname: "/new" as any, params: { source: "camera", uri: finalUri, mediaType, filter } });
       return;
     }
-    let bakedUri = await maybeBakeMedia(finalUri);
+    let workingUri = finalUri;
+    if (mediaType === "image" && collageUris.length > 1) {
+      const merged = await bakeCollageWeb(collageUris, collageLayout);
+      if (merged) workingUri = merged;
+    }
+    let bakedUri = await maybeBakeMedia(workingUri);
+    if (mediaType === "image") bakedUri = await bakeOverlaysWeb(bakedUri);
 
     if (mode === "story") {
       try {
@@ -881,9 +1029,9 @@ export default function CapturePreview() {
       const { hashtags, mentions } = extractTags(caption);
       const allMentions = [...mentions, ...taggedUsers.map(t => t.username)];
 
-      // If collage, upload each image as a carousel
-      const urisToUpload = collageUris.length > 1 ? collageUris : [bakedUri];
-      const isCarousel = urisToUpload.length > 1;
+      // Collage now uploads as a single merged image preserving selected layout.
+      const urisToUpload = [bakedUri];
+      const isCarousel = false;
 
       const { data: insertedPost, error: postError } = await supabase.from("posts").insert({
         user_id: uid, media_type: mediaType, image_path: "", // will be set from first media
@@ -1202,26 +1350,30 @@ export default function CapturePreview() {
             />
           ) : mediaType === "image" ? (
             hasCollagePreview ? (
-              <View style={[styles.preview, previewMediaStyle]}>
-                <FlatList
-                  data={collageUris}
-                  keyExtractor={(item, idx) => `${item}-${idx}`}
-                  horizontal
-                  pagingEnabled
-                  showsHorizontalScrollIndicator={false}
-                  onMomentumScrollEnd={(e) => {
-                    const idx = Math.round((e.nativeEvent.contentOffset.x || 0) / width);
-                    setCollagePreviewIndex(Math.max(0, Math.min(collageUris.length - 1, idx)));
-                  }}
-                  renderItem={({ item }) => (
-                    isWeb ? (
-                      <View style={{ width, height: previewHeight }}>
+              <View style={[styles.preview, previewMediaStyle, { backgroundColor: "#000" }]}>
+                {collageUris.map((item, idx) => {
+                  const slot = collageSlots[idx];
+                  if (!slot) return null;
+                  return (
+                    <View
+                      key={`${item}-${idx}`}
+                      style={{
+                        position: "absolute",
+                        left: slot.x * width,
+                        top: slot.y * previewHeight,
+                        width: slot.w * width,
+                        height: slot.h * previewHeight,
+                        padding: 1.5,
+                      }}
+                    >
+                      {isWeb ? (
                         <img
                           src={item}
                           style={{
                             width: "100%",
                             height: "100%",
                             objectFit: "cover",
+                            borderRadius: 6,
                             filter: !isComparing
                               ? [effectiveCaptureCssFilter || "", activeFilter.cssFilter || "", getEffectCSSFilter(activeWebglEffect) || ""].filter(Boolean).join(" ") || undefined
                               : undefined,
@@ -1229,17 +1381,17 @@ export default function CapturePreview() {
                           onLoad={() => setMediaLoaded(true)}
                           onError={() => setMediaLoaded(true)}
                         />
-                      </View>
-                    ) : (
-                      <Image
-                        source={{ uri: item }}
-                        style={{ width, height: previewHeight }}
-                        resizeMode="cover"
-                        onLoadEnd={() => setMediaLoaded(true)}
-                      />
-                    )
-                  )}
-                />
+                      ) : (
+                        <Image
+                          source={{ uri: item }}
+                          style={{ width: "100%", height: "100%", borderRadius: 6 }}
+                          resizeMode="cover"
+                          onLoadEnd={() => setMediaLoaded(true)}
+                        />
+                      )}
+                    </View>
+                  );
+                })}
               </View>
             ) : (
             isWeb && !isComparing && (activeFilter.cssFilter || effectiveCaptureCssFilter || activeWebglEffect !== "none") ? (
@@ -1425,7 +1577,7 @@ export default function CapturePreview() {
       </Pressable>
       {hasCollagePreview && (
         <View style={styles.collageCounterBadge}>
-          <Text style={styles.collageCounterText}>{collagePreviewIndex + 1}/{collageUris.length}</Text>
+          <Text style={styles.collageCounterText}>{collageUris.length} fotos</Text>
         </View>
       )}
       {taggedUsers.length > 0 && (
@@ -1548,148 +1700,33 @@ export default function CapturePreview() {
 
       {/* Bottom panel */}
       <View style={[styles.bottomPanel, { paddingBottom: insets.bottom + 16 }]}>
-        {/* Effects panel — Premium tabbed: Filtros / FX / AR */}
+        {/* Effects panel — FX only */}
         {showEffectsPanel && (
           <View style={styles.beautifyPanel}>
-            {/* Tab bar */}
-            <View style={{ flexDirection: "row", marginBottom: 10, paddingHorizontal: 4 }}>
-              {([
-                { key: "filters" as const, label: "Filtros", icon: "◑" },
-                { key: "fx" as const, label: "Efeitos", icon: "⚡" },
-                { key: "ar" as const, label: "AR & Make", icon: "✨" },
-              ]).map(tab => (
-                <TouchableOpacity
-                  key={tab.key}
-                  activeOpacity={0.85}
-                  onPress={() => setEffectsTab(tab.key)}
-                  style={{
-                    flex: 1,
-                    paddingVertical: 8,
-                    borderRadius: 999,
-                    backgroundColor: effectsTab === tab.key ? "rgba(255,51,85,0.2)" : "rgba(255,255,255,0.06)",
-                    marginHorizontal: 3,
-                    alignItems: "center",
-                    borderWidth: effectsTab === tab.key ? 1 : 0,
-                    borderColor: "rgba(255,51,85,0.5)",
-                  }}
-                >
-                  <Text style={{ color: effectsTab === tab.key ? "#fff" : "rgba(255,255,255,0.6)", fontSize: 12, fontWeight: "800" }}>
-                    {tab.icon} {tab.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {/* Filters tab */}
-            {effectsTab === "filters" && (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 4, gap: 4 }} style={{ marginBottom: 6 }}>
-                {FILTERS.map(f => {
-                  const active = f.id === filter;
-                  const thumbBg = f.id === "none" ? "rgba(255,255,255,0.08)" : f.accent + "30";
-                  const thumbBorder = active ? (f.accent !== "transparent" ? f.accent : "#fff") : "transparent";
-                  return (
-                    <TouchableOpacity key={f.id} activeOpacity={0.85} onPress={() => { setFilter(f.id); setFilterIntensity(1.0); }} style={styles.effectFilterItem}>
-                      <View style={[styles.effectFilterThumb, { backgroundColor: thumbBg, borderColor: thumbBorder, borderWidth: active ? 2.5 : 1, borderStyle: "solid" as any }]}>
-                        {f.id !== "none" && <View style={{ width: 30, height: 30, borderRadius: 99, backgroundColor: f.accent, opacity: 0.7 }} />}
-                        {active && <Text style={[styles.effectFilterCheck, { position: "absolute" }]}>✓</Text>}
-                      </View>
-                      <Text style={[styles.effectFilterName, active && styles.effectFilterNameActive]} numberOfLines={1}>{f.name}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-            )}
-
-            {/* FX tab — WebGL effects */}
-            {effectsTab === "fx" && (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 4, gap: 4 }} style={{ marginBottom: 6 }}>
-                {WEBGL_EFFECTS.map(fx => {
-                  const active = fx.id === activeWebglEffect;
-                  return (
-                    <TouchableOpacity
-                      key={fx.id}
-                      activeOpacity={0.85}
-                      onPress={() => setActiveWebglEffect(active ? "none" : fx.id)}
-                      style={styles.effectFilterItem}
-                    >
-                      <View style={[styles.effectFilterThumb, {
-                        backgroundColor: active ? "rgba(255,51,85,0.15)" : "rgba(255,255,255,0.06)",
-                        borderColor: active ? "#ff3355" : "rgba(255,255,255,0.1)",
-                        borderWidth: active ? 2.5 : 1,
-                      }]}>
-                        <Text style={{ fontSize: 22 }}>{fx.icon}</Text>
-                        {active && <Text style={[styles.effectFilterCheck, { position: "absolute", bottom: 2, right: 2 }]}>✓</Text>}
-                      </View>
-                      <Text style={[styles.effectFilterName, active && styles.effectFilterNameActive]} numberOfLines={1}>{fx.name}</Text>
-                      <Text style={{ color: "rgba(255,255,255,0.35)", fontSize: 8, textAlign: "center" as any }} numberOfLines={1}>{fx.category}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-            )}
-
-            {/* AR & Makeup tab */}
-            {effectsTab === "ar" && (
-              <View>
-                <Text style={{ color: "rgba(255,255,255,0.5)", fontSize: 10, fontWeight: "700", marginBottom: 6, paddingHorizontal: 4, letterSpacing: 1 }}>
-                  💄 MAQUIAGEM WebGL — presets profissionais
-                </Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 4, gap: 4 }} style={{ marginBottom: 8 }}>
-                  {[
-                    { id: "none", name: "Nenhum", icon: "⊘", tag: "" },
-                    { id: "makeup_natural_glow", name: "Natural Glow", icon: "🌸", tag: "WebGL" },
-                    { id: "makeup_glam_night", name: "Glam Night", icon: "✨", tag: "WebGL" },
-                    { id: "makeup_soft_pink", name: "Soft Pink", icon: "💗", tag: "WebGL" },
-                    { id: "makeup_bold_red", name: "Bold Red", icon: "💋", tag: "WebGL" },
-                    { id: "makeup_sunset_vibes", name: "Sunset", icon: "🌅", tag: "WebGL" },
-                    { id: "makeup_ice_queen", name: "Ice Queen", icon: "❄️", tag: "WebGL" },
-                  ].map(ar => (
-                    <TouchableOpacity key={ar.id} activeOpacity={0.85} onPress={() => {}}
-                      style={styles.effectFilterItem}>
-                      <View style={[styles.effectFilterThumb, { backgroundColor: "rgba(255,255,255,0.06)", borderColor: ar.tag ? "rgba(0,149,246,0.3)" : "rgba(255,255,255,0.1)", borderWidth: ar.tag ? 1.5 : 1 }]}>
-                        <Text style={{ fontSize: 22 }}>{ar.icon}</Text>
-                      </View>
-                      <Text style={styles.effectFilterName} numberOfLines={1}>{ar.name}</Text>
-                      {ar.tag ? <Text style={{ color: "rgba(0,149,246,0.8)", fontSize: 7, fontWeight: "800" }}>{ar.tag}</Text> : null}
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-
-                <Text style={{ color: "rgba(255,255,255,0.5)", fontSize: 10, fontWeight: "700", marginBottom: 6, paddingHorizontal: 4, letterSpacing: 1 }}>
-                  🎭 AR FACE — efeitos ao vivo na câmera
-                </Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 4, gap: 4 }} style={{ marginBottom: 6 }}>
-                  {[
-                    { id: "makeup_lipstick", name: "Batom", icon: "💄" },
-                    { id: "makeup_blush", name: "Blush", icon: "🌺" },
-                    { id: "makeup_eyeshadow", name: "Sombra", icon: "👁️" },
-                    { id: "makeup_contour", name: "Contorno", icon: "🎭" },
-                    { id: "makeup_full", name: "Make Completa", icon: "💋" },
-                    { id: "beauty_glow", name: "Glow", icon: "✨" },
-                    { id: "neon_outline", name: "Neon Face", icon: "💡" },
-                    { id: "heart_eyes", name: "Heart Eyes", icon: "😍" },
-                    { id: "crown", name: "Coroa", icon: "👑" },
-                    { id: "sunglasses", name: "Óculos", icon: "🕶️" },
-                    { id: "cat_ears", name: "Gato", icon: "🐱" },
-                    { id: "dog_nose", name: "Cachorro", icon: "🐶" },
-                    { id: "angel_halo", name: "Anjo", icon: "😇" },
-                    { id: "sparkles", name: "Brilhos", icon: "⭐" },
-                    { id: "butterfly", name: "Borboleta", icon: "🦋" },
-                  ].map(ar => (
-                    <TouchableOpacity key={ar.id} activeOpacity={0.85} onPress={() => {}}
-                      style={styles.effectFilterItem}>
-                      <View style={[styles.effectFilterThumb, { backgroundColor: "rgba(255,255,255,0.06)", borderColor: "rgba(255,255,255,0.1)", borderWidth: 1 }]}>
-                        <Text style={{ fontSize: 22 }}>{ar.icon}</Text>
-                      </View>
-                      <Text style={styles.effectFilterName} numberOfLines={1}>{ar.name}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-                <Text style={{ color: "rgba(255,255,255,0.35)", fontSize: 10, textAlign: "center" as any, paddingVertical: 4 }}>
-                  💡 Efeitos AR funcionam ao vivo na câmera — volte à captura para usar
-                </Text>
-              </View>
-            )}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 4, gap: 4 }} style={{ marginBottom: 6 }}>
+              {WEBGL_EFFECTS.map(fx => {
+                const active = fx.id === activeWebglEffect;
+                return (
+                  <TouchableOpacity
+                    key={fx.id}
+                    activeOpacity={0.85}
+                    onPress={() => setActiveWebglEffect(active ? "none" : fx.id)}
+                    style={styles.effectFilterItem}
+                  >
+                    <View style={[styles.effectFilterThumb, {
+                      backgroundColor: active ? "rgba(255,51,85,0.15)" : "rgba(255,255,255,0.06)",
+                      borderColor: active ? "#ff3355" : "rgba(255,255,255,0.1)",
+                      borderWidth: active ? 2.5 : 1,
+                    }]}>
+                      <Text style={{ fontSize: 22 }}>{fx.icon}</Text>
+                      {active && <Text style={[styles.effectFilterCheck, { position: "absolute", bottom: 2, right: 2 }]}>✓</Text>}
+                    </View>
+                    <Text style={[styles.effectFilterName, active && styles.effectFilterNameActive]} numberOfLines={1}>{fx.name}</Text>
+                    <Text style={{ color: "rgba(255,255,255,0.35)", fontSize: 8, textAlign: "center" as any }} numberOfLines={1}>{fx.category}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
           </View>
         )}
 

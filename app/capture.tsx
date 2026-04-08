@@ -116,11 +116,9 @@ export default function CaptureScreen() {
 
   // ── Live filter (Instagram-style, applied before capture) ──
   const [liveFilter, setLiveFilter] = useState<LiveFilterDef>(LIVE_FILTERS[0]);
-  const [showLiveFiltersPicker, setShowLiveFiltersPicker] = useState(false);
 
   // ── AR Face effects ──
   const [arEffect, setArEffect] = useState<AREffectId>("none");
-  const [showARPicker, setShowARPicker] = useState(false);
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
 
   // ── WebGL Effects ──
@@ -828,9 +826,7 @@ export default function CaptureScreen() {
     { key: "flash", icon: flashOn ? "⚡" : "⚡︎", label: flashOn ? "On" : "Off", onPress: toggleFlash, active: flashOn },
     { key: "timer", icon: "⏱", label: timerSeconds === 0 ? "Timer" : `${timerSeconds}s`, onPress: cycleTimer, active: timerSeconds > 0 },
     { key: "grid", icon: "⊞", label: "Grid", onPress: toggleGrid, active: showGrid },
-    { key: "filters", icon: "◑", label: "Filtros", onPress: () => { setShowLiveFiltersPicker(p => !p); setShowEffectsPicker(false); setShowARPicker(false); }, active: liveFilter.id !== "none" },
-    { key: "effects", icon: "✦", label: "Efeitos", onPress: () => { setShowEffectsPicker(p => !p); setShowARPicker(false); setShowLiveFiltersPicker(false); }, active: activeEffect !== "none" },
-    { key: "ar", icon: "😀", label: "AR", onPress: () => { setShowARPicker(p => !p); setShowEffectsPicker(false); setShowLiveFiltersPicker(false); }, active: arEffect !== "none" },
+    { key: "effects", icon: "✦", label: "Efeitos", onPress: () => { setShowEffectsPicker(p => !p); }, active: activeEffect !== "none" },
     { key: "collage", icon: "⊡", label: "Layout", onPress: () => setShowCollageMenu(p => !p), active: isCollageMode },
   ];
 
@@ -1298,46 +1294,6 @@ export default function CaptureScreen() {
       </Modal>
 
       {/* ── Effects picker (WebGL effects) ── */}
-      {showLiveFiltersPicker && !isCollageMode && (
-        <View style={styles.effectsPickerOverlay}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 8, gap: 4 }}>
-            {LIVE_FILTERS.map(f => {
-              const isActive = f.id === liveFilter.id;
-              const thumbCss = f.cssFilter && f.cssFilter !== "none" ? f.cssFilter : undefined;
-              return (
-                <TouchableOpacity
-                  key={f.id}
-                  activeOpacity={0.8}
-                  onPress={() => { setLiveFilter(f); if (f.id !== "none") setShowLiveFiltersPicker(false); }}
-                  style={[styles.effectPickerItem, isActive && styles.effectPickerItemActive]}
-                >
-                  <View style={styles.liveFilterThumb}>
-                    <LinearGradient
-                      colors={["#222", "#666", "#b9a58f"]}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                      style={[
-                        styles.liveFilterThumbBase,
-                        isWeb && thumbCss ? ({ filter: thumbCss, WebkitFilter: thumbCss } as any) : null,
-                      ]}
-                    />
-                    <View style={styles.liveFilterThumbShine} />
-                    <View style={[styles.liveFilterThumbAccent, { backgroundColor: f.accent || "rgba(255,255,255,0.25)" }]} />
-                    {f.id === "none" && (
-                      <View style={styles.liveFilterThumbNone}>
-                        <Text style={styles.liveFilterThumbNoneText}>N</Text>
-                      </View>
-                    )}
-                  </View>
-                  <Text style={[styles.effectPickerLabel, isActive && { color: "#fff" }]} numberOfLines={1}>{f.name}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </View>
-      )}
-
-      {/* ── Effects picker (WebGL effects) ── */}
       {showEffectsPicker && !isCollageMode && (
         <View style={styles.effectsPickerOverlay}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 8, gap: 4 }}>
@@ -1359,19 +1315,7 @@ export default function CaptureScreen() {
         </View>
       )}
 
-      {/* ── AR Face effects picker ── */}
-      {showARPicker && !isCollageMode && (
-        <View style={styles.arPickerOverlay}>
-          <FaceAROverlay
-            videoRef={cameraVideoRef}
-            activeEffect={arEffect}
-            onEffectChange={(eff) => { setArEffect(eff); if (eff !== "none") setShowARPicker(false); }}
-            showPicker={true}
-            canvasWidth={cameraWidth}
-            canvasHeight={cameraHeight}
-          />
-        </View>
-      )}
+      {/* AR picker hidden in APK/native for now: current implementation is web-only face mesh */}
 
       {/* Bottom (not in collage mode) */}
       {!isCollageMode && !isPostMode ? (

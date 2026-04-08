@@ -417,6 +417,20 @@ export default function StoryViewer({
   const durationSec = typeof current.duration === "number" && current.duration > 0 ? current.duration : STORY_DURATION_DEFAULT;
   const f = getFilter(current?.filter);
   const isCloseFriendsStory = !!current?.close_friends_only;
+  const storyTextOverlays = useMemo(() => {
+    const raw = current?.text_overlays as any;
+    if (!raw) return [] as any[];
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw === "string") {
+      try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  }, [current?.text_overlays]);
 
   const handlePress = (evt: any) => {
     if (viewersSheetOpen || showOptionsMenu || isSwipingRef.current) return;
@@ -681,6 +695,31 @@ export default function StoryViewer({
             <Text style={s.captionText} numberOfLines={3}>{current.caption}</Text>
           </View>
         )}
+        {storyTextOverlays.map((t: any, idx: number) => (
+          <View
+            key={`story-text-${idx}`}
+            pointerEvents="none"
+            style={[
+              s.storyTextOverlay,
+              {
+                left: Number(t?.x ?? 0),
+                top: Number(t?.y ?? 0),
+                backgroundColor: t?.bg && t.bg !== "transparent" ? t.bg : "transparent",
+              },
+            ]}
+          >
+            <Text
+              style={{
+                color: t?.color || "#fff",
+                fontSize: Number(t?.fontSize ?? 28),
+                fontWeight: (t?.fontWeight || "700") as any,
+                textAlign: (t?.align || "center") as any,
+              }}
+            >
+              {String(t?.text ?? "")}
+            </Text>
+          </View>
+        ))}
 
         {/* Heart animation */}
         {showHeart && (
@@ -820,6 +859,7 @@ const s = StyleSheet.create({
   userDotActive: { backgroundColor: "#fff", width: 16 },
   captionOverlay: { position: "absolute", bottom: 120, left: 16, right: 60, zIndex: 8 },
   captionText: { color: "#fff", fontSize: 15, fontWeight: "600", textShadowColor: "rgba(0,0,0,0.8)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 },
+  storyTextOverlay: { position: "absolute", maxWidth: SCREEN_W - 24, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8, zIndex: 8 },
   heartOverlay: { position: "absolute", top: "50%" as any, left: "50%" as any, marginLeft: -40, marginTop: -40, zIndex: 20 },
   bottomBar: { position: "absolute", bottom: 0, left: 0, right: 0, zIndex: 10, paddingHorizontal: 12, paddingBottom: Platform.select({ ios: 44, android: 32, default: 24 }) },
   ownerBottomRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 12 },
