@@ -378,6 +378,42 @@ export default function CaptureScreen() {
     };
   }, []);
 
+  // Force CSS filter on the real camera <video> element (important for WebView/Capacitor).
+  // Keep this hook above any early returns to preserve hooks order.
+  useEffect(() => {
+    if (!isWeb) return;
+    let cancelled = false;
+    let tries = 0;
+    const maxTries = 24;
+    const apply = () => {
+      if (cancelled) return;
+      const v = getActiveCameraVideo();
+      if (!v) return;
+      const css = liveCSSFilter || "none";
+      try {
+        (v.style as any).filter = css;
+        (v.style as any).webkitFilter = css;
+      } catch {}
+    };
+    apply();
+    const id = setInterval(() => {
+      tries += 1;
+      apply();
+      if (tries >= maxTries) clearInterval(id);
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+      const v = getActiveCameraVideo();
+      if (v) {
+        try {
+          (v.style as any).filter = "none";
+          (v.style as any).webkitFilter = "none";
+        } catch {}
+      }
+    };
+  }, [getActiveCameraVideo, liveCSSFilter, cameraKey]);
+
   const loadGalleryAssets = async (albumId?: string) => {
     try {
       const opts: MediaLibrary.AssetsOptions = {
@@ -838,41 +874,6 @@ export default function CaptureScreen() {
     liveFilter,
     activeEffect,
   });
-
-  // Force CSS filter on the real camera <video> element (important for WebView/Capacitor).
-  useEffect(() => {
-    if (!isWeb) return;
-    let cancelled = false;
-    let tries = 0;
-    const maxTries = 24;
-    const apply = () => {
-      if (cancelled) return;
-      const v = getActiveCameraVideo();
-      if (!v) return;
-      const css = liveCSSFilter || "none";
-      try {
-        (v.style as any).filter = css;
-        (v.style as any).webkitFilter = css;
-      } catch {}
-    };
-    apply();
-    const id = setInterval(() => {
-      tries += 1;
-      apply();
-      if (tries >= maxTries) clearInterval(id);
-    }, 250);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-      const v = getActiveCameraVideo();
-      if (v) {
-        try {
-          (v.style as any).filter = "none";
-          (v.style as any).webkitFilter = "none";
-        } catch {}
-      }
-    };
-  }, [getActiveCameraVideo, liveCSSFilter, cameraKey]);
 
   const rightTools = [
     { key: "flash", icon: flashOn ? "⚡" : "⚡︎", label: flashOn ? "On" : "Off", onPress: toggleFlash, active: flashOn },
