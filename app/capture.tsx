@@ -378,6 +378,24 @@ export default function CaptureScreen() {
     };
   }, []);
 
+  // Compute combined CSS filter for live preview
+  const liveCSSFilter = (() => {
+    let f = liveFilter.cssFilter !== "none" ? liveFilter.cssFilter : "";
+    const effectCSS = getEffectCSSFilter(activeEffect);
+    if (effectCSS) f = f ? `${f} ${effectCSS}` : effectCSS;
+    return f || undefined;
+  })();
+  const liveCameraWebFilterStyle = isWeb && liveCSSFilter
+    ? ({ filter: liveCSSFilter, WebkitFilter: liveCSSFilter } as any)
+    : undefined;
+  const shouldUseTintOverlay = !isWeb;
+  const previewTintLayers = getPreviewTintLayers({
+    isWeb,
+    isCapacitor,
+    liveFilter,
+    activeEffect,
+  });
+
   // Force CSS filter on the real camera <video> element (important for WebView/Capacitor).
   // Keep this hook above any early returns to preserve hooks order.
   useEffect(() => {
@@ -856,24 +874,6 @@ export default function CaptureScreen() {
   const cameraWidth = W;
 
   const flipRotation = flipAnim.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "90deg"] });
-
-  // Compute combined CSS filter for live preview
-  const liveCSSFilter = (() => {
-    let f = liveFilter.cssFilter !== "none" ? liveFilter.cssFilter : "";
-    const effectCSS = getEffectCSSFilter(activeEffect);
-    if (effectCSS) f = f ? `${f} ${effectCSS}` : effectCSS;
-    return f || undefined;
-  })();
-  const liveCameraWebFilterStyle = isWeb && liveCSSFilter
-    ? ({ filter: liveCSSFilter, WebkitFilter: liveCSSFilter } as any)
-    : undefined;
-  const shouldUseTintOverlay = !isWeb;
-  const previewTintLayers = getPreviewTintLayers({
-    isWeb,
-    isCapacitor,
-    liveFilter,
-    activeEffect,
-  });
 
   const rightTools = [
     { key: "flash", icon: flashOn ? "⚡" : "⚡︎", label: flashOn ? "On" : "Off", onPress: toggleFlash, active: flashOn },
