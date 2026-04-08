@@ -1,5 +1,6 @@
 // app/notifications.tsx — Instagram-style unified notifications
 import { useTheme } from "@/contexts/ThemeContext";
+import { filterInboxNotifications } from "@/lib/notificationTypes";
 import { getFollowState } from "@/lib/social";
 import { supabase } from "@/lib/supabase";
 import { useFocusEffect } from "@react-navigation/native";
@@ -223,7 +224,7 @@ export default function NotificationsScreen() {
         })
       );
 
-      return mapped;
+      return filterInboxNotifications(mapped);
     } catch {
       return [];
     }
@@ -284,10 +285,12 @@ export default function NotificationsScreen() {
       });
 
       if (!error && Array.isArray(data) && data.length > 0) {
-        nextNotifications = data.map((n: any) => ({
-          ...n,
-          follow_state: n.i_follow_actor ? "following" as const : "not_following" as const,
-        }));
+        nextNotifications = filterInboxNotifications(
+          data.map((n: any) => ({
+            ...n,
+            follow_state: n.i_follow_actor ? ("following" as const) : ("not_following" as const),
+          }))
+        );
       } else {
         nextNotifications = await fetchDirectNotifications();
         if (nextNotifications.length === 0) {
