@@ -335,40 +335,14 @@ export default function ConversationScreen() {
     }
   }, [conversationId]);
 
-  async function reactivateConversationForUser() {
-    if (!authUserId || !conversationId) return;
-
-    const cutoff = await getMessageCutoffForUser(authUserId, conversationId);
-    // Sem exclusão local: não criar linha (evita esconder histórico por engano).
-    if (!cutoff) return;
-
-    const { error: reactivateError } = await supabase
-      .from("conversation_deletions")
-      .upsert(
-        {
-          conversation_id: conversationId,
-          user_id: authUserId,
-          deleted_at: cutoff,
-          messages_hidden_before: cutoff,
-          hidden_from_inbox: false,
-        },
-        { onConflict: "conversation_id,user_id" }
-      );
-
-    if (reactivateError) console.warn("reactivate upsert error:", reactivateError);
-  }
-
   async function syncConversationAfterSend(params: {
     preview: string;
     sentAt: string;
   }) {
     const { preview, sentAt } = params;
 
-    try {
-      await reactivateConversationForUser();
-    } catch (reactivateErr: any) {
-      console.warn("reactivate non-blocking:", reactivateErr);
-    }
+    // Não fazer upsert em conversation_deletions aqui: reabrir (+ / perfil) já marca
+    // hidden_from_inbox=false. Upsert extra no envio gerava 403 (RLS) e falhava em silêncio.
 
     const { error: conversationUpdateError } = await supabase
       .from("conversations")
