@@ -998,15 +998,7 @@ export default function CapturePreview() {
       const merged = await bakeCollageWeb(collageUris, collageLayout);
       if (merged) workingUri = merged;
     }
-    const isCollageImage = mediaType === "image" && collageUris.length > 1;
-    let bakedUri = await maybeBakeMedia(workingUri, { skipCanvasFx: isCollageImage });
-    if (isCollageImage && activeWebglEffect !== "none") {
-      const collageFxCss = getEffectCSSFilter(activeWebglEffect);
-      if (collageFxCss && isWeb) {
-        const cssBaked = await bakeWebCssFilter(bakedUri, collageFxCss);
-        if (cssBaked) bakedUri = cssBaked;
-      }
-    }
+    let bakedUri = await maybeBakeMedia(workingUri, { skipCanvasFx: false });
     if (mediaType === "image") bakedUri = await bakeOverlaysWeb(bakedUri);
 
     if (mode === "story") {
