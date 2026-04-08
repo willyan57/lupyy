@@ -324,6 +324,7 @@ export default function CapturePreview() {
 
   const [userId, setUserId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [sendPhase, setSendPhase] = useState<string>("");
   const [mediaLoaded, setMediaLoaded] = useState(false);
   const [toolsCollapsed, setToolsCollapsed] = useState(true);
   const [caption, setCaption] = useState("");
@@ -986,20 +987,30 @@ export default function CapturePreview() {
     if (mode === "story") {
       try {
         setSending(true);
+        setSendPhase("Preparando...");
         let uid = userId;
         if (!uid) { const { data } = await supabase.auth.getUser(); uid = data.user?.id ?? null; }
         if (!uid) { setSending(false); return; }
         const isVideo = mediaType === "video";
         let uploadUri = bakedUri;
         let thumbUploadUri: string | null = null;
-        if (!isVideo) { uploadUri = await compressImage(bakedUri); }
-        else { const p = await prepareVideo(bakedUri); uploadUri = p.videoUri; thumbUploadUri = p.thumbUri ?? null; }
+        if (!isVideo) {
+          setSendPhase("Otimizando imagem...");
+          // Web collage comes as data URL already compressed; avoid ImageManipulator stalls on large data URLs.
+          uploadUri = Platform.OS === "web" ? bakedUri : await compressImage(bakedUri);
+        }
+        else {
+          setSendPhase("Preparando vídeo...");
+          const p = await prepareVideo(bakedUri); uploadUri = p.videoUri; thumbUploadUri = p.thumbUri ?? null;
+        }
         const timestamp = Date.now();
         const basePath = `${uid}/${timestamp}`;
         const ext = isVideo ? "mp4" : "jpg";
+        setSendPhase("Enviando mídia...");
         await uploadToBucket("stories", `${basePath}.${ext}`, uploadUri, isVideo ? "video/mp4" : "image/jpeg");
         let thumbPath: string | null = null;
         if (isVideo && thumbUploadUri) { thumbPath = `${basePath}.jpg`; await uploadToBucket("stories", thumbPath, thumbUploadUri, "image/jpeg"); }
+        setSendPhase("Finalizando...");
         await supabase.from("stories").insert({
           user_id: uid, media_type: mediaType, media_path: `${basePath}.${ext}`,
           thumbnail_path: thumbPath, caption: caption || null, has_sound: isVideo,
@@ -1010,10 +1021,12 @@ export default function CapturePreview() {
           draw_paths: drawPaths.length > 0 ? JSON.stringify(drawPaths) : null,
         });
         setSending(false);
+        setSendPhase("");
         router.replace("/feed");
       } catch (err) {
         console.log("Story error:", err);
         setSending(false);
+        setSendPhase("");
         Alert.alert("Erro", "Não foi possível publicar. Tente novamente.");
       }
       return;
@@ -1022,6 +1035,7 @@ export default function CapturePreview() {
     // Post — handle collage as carousel
     try {
       setSending(true);
+      setSendPhase("Preparando...");
       let uid = userId;
       if (!uid) { const { data } = await supabase.auth.getUser(); uid = data.user?.id ?? null; }
       if (!uid) { setSending(false); return; }
@@ -1043,11 +1057,18 @@ export default function CapturePreview() {
       for (let i = 0; i < urisToUpload.length; i++) {
         let uploadUri = urisToUpload[i];
         let thumbUri: string | null = null;
-        if (!isVideo) { uploadUri = await compressImage(uploadUri); }
-        else { const p = await prepareVideo(uploadUri); uploadUri = p.videoUri; thumbUri = p.thumbUri ?? null; }
+        if (!isVideo) {
+          setSendPhase(`Otimizando ${i + 1}/${urisToUpload.length}...`);
+          uploadUri = Platform.OS === "web" ? uploadUri : await compressImage(uploadUri);
+        }
+        else {
+          setSendPhase(`Preparando vídeo ${i + 1}/${urisToUpload.length}...`);
+          const p = await prepareVideo(uploadUri); uploadUri = p.videoUri; thumbUri = p.thumbUri ?? null;
+        }
         const timestamp = Date.now();
         const basePath = `${uid}/${timestamp}_${i}`;
         const ext = isVideo ? "mp4" : "jpg";
+        setSendPhase(`Enviando ${i + 1}/${urisToUpload.length}...`);
         await uploadToBucket("posts", `${basePath}.${ext}`, uploadUri, isVideo ? "video/mp4" : "image/jpeg");
         let thumbPath: string | null = null;
         if (isVideo && thumbUri) { thumbPath = `${basePath}.jpg`; await uploadToBucket("posts", thumbPath, thumbUri, "image/jpeg"); }
@@ -1062,12 +1083,14 @@ export default function CapturePreview() {
       }
 
       setSending(false);
+      setSendPhase("");
       const draftId = String(params.collageDraftId ?? "");
       if (draftId) clearCollageDraft(draftId);
       router.replace("/feed");
     } catch (err) {
       console.log("Post error:", err);
       setSending(false);
+      setSendPhase("");
       Alert.alert("Erro", "Não foi possível publicar. Tente novamente.");
     }
   };
@@ -1617,8 +1640,16 @@ export default function CapturePreview() {
       </Animated.View>
 
         {((!mediaLoaded) || aiProcessing || (!!androidPreviewJob && !isComparing)) && (
-        <View style={styles.loadingOverlay}><ActivityIndicator color="#fff" /></View>
-      )}
+          <View style={styles.loadingOverlay}>
+            <ActivityIndicator color="#fff" />
+          </View>
+        )}
+        {sending && (
+          <View style={styles.sendingOverlay}>
+            <ActivityIndicator color="#fff" />
+            <Text style={styles.sendingOverlayText}>{sendPhase || "Enviando..."}</Text>
+          </View>
+        )}
 
       <LinearGradient colors={["rgba(0,0,0,0.75)", "rgba(0,0,0,0.0)"]} style={styles.topGradient} />
       <LinearGradient colors={["rgba(0,0,0,0.0)", "rgba(0,0,0,0.85)"]} style={styles.bottomGradient} />
@@ -2223,6 +2254,24 @@ const styles = StyleSheet.create({
   preview: { width, height: previewHeight },
   videoPreview: { width, height: previewHeight },
   loadingOverlay: { ...StyleSheet.absoluteFillObject as any, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.55)" },
+  sendingOverlay: {
+    position: "absolute",
+    left: 16,
+    right: 16,
+    bottom: 128,
+    zIndex: 40,
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    backgroundColor: "rgba(0,0,0,0.72)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+  sendingOverlayText: { color: "#fff", fontSize: 13, fontWeight: "700", letterSpacing: 0.2 },
   filterOverlay: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
   blurWrap: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
   vignetteWrap: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },

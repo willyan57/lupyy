@@ -417,20 +417,20 @@ export default function StoryViewer({
   const durationSec = typeof current.duration === "number" && current.duration > 0 ? current.duration : STORY_DURATION_DEFAULT;
   const f = getFilter(current?.filter);
   const isCloseFriendsStory = !!current?.close_friends_only;
-  const storyTextOverlays = useMemo(() => {
-    const raw = current?.text_overlays as any;
-    if (!raw) return [] as any[];
-    if (Array.isArray(raw)) return raw;
-    if (typeof raw === "string") {
+  const rawTextOverlays = current?.text_overlays as any;
+  const storyTextOverlays = (() => {
+    if (!rawTextOverlays) return [] as any[];
+    if (Array.isArray(rawTextOverlays)) return rawTextOverlays;
+    if (typeof rawTextOverlays === "string") {
       try {
-        const parsed = JSON.parse(raw);
+        const parsed = JSON.parse(rawTextOverlays);
         return Array.isArray(parsed) ? parsed : [];
       } catch {
         return [];
       }
     }
     return [];
-  }, [current?.text_overlays]);
+  })();
 
   const handlePress = (evt: any) => {
     if (viewersSheetOpen || showOptionsMenu || isSwipingRef.current) return;
