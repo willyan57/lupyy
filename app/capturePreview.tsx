@@ -756,7 +756,8 @@ export default function CapturePreview() {
     });
   }, []);
 
-  const maybeBakeMedia = async (inputUri: string) => {
+  const maybeBakeMedia = async (inputUri: string, options?: { skipCanvasFx?: boolean }) => {
+    const skipCanvasFx = !!options?.skipCanvasFx;
     if (!shouldBakeOnExport) return inputUri;
     try {
       if (mediaType === "image") {
@@ -783,7 +784,7 @@ export default function CapturePreview() {
           }
         }
 
-        if (activeWebglEffect !== "none") {
+        if (activeWebglEffect !== "none" && !skipCanvasFx) {
           if (isWeb || isCapacitor) {
             try {
               const effectBaked = await applyCanvasEffect(bakedUri, activeWebglEffect, 1.0);
@@ -985,7 +986,15 @@ export default function CapturePreview() {
       const merged = await bakeCollageWeb(collageUris, collageLayout);
       if (merged) workingUri = merged;
     }
-    let bakedUri = await maybeBakeMedia(workingUri);
+    const isCollageImage = mediaType === "image" && collageUris.length > 1;
+    let bakedUri = await maybeBakeMedia(workingUri, { skipCanvasFx: isCollageImage });
+    if (isCollageImage && activeWebglEffect !== "none") {
+      const collageFxCss = getEffectCSSFilter(activeWebglEffect);
+      if (collageFxCss && isWeb) {
+        const cssBaked = await bakeWebCssFilter(bakedUri, collageFxCss);
+        if (cssBaked) bakedUri = cssBaked;
+      }
+    }
     if (mediaType === "image") bakedUri = await bakeOverlaysWeb(bakedUri);
 
     if (mode === "story") {

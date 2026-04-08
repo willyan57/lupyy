@@ -110,6 +110,17 @@ const FILTERS: Record<string, { overlay?: string; blur?: number; vignette?: bool
 };
 
 const getFilter = (id?: string | null) => FILTERS[id ?? "none"] ?? FILTERS.none;
+let storyStickersRpcAvailable = true;
+
+function isMissingRpcError(error: any): boolean {
+  const msg = String(error?.message ?? "").toLowerCase();
+  const code = String(error?.code ?? "").toLowerCase();
+  return (
+    code === "pgrst202" ||
+    msg.includes("could not find the function") ||
+    msg.includes("get_story_stickers")
+  );
+}
 
 const formatStoryTime = (createdAt?: string | null): string => {
   if (!createdAt) return "";
@@ -341,13 +352,19 @@ export default function StoryViewer({
   // Load stickers for current story
   useEffect(() => {
     if (!visible || total === 0 || currentIndex >= total) return;
+    if (!storyStickersRpcAvailable) { setStickers([]); return; }
     const current = activeItems[currentIndex];
     if (!current) return;
     const storyId = Number(current.id);
     if (!Number.isFinite(storyId) || storyId <= 0) return;
 
     supabase.rpc("get_story_stickers", { _story_id: storyId })
-      .then(({ data }: { data: any }) => {
+      .then(({ data, error }: { data: any; error: any }) => {
+        if (error) {
+          if (isMissingRpcError(error)) storyStickersRpcAvailable = false;
+          setStickers([]);
+          return;
+        }
         if (data) setStickers(data as StickerData[]);
         else setStickers([]);
       })
