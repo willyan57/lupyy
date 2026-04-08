@@ -1,5 +1,6 @@
 // app/conversations/[id].tsx
 import Colors from "@/constants/Colors";
+import { emitMergeConversationIntoList } from "@/lib/conversationListEvents";
 import { touchUserPresence, useUserPresence } from "@/lib/presence";
 import { supabase } from "@/lib/supabase";
 import { useTypingIndicator } from "@/lib/useTypingIndicator";
@@ -50,6 +51,7 @@ type ConversationRow = {
   user1: string;
   user2: string;
   conversation_type: "friend" | "crush" | null;
+  created_at?: string | null;
 };
 
 type ProfileHeader = {
@@ -72,6 +74,7 @@ export default function ConversationScreen() {
     useState<"friend" | "crush" | null>(null);
 
   const [otherProfile, setOtherProfile] = useState<ProfileHeader | null>(null);
+  const [conversationCreatedAt, setConversationCreatedAt] = useState<string | null>(null);
 
   const [messages, setMessages] = useState<DbMessage[]>([]);
   const [input, setInput] = useState("");
@@ -305,13 +308,14 @@ export default function ConversationScreen() {
 
     const { data: conv } = await supabase
       .from("conversations")
-      .select("id, user1, user2, conversation_type")
+      .select("id, user1, user2, conversation_type, created_at")
       .eq("id", conversationId)
       .maybeSingle();
 
     if (!conv) return;
 
     const conversation = conv as ConversationRow;
+    setConversationCreatedAt(conversation.created_at ?? null);
     const other =
       conversation.user1 === uid
         ? conversation.user2
@@ -355,6 +359,21 @@ export default function ConversationScreen() {
     if (conversationUpdateError) {
       console.warn("conversation sync error:", conversationUpdateError);
     }
+  }
+
+  function notifyInboxListAfterSend(preview: string, sentAt: string) {
+    if (!conversationId || !otherUserId || !conversationType) return;
+    emitMergeConversationIntoList({
+      id: conversationId,
+      conversation_type: conversationType,
+      last_message: preview,
+      last_message_at: sentAt,
+      created_at: conversationCreatedAt,
+      other_user_id: otherUserId,
+      other_user_username: otherProfile?.username ?? null,
+      other_user_full_name: otherProfile?.full_name ?? null,
+      other_user_avatar: otherProfile?.avatar_url ?? null,
+    });
   }
 
   // ── Delete entire conversation (hide for current user) ──
@@ -674,6 +693,7 @@ export default function ConversationScreen() {
         preview: text,
         sentAt,
       });
+      notifyInboxListAfterSend(text, sentAt);
 
       // ── Push notification para o outro usuário ──
       if (otherUserId && otherUserId !== authUserId) {
@@ -807,6 +827,7 @@ export default function ConversationScreen() {
         preview: "[mídia]",
         sentAt: mediaSentAt,
       });
+      notifyInboxListAfterSend("[mídia]", mediaSentAt);
 
     } catch (e: any) {
       if ((e?.message ?? "").includes("CRUSH_CHAT_LOCKED")) {

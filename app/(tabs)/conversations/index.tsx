@@ -1,5 +1,9 @@
 // app/(tabs)/conversations/index.tsx
 import SwipeableTabScreen from "@/components/SwipeableTabScreen";
+import {
+  MERGE_CONVERSATION_INTO_LIST,
+  type MergeConversationListPayload,
+} from "@/lib/conversationListEvents";
 import { getOrCreateConversation, syncConversationDeletionInboxState } from "@/lib/conversations";
 import { supabase } from "@/lib/supabase";
 import { useFocusEffect } from "@react-navigation/native";
@@ -10,6 +14,7 @@ import {
 
   Animated,
   BackHandler,
+  DeviceEventEmitter,
   FlatList,
   Image,
   Modal,
@@ -31,6 +36,12 @@ type RpcConversation = {
   other_user_full_name: string | null;
   other_user_avatar: string | null;
 };
+
+function sortConversationsByRecent(a: RpcConversation, b: RpcConversation) {
+  const ta = a.last_message_at ? new Date(a.last_message_at).getTime() : 0;
+  const tb = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
+  return tb - ta;
+}
 
 type FollowerRow = {
   id: string;
@@ -342,6 +353,28 @@ export default function ConversationsScreen() {
       };
     }, [loadViewerContext, loadConversations])
   );
+
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener(
+      MERGE_CONVERSATION_INTO_LIST,
+      (payload: MergeConversationListPayload) => {
+        const row = payload as RpcConversation;
+        const isCrush = payload.conversation_type === "crush";
+        const merge = (prev: RpcConversation[]) => {
+          const idx = prev.findIndex((c) => c.id === payload.id);
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = { ...next[idx], ...row };
+            return next.sort(sortConversationsByRecent);
+          }
+          return [row, ...prev].sort(sortConversationsByRecent);
+        };
+        if (isCrush) setCrushConversations(merge);
+        else setFriendConversations(merge);
+      }
+    );
+    return () => sub.remove();
+  }, []);
 
   useEffect(() => {
     const channel = supabase
