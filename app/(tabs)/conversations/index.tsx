@@ -257,8 +257,9 @@ export default function ConversationsScreen() {
         return;
       }
 
-      // Reopen as a clean thread for this user:
-      // keep conversation visible again, but hide all older messages.
+      // Reopen as a clean thread for this user (Instagram-style):
+      // deleted_at is NOT NULL in DB — use same timestamp as messages_hidden_before (see CSV samples).
+      // hidden_from_inbox=false shows the row in inbox again without restoring old messages.
       const reopenAt = new Date().toISOString();
       const { error: reactivateError } = await supabase
         .from("conversation_deletions")
@@ -266,8 +267,9 @@ export default function ConversationsScreen() {
           {
             conversation_id: conversation.id,
             user_id: currentUserId,
-            deleted_at: null,
+            deleted_at: reopenAt,
             messages_hidden_before: reopenAt,
+            hidden_from_inbox: false,
           },
           { onConflict: "conversation_id,user_id" }
         );
@@ -459,6 +461,7 @@ export default function ConversationsScreen() {
             user_id: currentUserId,
             deleted_at: now,
             messages_hidden_before: now,
+            hidden_from_inbox: true,
           },
           { onConflict: "conversation_id,user_id" }
         );

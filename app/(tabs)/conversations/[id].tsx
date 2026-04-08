@@ -339,15 +339,18 @@ export default function ConversationScreen() {
     if (!authUserId || !conversationId) return;
 
     const cutoff = await getMessageCutoffForUser(authUserId, conversationId);
+    // Sem exclusão local: não criar linha (evita esconder histórico por engano).
+    if (!cutoff) return;
+
     const { error: reactivateError } = await supabase
       .from("conversation_deletions")
       .upsert(
         {
           conversation_id: conversationId,
           user_id: authUserId,
-          deleted_at: null,
-          // Preserve existing cutoff so reopening does not restore old history.
-          messages_hidden_before: cutoff ?? null,
+          deleted_at: cutoff,
+          messages_hidden_before: cutoff,
+          hidden_from_inbox: false,
         },
         { onConflict: "conversation_id,user_id" }
       );
@@ -402,6 +405,7 @@ export default function ConversationScreen() {
                   user_id: authUserId,
                   deleted_at: now,
                   messages_hidden_before: now,
+                  hidden_from_inbox: true,
                 },
                 { onConflict: "conversation_id,user_id" }
               );

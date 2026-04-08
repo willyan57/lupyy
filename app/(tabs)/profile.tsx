@@ -1614,8 +1614,9 @@ export default function Profile() {
             {
               conversation_id: conversation.id,
               user_id: authUserId,
-              deleted_at: null,
+              deleted_at: reopenAt,
               messages_hidden_before: reopenAt,
+              hidden_from_inbox: false,
             },
             { onConflict: "conversation_id,user_id" }
           );
