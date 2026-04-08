@@ -11,9 +11,7 @@
 
 import Colors from "@/constants/Colors";
 import { EffectBakeWebView, dataUrlToCacheFile, type EffectBakeJob } from "@/components/EffectBakeWebView";
-import { LIVE_FILTERS } from "@/components/LiveFilterCarousel";
 import { cssFilterStringToShaderBoost, mergeBeautifyWithCssBoost } from "@/lib/cssFilterToShaderBoost";
-import { getPreviewTintLayers } from "@/lib/livePreviewTint";
 import type { BeautifyParams } from "@/lib/gl/LutRenderer";
 import LutRenderer from "@/lib/gl/LutRenderer";
 import { OffscreenLutRenderer } from "@/lib/gl/OffscreenLutRenderer";
@@ -262,11 +260,6 @@ export default function CapturePreview() {
     return raw && raw !== "none" ? raw : "";
   }, [params.liveFilterCSS]);
 
-  const incomingLiveFilterDef = useMemo(() => {
-    const id = String(params.liveFilter ?? "");
-    return LIVE_FILTERS.find((f) => f.id === id) ?? LIVE_FILTERS[0];
-  }, [params.liveFilter]);
-
   const [filter, setFilter] = useState<FilterId>(initialFilter);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [showInlineFilters, setShowInlineFilters] = useState(false);
@@ -483,13 +476,11 @@ export default function CapturePreview() {
 
   const previewLutSource = useMemo(() => getLutForFilter(mapPreviewFilterToExport(filter)), [filter]);
   const previewImageUri = useMemo(() => {
-    // On Android, avoid swapping to offscreen-rendered URI while FX is active:
-    // that path can produce transient black frames in some GPU/WebView combinations.
-    if (isAndroidNative && !isComparing && mediaType === "image" && activeWebglEffect === "none") {
+    if (isAndroidNative && !isComparing && mediaType === "image") {
       return androidPreviewUri || effectiveUri;
     }
     return effectiveUri;
-  }, [androidPreviewUri, effectiveUri, isComparing, mediaType, activeWebglEffect]);
+  }, [androidPreviewUri, effectiveUri, isComparing, mediaType, isAndroidNative]);
 
   const needsGlPreview = useMemo(() => {
     if (mediaType !== "image") return false;
@@ -648,6 +639,8 @@ export default function CapturePreview() {
           if (done === total) {
             ctx.fillStyle = "#000";
             ctx.fillRect(0, 0, outW, outH);
+            ctx.imageSmoothingEnabled = true;
+            (ctx as any).imageSmoothingQuality = "high";
             for (let j = 0; j < total; j++) {
               const slot = slots[j];
               if (!slot || !images[j]) continue;
@@ -655,7 +648,26 @@ export default function CapturePreview() {
               const y = Math.round(slot.y * outH);
               const w = Math.round(slot.w * outW);
               const h = Math.round(slot.h * outH);
-              ctx.drawImage(images[j], x, y, w, h);
+              const src = images[j];
+              const iw = src.naturalWidth || src.width || w;
+              const ih = src.naturalHeight || src.height || h;
+              if (iw <= 0 || ih <= 0 || w <= 0 || h <= 0) continue;
+
+              // Match preview behavior (`resizeMode="cover"`): fill slot with center-crop, never stretch.
+              const slotRatio = w / h;
+              const imgRatio = iw / ih;
+              let sx = 0;
+              let sy = 0;
+              let sw = iw;
+              let sh = ih;
+              if (imgRatio > slotRatio) {
+                sw = ih * slotRatio;
+                sx = (iw - sw) / 2;
+              } else if (imgRatio < slotRatio) {
+                sh = iw / slotRatio;
+                sy = (ih - sh) / 2;
+              }
+              ctx.drawImage(src, sx, sy, sw, sh, x, y, w, h);
             }
             try { resolve(canvas.toDataURL("image/jpeg", 0.92)); } catch { resolve(null); }
           }
@@ -811,7 +823,7 @@ export default function CapturePreview() {
   };
 
   useEffect(() => {
-    if (!isAndroidNative || mediaType !== "image" || !effectiveUri || activeWebglEffect !== "none") {
+    if (!isAndroidNative || mediaType !== "image" || !effectiveUri) {
       setAndroidPreviewJob(null);
       setAndroidPreviewUri(null);
       androidPreviewKeyRef.current = "";
@@ -1345,8 +1357,18 @@ export default function CapturePreview() {
           exportWidth={1080}
           exportHeight={1350}
           onFinish={(u) => {
-            setAndroidPreviewUri(u || androidPreviewJob.uri);
-            setAndroidPreviewJob((current) => current?.requestKey === androidPreviewJob.requestKey ? null : current);
+            const lutUri = u || androidPreviewJob.uri;
+            (async () => {
+              let outUri = lutUri;
+              if (activeWebglEffect !== "none") {
+                try {
+                  const fxUri = await runNativeCanvasEffectBake(lutUri, activeWebglEffect);
+                  if (fxUri) outUri = fxUri;
+                } catch {}
+              }
+              setAndroidPreviewUri(outUri);
+              setAndroidPreviewJob((current) => current?.requestKey === androidPreviewJob.requestKey ? null : current);
+            })();
           }}
         />
       )}
@@ -1484,22 +1506,6 @@ export default function CapturePreview() {
                     resizeMode="cover"
                     onLoadEnd={() => setMediaLoaded(true)}
                   />
-                  {!isComparing &&
-                    getPreviewTintLayers({
-                      isWeb: false,
-                      isCapacitor: false,
-                      liveFilter: incomingLiveFilterDef,
-                      activeEffect: activeWebglEffect,
-                    }).map((layer, i) => (
-                      <View
-                        key={`pv-tint-${i}`}
-                        pointerEvents="none"
-                        style={[
-                          StyleSheet.absoluteFillObject,
-                          { backgroundColor: layer.color, opacity: layer.opacity, zIndex: 2 + i },
-                        ]}
-                      />
-                    ))}
                 </View>
               )
             ))

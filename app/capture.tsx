@@ -180,6 +180,22 @@ export default function CaptureScreen() {
     }
   }, []);
 
+  const getActiveCameraVideo = useCallback((): HTMLVideoElement | null => {
+    if (!isWeb) return null;
+    try {
+      const videos = Array.from(document.querySelectorAll("video")) as HTMLVideoElement[];
+      const bestVideo = videos
+        .map((v) => ({
+          el: v,
+          area: (v.videoWidth || v.clientWidth || 0) * (v.videoHeight || v.clientHeight || 0),
+        }))
+        .sort((a, b) => b.area - a.area)[0]?.el;
+      return bestVideo ?? null;
+    } catch {
+      return null;
+    }
+  }, []);
+
   const capturePreviewMediaParams = {
     liveFilter: liveFilter.id !== "none" ? liveFilter.id : undefined,
     liveFilterCSS: liveFilter.cssFilter !== "none" ? liveFilter.cssFilter : undefined,
@@ -815,12 +831,48 @@ export default function CaptureScreen() {
   const liveCameraWebFilterStyle = isWeb && liveCSSFilter
     ? ({ filter: liveCSSFilter, WebkitFilter: liveCSSFilter } as any)
     : undefined;
+  const shouldUseTintOverlay = !isWeb;
   const previewTintLayers = getPreviewTintLayers({
     isWeb,
     isCapacitor,
     liveFilter,
     activeEffect,
   });
+
+  // Force CSS filter on the real camera <video> element (important for WebView/Capacitor).
+  useEffect(() => {
+    if (!isWeb) return;
+    let cancelled = false;
+    let tries = 0;
+    const maxTries = 24;
+    const apply = () => {
+      if (cancelled) return;
+      const v = getActiveCameraVideo();
+      if (!v) return;
+      const css = liveCSSFilter || "none";
+      try {
+        (v.style as any).filter = css;
+        (v.style as any).webkitFilter = css;
+      } catch {}
+    };
+    apply();
+    const id = setInterval(() => {
+      tries += 1;
+      apply();
+      if (tries >= maxTries) clearInterval(id);
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+      const v = getActiveCameraVideo();
+      if (v) {
+        try {
+          (v.style as any).filter = "none";
+          (v.style as any).webkitFilter = "none";
+        } catch {}
+      }
+    };
+  }, [getActiveCameraVideo, liveCSSFilter, cameraKey]);
 
   const rightTools = [
     { key: "flash", icon: flashOn ? "⚡" : "⚡︎", label: flashOn ? "On" : "Off", onPress: toggleFlash, active: flashOn },
@@ -930,7 +982,7 @@ export default function CaptureScreen() {
             onCameraReady={() => setCameraReady(true)}
           />
           {/* Native APK / Capacitor: CSS filter does not affect the camera surface — use tint layers */}
-          {previewTintLayers.map((layer, i) => (
+          {shouldUseTintOverlay && previewTintLayers.map((layer, i) => (
             <View
               key={`preview-tint-${i}`}
               pointerEvents="none"

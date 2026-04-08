@@ -12,39 +12,39 @@ function effectTintLayers(id: EffectId): PreviewTintLayer[] {
     case "none":
       return [];
     case "glitch":
-      return [{ color: "#7CFC00", opacity: 0.09 }];
+      return [{ color: "#7CFC00", opacity: 0.035 }];
     case "chromatic":
       return [
-        { color: "#FF2D55", opacity: 0.045 },
-        { color: "#00E5FF", opacity: 0.045 },
+        { color: "#FF2D55", opacity: 0.02 },
+        { color: "#00E5FF", opacity: 0.02 },
       ];
     case "light_leaks":
-      return [{ color: "#FFB84D", opacity: 0.14 }];
+      return [{ color: "#FFB84D", opacity: 0.05 }];
     case "vhs":
-      return [{ color: "#C4A574", opacity: 0.13 }];
+      return [{ color: "#C4A574", opacity: 0.045 }];
     case "prism":
-      return [{ color: "#E8D5FF", opacity: 0.11 }];
+      return [{ color: "#E8D5FF", opacity: 0.04 }];
     case "duotone":
-      return [{ color: "#5B6CFF", opacity: 0.1 }];
+      return [{ color: "#5B6CFF", opacity: 0.035 }];
     case "pixelate":
-      return [{ color: "#666666", opacity: 0.07 }];
+      return [{ color: "#666666", opacity: 0.03 }];
     case "halftone":
-      return [{ color: "#1a1a1a", opacity: 0.09 }];
+      return [{ color: "#1a1a1a", opacity: 0.035 }];
     case "rgb_split":
       return [
-        { color: "#FF0000", opacity: 0.04 },
-        { color: "#00FF88", opacity: 0.04 },
+        { color: "#FF0000", opacity: 0.02 },
+        { color: "#00FF88", opacity: 0.02 },
       ];
     case "mirror":
-      return [{ color: "#FFFFFF", opacity: 0.06 }];
+      return [{ color: "#FFFFFF", opacity: 0.025 }];
     case "kaleidoscope":
-      return [{ color: "#FF88DD", opacity: 0.09 }];
+      return [{ color: "#FF88DD", opacity: 0.035 }];
     case "fisheye":
-      return [{ color: "#88CCFF", opacity: 0.07 }];
+      return [{ color: "#88CCFF", opacity: 0.03 }];
     case "wave_distort":
-      return [{ color: "#4488FF", opacity: 0.08 }];
+      return [{ color: "#4488FF", opacity: 0.03 }];
     case "neon_edges":
-      return [{ color: "#FF00E5", opacity: 0.1 }];
+      return [{ color: "#FF00E5", opacity: 0.04 }];
     default:
       return [];
   }
@@ -71,7 +71,8 @@ export function getPreviewTintLayers(params: {
   if (liveFilter.id !== "none" && liveFilter.accent && liveFilter.accent !== "transparent") {
     layers.push({
       color: liveFilter.accent,
-      opacity: hasEffect ? 0.14 : 0.22,
+      // Keep native preview closer to web: subtle grade cue instead of a color mask.
+      opacity: hasEffect ? 0.06 : 0.1,
     });
   }
 

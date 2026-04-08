@@ -38,6 +38,78 @@ function chromaShift(data, w, h, px) {
     data[i + 3] = 255;
   }
 }
+function applyLightLeaks(ctx, w, h) {
+  var g1 = ctx.createRadialGradient(w * 0.1, h * 0.1, 0, w * 0.3, h * 0.3, w * 0.7);
+  g1.addColorStop(0, "rgba(255,180,80,0.45)");
+  g1.addColorStop(0.5, "rgba(255,120,60,0.2)");
+  g1.addColorStop(1, "rgba(255,100,50,0)");
+  ctx.globalCompositeOperation = "screen";
+  ctx.fillStyle = g1;
+  ctx.fillRect(0, 0, w, h);
+  var g2 = ctx.createRadialGradient(w * 0.85, h * 0.9, 0, w * 0.7, h * 0.7, w * 0.6);
+  g2.addColorStop(0, "rgba(255,100,180,0.35)");
+  g2.addColorStop(0.6, "rgba(255,80,120,0.15)");
+  g2.addColorStop(1, "rgba(255,60,100,0)");
+  ctx.fillStyle = g2;
+  ctx.fillRect(0, 0, w, h);
+  ctx.globalCompositeOperation = "source-over";
+}
+function applyVhsPass(ctx, w, h) {
+  ctx.globalCompositeOperation = "multiply";
+  for (var y = 0; y < h; y += 2) {
+    ctx.fillStyle = "rgba(0,0,0,0.12)";
+    ctx.fillRect(0, y, w, 1);
+  }
+  ctx.globalCompositeOperation = "screen";
+  for (var i = 0; i < 80; i++) {
+    var x = Math.random() * w;
+    var yy = Math.random() * h;
+    var g = Math.floor(Math.random() * 255);
+    ctx.fillStyle = "rgba(" + g + "," + g + "," + g + ",0.08)";
+    ctx.fillRect(x, yy, Math.random() * 40, 1);
+  }
+  var trackY = Math.floor(Math.random() * h);
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = "rgba(255,255,255,0.15)";
+  ctx.fillRect(0, trackY, w, 4);
+}
+function applyPrismPass(ctx, img, w, h) {
+  var off = 12;
+  ctx.globalCompositeOperation = "screen";
+  ctx.globalAlpha = 0.45;
+  ctx.drawImage(img, off, off, w, h);
+  ctx.globalCompositeOperation = "multiply";
+  ctx.fillStyle = "rgba(255,0,0,0.35)";
+  ctx.fillRect(0, 0, w + off, h + off);
+  ctx.globalCompositeOperation = "screen";
+  ctx.drawImage(img, -off, -off, w, h);
+  ctx.globalCompositeOperation = "multiply";
+  ctx.fillStyle = "rgba(0,0,255,0.35)";
+  ctx.fillRect(0, 0, w, h);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = "overlay";
+  var grad = ctx.createLinearGradient(0, 0, w, h);
+  grad.addColorStop(0, "rgba(255,0,0,0.09)");
+  grad.addColorStop(0.25, "rgba(255,255,0,0.09)");
+  grad.addColorStop(0.5, "rgba(0,255,255,0.09)");
+  grad.addColorStop(0.75, "rgba(0,0,255,0.09)");
+  grad.addColorStop(1, "rgba(255,0,255,0.09)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+  ctx.globalCompositeOperation = "source-over";
+}
+function applyDuotonePass(ctx, data, w, h) {
+  var dark = [60, 20, 120], light = [255, 160, 40];
+  for (var i = 0; i < data.length; i += 4) {
+    var lum = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) / 255;
+    var r = dark[0] + (light[0] - dark[0]) * lum;
+    var g = dark[1] + (light[1] - dark[1]) * lum;
+    var b = dark[2] + (light[2] - dark[2]) * lum;
+    data[i] = Math.round(data[i] * 0.15 + r * 0.85);
+    data[i + 1] = Math.round(data[i + 1] * 0.15 + g * 0.85);
+    data[i + 2] = Math.round(data[i + 2] * 0.15 + b * 0.85);
+  }
+}
 function runEffectBake(uri, effectId) {
   var img = new Image();
   img.onload = function () {
@@ -58,10 +130,26 @@ function runEffectBake(uri, effectId) {
       ctx.filter = css === "none" ? "none" : css;
       ctx.drawImage(img, 0, 0, w, h);
       ctx.filter = "none";
-      if (effectId === "chromatic" || effectId === "rgb_split") {
+      if (effectId === "light_leaks") {
+        applyLightLeaks(ctx, w, h);
+      }
+      if (effectId === "vhs") {
+        var vhsData = ctx.getImageData(0, 0, w, h);
+        chromaShift(vhsData.data, w, h, 6);
+        ctx.putImageData(vhsData, 0, 0);
+        applyVhsPass(ctx, w, h);
+      }
+      if (effectId === "prism") {
+        applyPrismPass(ctx, img, w, h);
+      }
+      if (effectId === "chromatic" || effectId === "rgb_split" || effectId === "glitch") {
         var id = ctx.getImageData(0, 0, w, h);
-        chromaShift(id.data, w, h, effectId === "rgb_split" ? 5 : 4);
+        chromaShift(id.data, w, h, effectId === "rgb_split" ? 18 : (effectId === "glitch" ? 8 : 16));
         ctx.putImageData(id, 0, 0);
+      } else if (effectId === "duotone") {
+        var duoData = ctx.getImageData(0, 0, w, h);
+        applyDuotonePass(ctx, duoData.data, w, h);
+        ctx.putImageData(duoData, 0, 0);
       }
       window.ReactNativeWebView.postMessage(JSON.stringify({ ok: true, data: cv.toDataURL("image/jpeg", 0.92) }));
     } catch (e) {
