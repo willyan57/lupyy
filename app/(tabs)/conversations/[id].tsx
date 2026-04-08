@@ -338,13 +338,21 @@ export default function ConversationScreen() {
   async function reactivateConversationForUser() {
     if (!authUserId || !conversationId) return;
 
+    const cutoff = await getMessageCutoffForUser(authUserId, conversationId);
     const { error: reactivateError } = await supabase
       .from("conversation_deletions")
-      .delete()
-      .eq("conversation_id", conversationId)
-      .eq("user_id", authUserId);
+      .upsert(
+        {
+          conversation_id: conversationId,
+          user_id: authUserId,
+          deleted_at: null,
+          // Preserve existing cutoff so reopening does not restore old history.
+          messages_hidden_before: cutoff ?? null,
+        },
+        { onConflict: "conversation_id,user_id" }
+      );
 
-    if (reactivateError) console.warn("reactivate delete error:", reactivateError);
+    if (reactivateError) console.warn("reactivate upsert error:", reactivateError);
   }
 
   async function syncConversationAfterSend(params: {

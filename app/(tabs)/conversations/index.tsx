@@ -257,16 +257,23 @@ export default function ConversationsScreen() {
         return;
       }
 
-      // Reactivate conversation exactly like the working version:
-      // remove the deletion row so the conversation stays in the list again.
+      // Reopen as a clean thread for this user:
+      // keep conversation visible again, but hide all older messages.
+      const reopenAt = new Date().toISOString();
       const { error: reactivateError } = await supabase
         .from("conversation_deletions")
-        .delete()
-        .eq("conversation_id", conversation.id)
-        .eq("user_id", currentUserId);
+        .upsert(
+          {
+            conversation_id: conversation.id,
+            user_id: currentUserId,
+            deleted_at: null,
+            messages_hidden_before: reopenAt,
+          },
+          { onConflict: "conversation_id,user_id" }
+        );
 
       if (reactivateError) {
-        console.warn("Reactivation fallback - delete error:", reactivateError);
+        console.warn("Reactivation fallback - upsert error:", reactivateError);
       }
 
       // Get the other user's profile for optimistic list update

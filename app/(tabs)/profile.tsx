@@ -1606,12 +1606,19 @@ export default function Profile() {
           conversationType,
         });
 
-        // Reactivate exactly like the working version
+        // Reopen as clean chat for current user (do not restore old history).
+        const reopenAt = new Date().toISOString();
         await supabase
           .from("conversation_deletions")
-          .delete()
-          .eq("conversation_id", conversation.id)
-          .eq("user_id", authUserId);
+          .upsert(
+            {
+              conversation_id: conversation.id,
+              user_id: authUserId,
+              deleted_at: null,
+              messages_hidden_before: reopenAt,
+            },
+            { onConflict: "conversation_id,user_id" }
+          );
 
         router.push({
           pathname: "/conversations/[id]",
