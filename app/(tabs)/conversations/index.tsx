@@ -1,6 +1,6 @@
 // app/(tabs)/conversations/index.tsx
 import SwipeableTabScreen from "@/components/SwipeableTabScreen";
-import { getOrCreateConversation } from "@/lib/conversations";
+import { getOrCreateConversation, syncConversationDeletionInboxState } from "@/lib/conversations";
 import { supabase } from "@/lib/supabase";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
@@ -257,22 +257,10 @@ export default function ConversationsScreen() {
         return;
       }
 
-      // Reopen as a clean thread for this user (Instagram-style):
-      // deleted_at is NOT NULL in DB — use same timestamp as messages_hidden_before (see CSV samples).
-      // hidden_from_inbox=false shows the row in inbox again without restoring old messages.
-      const reopenAt = new Date().toISOString();
-      const { error: reactivateError } = await supabase
-        .from("conversation_deletions")
-        .upsert(
-          {
-            conversation_id: conversation.id,
-            user_id: currentUserId,
-            deleted_at: reopenAt,
-            messages_hidden_before: reopenAt,
-            hidden_from_inbox: false,
-          },
-          { onConflict: "conversation_id,user_id" }
-        );
+      const { error: reactivateError } = await syncConversationDeletionInboxState(supabase, {
+        conversationId: conversation.id,
+        userId: currentUserId,
+      });
 
       if (reactivateError) {
         console.warn("Reactivation fallback - upsert error:", reactivateError);
@@ -289,7 +277,7 @@ export default function ConversationsScreen() {
       const optimisticConversation: RpcConversation = {
         id: conversation.id,
         conversation_type: conversation.conversation_type ?? "friend",
-        last_message: null,
+        last_message: conversation.last_message ?? null,
         last_message_at: conversation.last_message_at ?? null,
         created_at: (conversation as any).created_at ?? new Date().toISOString(),
         other_user_id: otherUserId,

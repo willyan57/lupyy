@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type ConversationType = "friend" | "crush";
 
@@ -136,4 +137,51 @@ export async function fetchMessages(conversationId: string) {
 
   if (error) throw error;
   return (data || []) as Message[];
+}
+
+type DeletionInboxRow = {
+  messages_hidden_before?: string | null;
+  hidden_from_inbox?: boolean | null;
+  deleted_at?: string | null;
+};
+
+/**
+ * Abrir chat pelo + ou perfil: só aplica "thread limpo" quando o usuário tinha
+ * removido a conversa da lista (hidden_from_inbox = true). Se já estava reaberta
+ * (false), não mexer em messages_hidden_before — senão cada reabertura apagava
+ * mensagens novas (ex.: "ola") da query .gt(created_at, cutoff).
+ */
+export async function syncConversationDeletionInboxState(
+  client: SupabaseClient,
+  params: { conversationId: string; userId: string }
+) {
+  const { conversationId, userId } = params;
+
+  const { data: row, error: selErr } = await client
+    .from("conversation_deletions")
+    .select("messages_hidden_before, hidden_from_inbox, deleted_at")
+    .eq("conversation_id", conversationId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (selErr) return { error: selErr };
+
+  const r = row as DeletionInboxRow | null;
+  if (!r) return { error: null };
+
+  if (r.hidden_from_inbox === false) {
+    return { error: null };
+  }
+
+  const reopenAt = new Date().toISOString();
+  return client.from("conversation_deletions").upsert(
+    {
+      conversation_id: conversationId,
+      user_id: userId,
+      deleted_at: reopenAt,
+      messages_hidden_before: reopenAt,
+      hidden_from_inbox: false,
+    },
+    { onConflict: "conversation_id,user_id" }
+  );
 }

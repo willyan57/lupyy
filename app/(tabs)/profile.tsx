@@ -42,7 +42,7 @@ import ReportModal from "@/components/ReportModal";
 import SwipeableTabScreen from "@/components/SwipeableTabScreen";
 import ThemeSelector from "@/components/ThemeSelector";
 import { useTheme } from "@/contexts/ThemeContext";
-import { ConversationType, getOrCreateConversation } from "@/lib/conversations";
+import { ConversationType, getOrCreateConversation, syncConversationDeletionInboxState } from "@/lib/conversations";
 import type { ProfileVisitor } from "@/lib/engagement";
 import {
   BADGE_CONFIG,
@@ -1606,20 +1606,10 @@ export default function Profile() {
           conversationType,
         });
 
-        // Reopen as clean chat for current user (do not restore old history).
-        const reopenAt = new Date().toISOString();
-        await supabase
-          .from("conversation_deletions")
-          .upsert(
-            {
-              conversation_id: conversation.id,
-              user_id: authUserId,
-              deleted_at: reopenAt,
-              messages_hidden_before: reopenAt,
-              hidden_from_inbox: false,
-            },
-            { onConflict: "conversation_id,user_id" }
-          );
+        await syncConversationDeletionInboxState(supabase, {
+          conversationId: conversation.id,
+          userId: authUserId,
+        });
 
         router.push({
           pathname: "/conversations/[id]",
