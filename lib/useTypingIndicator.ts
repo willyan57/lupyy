@@ -14,10 +14,15 @@ type UseTypingIndicatorOptions = {
 
 type TimeoutType = ReturnType<typeof setTimeout>;
 
+/** Evita tempestade de 403 no console quando RLS/policy ainda não está ok no Supabase */
+function silenceTypingDb<T>(p: PromiseLike<{ error?: T | null }>) {
+  void Promise.resolve(p).catch(() => {});
+}
+
 export function useTypingIndicator({
   conversationId,
   currentUserId,
-  typingDebounceMs = 300,
+  typingDebounceMs = 900,
   typingTimeoutMs = 4000,
 }: UseTypingIndicatorOptions) {
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
@@ -49,10 +54,11 @@ export function useTypingIndicator({
           filter: `conversation_id=eq.${conversationId}`,
         },
         async () => {
-          const { data } = await supabase
+          const { data, error } = await supabase
             .from("conversation_typing")
             .select("user_id")
             .eq("conversation_id", conversationId);
+          if (error) return;
 
           if (data) {
             setTypingUsers(
@@ -67,10 +73,11 @@ export function useTypingIndicator({
 
     // carregar estado atual na montagem
     (async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("conversation_typing")
         .select("user_id")
         .eq("conversation_id", conversationId);
+      if (error) return;
 
       if (data) {
         setTypingUsers(
@@ -90,12 +97,13 @@ export function useTypingIndicator({
       if (debounceRef.current) clearTimeout(debounceRef.current);
 
       // Deletar registro do banco para o outro usuário não ficar vendo "digitando..."
-      supabase
-        .from("conversation_typing")
-        .delete()
-        .eq("conversation_id", conversationId)
-        .eq("user_id", currentUserId)
-        .then(() => {});
+      silenceTypingDb(
+        supabase
+          .from("conversation_typing")
+          .delete()
+          .eq("conversation_id", conversationId)
+          .eq("user_id", currentUserId)
+      );
     };
   }, [conversationId, currentUserId]);
 
@@ -107,29 +115,38 @@ export function useTypingIndicator({
       if (!cId || !uId) return;
 
       if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(async () => {
+      debounceRef.current = setTimeout(() => {
         if (isTyping) {
-          await supabase.from("conversation_typing").upsert({
-            conversation_id: cId,
-            user_id: uId,
-          });
+          silenceTypingDb(
+            supabase.from("conversation_typing").upsert(
+              {
+                conversation_id: cId,
+                user_id: uId,
+              },
+              { onConflict: "conversation_id,user_id" }
+            )
+          );
         } else {
-          await supabase
-            .from("conversation_typing")
-            .delete()
-            .eq("conversation_id", cId)
-            .eq("user_id", uId);
+          silenceTypingDb(
+            supabase
+              .from("conversation_typing")
+              .delete()
+              .eq("conversation_id", cId)
+              .eq("user_id", uId)
+          );
         }
       }, typingDebounceMs);
 
       if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
       if (isTyping) {
-        typingTimerRef.current = setTimeout(async () => {
-          await supabase
-            .from("conversation_typing")
-            .delete()
-            .eq("conversation_id", cId)
-            .eq("user_id", uId);
+        typingTimerRef.current = setTimeout(() => {
+          silenceTypingDb(
+            supabase
+              .from("conversation_typing")
+              .delete()
+              .eq("conversation_id", cId)
+              .eq("user_id", uId)
+          );
         }, typingTimeoutMs);
       }
     },
