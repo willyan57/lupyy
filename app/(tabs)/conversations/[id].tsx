@@ -1,6 +1,14 @@
 // app/conversations/[id].tsx
 import Colors from "@/constants/Colors";
 import { emitMergeConversationIntoList } from "@/lib/conversationListEvents";
+import {
+  acceptMessageRequest,
+  createDmRequestAfterIntro,
+  declineMessageRequest,
+  fetchDmRequestForConversation,
+  type DmRequestRow,
+} from "@/lib/dmRequests";
+import { markFriendDmIntroUsed } from "@/lib/social";
 import { touchUserPresence, useUserPresence } from "@/lib/presence";
 import { supabase } from "@/lib/supabase";
 import { useTypingIndicator } from "@/lib/useTypingIndicator";
@@ -81,6 +89,12 @@ export default function ConversationScreen() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [uploadingMedia, setUploadingMedia] = useState(false);
+
+  /** Amigo sem mútuo: 1 mensagem de abertura; depois bloqueia até o mútuo (coluna friend_dm_intro_used). */
+  type FriendIntroGate = "loading" | "open" | "blocked" | "na";
+  const [friendDmIntroGate, setFriendDmIntroGate] = useState<FriendIntroGate>("loading");
+  const friendIntroMarkAfterSendRef = useRef(false);
+  const [dmRequest, setDmRequest] = useState<DmRequestRow | null>(null);
 
   const isCommittedStatus = (status?: string | null) =>
     status === "committed" || status === "other";
@@ -288,6 +302,50 @@ export default function ConversationScreen() {
     });
   };
 
+  const refreshDmRequestState = useCallback(async () => {
+    if (!conversationId) {
+      setDmRequest(null);
+      return;
+    }
+    const row = await fetchDmRequestForConversation(conversationId);
+    setDmRequest(row);
+  }, [conversationId]);
+
+  const refreshFriendDmIntroGate = useCallback(
+    async (uid: string, other: string, convType: "friend" | "crush" | null) => {
+      friendIntroMarkAfterSendRef.current = false;
+      if (convType !== "friend") {
+        setFriendDmIntroGate("na");
+        return;
+      }
+      const { data: myRow } = await supabase
+        .from("follows")
+        .select("interest_type, friend_dm_intro_used")
+        .eq("follower_id", uid)
+        .eq("following_id", other)
+        .maybeSingle();
+      const { data: theirRow } = await supabase
+        .from("follows")
+        .select("interest_type")
+        .eq("follower_id", other)
+        .eq("following_id", uid)
+        .maybeSingle();
+      const mine = myRow as { interest_type?: string; friend_dm_intro_used?: boolean } | null;
+      const theirs = theirRow as { interest_type?: string } | null;
+      if (mine?.interest_type === "friend" && theirs?.interest_type !== "friend") {
+        if (mine.friend_dm_intro_used) {
+          setFriendDmIntroGate("blocked");
+        } else {
+          setFriendDmIntroGate("open");
+          friendIntroMarkAfterSendRef.current = true;
+        }
+      } else {
+        setFriendDmIntroGate("open");
+      }
+    },
+    []
+  );
+
   const refreshRelationshipLock = useCallback(async () => {
     const { data: auth } = await supabase.auth.getUser();
     const uid = auth?.user?.id ?? null;
@@ -337,7 +395,12 @@ export default function ConversationScreen() {
     if (profile) {
       setOtherProfile(profile as ProfileHeader);
     }
-  }, [conversationId]);
+
+    if (other) {
+      await refreshFriendDmIntroGate(uid, other, conversation.conversation_type);
+    }
+    await refreshDmRequestState();
+  }, [conversationId, refreshFriendDmIntroGate, refreshDmRequestState]);
 
   async function syncConversationAfterSend(params: {
     preview: string;
@@ -471,6 +534,12 @@ export default function ConversationScreen() {
         setConversationType(c.conversation_type);
 
         if (other) {
+          await refreshFriendDmIntroGate(uid, other, c.conversation_type);
+        } else {
+          setFriendDmIntroGate("na");
+        }
+
+        if (other) {
           const { data: profile } = await supabase
             .from("profiles")
             .select("id, username, full_name, avatar_url, relationship_status, partner_id")
@@ -510,6 +579,8 @@ export default function ConversationScreen() {
               .then(() => {});
           }
         }
+
+        if (isMounted) await refreshDmRequestState();
       } finally {
         if (isMounted) setLoading(false);
       }
@@ -520,7 +591,7 @@ export default function ConversationScreen() {
     return () => {
       isMounted = false;
     };
-  }, [conversationId, router]);
+  }, [conversationId, router, refreshFriendDmIntroGate, refreshDmRequestState]);
 
   useFocusEffect(
     useCallback(() => {
@@ -634,9 +705,76 @@ export default function ConversationScreen() {
     setSelectedMessage(null);
   }
 
+  async function applyFriendIntroAfterSend() {
+    if (!friendIntroMarkAfterSendRef.current || !authUserId || !otherUserId || !conversationId) return;
+    const { error } = await markFriendDmIntroUsed(authUserId, otherUserId);
+    if (!error) {
+      friendIntroMarkAfterSendRef.current = false;
+      setFriendDmIntroGate("blocked");
+      await createDmRequestAfterIntro({
+        conversationId,
+        senderId: authUserId,
+        recipientId: otherUserId,
+      });
+    }
+  }
+
+  async function handleAcceptMessageRequest() {
+    if (!conversationId || !authUserId || !otherUserId) return;
+    try {
+      await acceptMessageRequest(conversationId);
+      await refreshDmRequestState();
+      await refreshFriendDmIntroGate(authUserId, otherUserId, conversationType);
+    } catch (e: any) {
+      Alert.alert("Erro", e?.message ?? "Não foi possível aceitar o pedido.");
+    }
+  }
+
+  function handleDeclineMessageRequest() {
+    Alert.alert(
+      "Recusar pedido?",
+      "Esta conversa sai da caixa de pedidos. Você pode se conectar depois pelo perfil.",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Recusar",
+          style: "destructive",
+          onPress: async () => {
+            if (!conversationId) return;
+            try {
+              await declineMessageRequest(conversationId);
+              router.back();
+            } catch (e: any) {
+              Alert.alert("Erro", e?.message ?? "Tente novamente.");
+            }
+          },
+        },
+      ]
+    );
+  }
+
   async function handleSend() {
     const text = input.trim();
     if (!text || !authUserId || !conversationId || sending) return;
+    if (conversationType === "friend" && friendDmIntroGate === "loading") return;
+    if (conversationType === "friend" && friendDmIntroGate === "blocked") {
+      Alert.alert(
+        "Mensagem de abertura usada",
+        "Você já enviou sua primeira mensagem. Quando a outra pessoa seguir de volta como amigo, a conversa continua livremente — como no Instagram."
+      );
+      return;
+    }
+    if (
+      conversationType === "friend" &&
+      dmRequest?.status === "pending" &&
+      dmRequest.recipient_id === authUserId
+    ) {
+      Alert.alert(
+        "Pedido pendente",
+        "Aceite o pedido de mensagem para responder — ou recuse na barra acima."
+      );
+      return;
+    }
     if (isCrushLocked) {
       Alert.alert(
         "🔒 Conversa bloqueada",
@@ -693,6 +831,7 @@ export default function ConversationScreen() {
         preview: text,
         sentAt,
       });
+      await applyFriendIntroAfterSend();
       notifyInboxListAfterSend(text, sentAt);
 
       // ── Push notification para o outro usuário ──
@@ -730,6 +869,22 @@ export default function ConversationScreen() {
 
   async function handlePickMedia() {
     if (!authUserId || !conversationId || uploadingMedia) return;
+    if (conversationType === "friend" && friendDmIntroGate === "blocked") {
+      Alert.alert(
+        "Mensagem de abertura usada",
+        "Envie uma nova mensagem quando houver follow mútuo como amigos."
+      );
+      return;
+    }
+    if (
+      conversationType === "friend" &&
+      dmRequest?.status === "pending" &&
+      dmRequest.recipient_id === authUserId
+    ) {
+      Alert.alert("Pedido pendente", "Aceite o pedido para enviar mídia.");
+      return;
+    }
+    if (conversationType === "friend" && friendDmIntroGate === "loading") return;
     if (isCrushLocked) {
       Alert.alert(
         "🔒 Conversa bloqueada",
@@ -827,6 +982,7 @@ export default function ConversationScreen() {
         preview: "[mídia]",
         sentAt: mediaSentAt,
       });
+      await applyFriendIntroAfterSend();
       notifyInboxListAfterSend("[mídia]", mediaSentAt);
 
     } catch (e: any) {
@@ -917,7 +1073,23 @@ export default function ConversationScreen() {
     }
   }
 
-  const isDisabled = !input.trim() || sending;
+  const recipientRequestPending =
+    conversationType === "friend" &&
+    dmRequest?.status === "pending" &&
+    dmRequest.recipient_id === authUserId;
+
+  const senderRequestPending =
+    conversationType === "friend" &&
+    dmRequest?.status === "pending" &&
+    dmRequest.sender_id === authUserId;
+
+  const friendDmLocked =
+    conversationType === "friend" &&
+    (friendDmIntroGate === "blocked" || friendDmIntroGate === "loading");
+
+  const messagingLocked = friendDmLocked || recipientRequestPending;
+
+  const isDisabled = !input.trim() || sending || messagingLocked;
 
   // ── Format timestamp ──
   function formatTime(dateStr: string) {
@@ -1158,6 +1330,49 @@ export default function ConversationScreen() {
               keyboardDismissMode="interactive"
             />
 
+            {recipientRequestPending && (
+              <View style={styles.dmRequestBanner}>
+                <Text style={styles.dmRequestBannerTitle}>✉️ Pedido de mensagem</Text>
+                <Text style={styles.dmRequestBannerSub}>
+                  Alguém enviou uma mensagem de abertura. Aceite para responder — ou recuse.
+                </Text>
+                <View style={styles.dmRequestActions}>
+                  <TouchableOpacity
+                    style={styles.dmRequestBtnSecondary}
+                    onPress={handleDeclineMessageRequest}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.dmRequestBtnSecondaryText}>Recusar</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.dmRequestBtnPrimary}
+                    onPress={handleAcceptMessageRequest}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.dmRequestBtnPrimaryText}>Aceitar</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {senderRequestPending && (
+              <View style={styles.dmRequestSenderBanner}>
+                <Text style={styles.dmRequestSenderBannerText}>
+                  ⏳ Pedido enviado — quando a pessoa aceitar, vocês conversam com liberdade na caixa de entrada.
+                </Text>
+              </View>
+            )}
+
+            {conversationType === "friend" &&
+              friendDmIntroGate === "blocked" &&
+              !recipientRequestPending && (
+              <View style={styles.friendIntroBanner}>
+                <Text style={styles.friendIntroBannerText}>
+                  Você usou sua mensagem de abertura. A conversa continua quando a outra pessoa seguir de volta.
+                </Text>
+              </View>
+            )}
+
             {replyingTo && (
               <View style={styles.replyBanner}>
                 <View style={styles.replyBannerLeft}>
@@ -1196,7 +1411,7 @@ export default function ConversationScreen() {
               <TouchableOpacity
                 onPress={handlePickMedia}
                 style={styles.mediaButton}
-                disabled={uploadingMedia}
+                disabled={uploadingMedia || messagingLocked}
                 activeOpacity={0.8}
               >
                 {uploadingMedia ? (
@@ -1214,6 +1429,7 @@ export default function ConversationScreen() {
                 value={input}
                 onChangeText={handleInputChange}
                 multiline
+                editable={!messagingLocked}
               />
 
               <TouchableOpacity
@@ -1647,6 +1863,81 @@ const styles = StyleSheet.create({
     color: "#666",
     fontSize: 12,
     fontStyle: "italic",
+  },
+  friendIntroBanner: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#2a2438",
+    backgroundColor: "rgba(108,99,255,0.12)",
+  },
+  friendIntroBannerText: {
+    color: "#c4b5fd",
+    fontSize: 12,
+    lineHeight: 17,
+    textAlign: "center",
+  },
+  dmRequestBanner: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#333",
+    backgroundColor: "rgba(34,197,94,0.1)",
+  },
+  dmRequestBannerTitle: {
+    color: "#86efac",
+    fontSize: 14,
+    fontWeight: "700",
+    marginBottom: 4,
+    textAlign: "center",
+  },
+  dmRequestBannerSub: {
+    color: "#a7f3d0",
+    fontSize: 12,
+    lineHeight: 17,
+    textAlign: "center",
+    marginBottom: 10,
+  },
+  dmRequestActions: {
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 12,
+  },
+  dmRequestBtnSecondary: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.25)",
+  },
+  dmRequestBtnSecondaryText: {
+    color: "#e5e5e5",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  dmRequestBtnPrimary: {
+    paddingVertical: 10,
+    paddingHorizontal: 24,
+    borderRadius: 10,
+    backgroundColor: "#22c55e",
+  },
+  dmRequestBtnPrimaryText: {
+    color: "#052e16",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  dmRequestSenderBanner: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#333",
+    backgroundColor: "rgba(251,191,36,0.12)",
+  },
+  dmRequestSenderBannerText: {
+    color: "#fcd34d",
+    fontSize: 12,
+    lineHeight: 17,
+    textAlign: "center",
   },
   replyBanner: {
     flexDirection: "row",

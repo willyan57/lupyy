@@ -57,6 +57,8 @@ export default function ConversationsScreen() {
   const [activeTab, setActiveTab] = useState<"friend" | "crush">("friend");
 
   const [friendConversations, setFriendConversations] = useState<RpcConversation[]>([]);
+  const [requestConversations, setRequestConversations] = useState<RpcConversation[]>([]);
+  const [friendSubTab, setFriendSubTab] = useState<"inbox" | "requests">("inbox");
   const [crushConversations, setCrushConversations] = useState<RpcConversation[]>([]);
 
   const [unreadMap, setUnreadMap] = useState<Record<string, number>>({});
@@ -98,15 +100,17 @@ export default function ConversationsScreen() {
 
   const refreshUnreadCountsForLists = async (
     friendsList?: RpcConversation[],
-    crushList?: RpcConversation[]
+    crushList?: RpcConversation[],
+    requestsList?: RpcConversation[]
   ) => {
     const activeUserId = currentUserId;
     if (!activeUserId) return;
 
     const baseFriends = friendsList ?? friendConversations;
     const baseCrushes = crushList ?? crushConversations;
+    const baseRequests = requestsList ?? requestConversations;
 
-    const allIds = [...baseFriends, ...baseCrushes].map((c) => c.id);
+    const allIds = [...baseFriends, ...baseCrushes, ...baseRequests].map((c) => c.id);
     if (allIds.length === 0) {
       setUnreadMap({});
       return;
@@ -175,22 +179,30 @@ export default function ConversationsScreen() {
     if (!activeUserId) return;
     setLoading(true);
     try {
-      const { data, error } = await supabase.rpc("get_user_conversations_full");
+      const [{ data, error }, { data: reqData, error: reqErr }] = await Promise.all([
+        supabase.rpc("get_user_conversations_full"),
+        supabase.rpc("get_user_message_requests"),
+      ]);
 
       if (error || !data) {
         console.error("RPC error:", error);
         return;
+      }
+      if (reqErr) {
+        console.warn("get_user_message_requests:", reqErr);
       }
 
       const visible = data as RpcConversation[];
 
       const friends = visible.filter((c) => c.conversation_type === "friend");
       const crushes = visible.filter((c) => c.conversation_type === "crush");
+      const requests = (reqData ?? []) as RpcConversation[];
 
       setFriendConversations(friends);
       setCrushConversations(crushes);
+      setRequestConversations(requests);
 
-      await refreshUnreadCountsForLists(friends, crushes);
+      await refreshUnreadCountsForLists(friends, crushes, requests);
     } finally {
       setLoading(false);
     }
@@ -443,6 +455,26 @@ export default function ConversationsScreen() {
         },
         scheduleReload
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "conversation_dm_requests",
+          filter: `recipient_id=eq.${currentUserId}`,
+        },
+        scheduleReload
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "conversation_dm_requests",
+          filter: `sender_id=eq.${currentUserId}`,
+        },
+        scheduleReload
+      )
       .subscribe();
 
     return () => {
@@ -490,6 +522,9 @@ export default function ConversationsScreen() {
       setFriendConversations((prev) =>
         prev.filter((c) => c.id !== deleteTarget)
       );
+      setRequestConversations((prev) =>
+        prev.filter((c) => c.id !== deleteTarget)
+      );
       setCrushConversations((prev) =>
         prev.filter((c) => c.id !== deleteTarget)
       );
@@ -498,8 +533,11 @@ export default function ConversationsScreen() {
     [currentUserId, deleteTarget]
   );
 
+  const friendListData =
+    friendSubTab === "inbox" ? friendConversations : requestConversations;
+
   const data =
-    activeTab === "friend" ? friendConversations : crushConversations;
+    activeTab === "friend" ? friendListData : crushConversations;
 
   const normalizedSearch = search.trim().toLowerCase();
   const filteredData = normalizedSearch
@@ -516,6 +554,10 @@ export default function ConversationsScreen() {
     : data;
 
   const friendUnreadTotal = friendConversations.reduce(
+    (sum, c) => sum + (unreadMap[c.id] || 0),
+    0
+  );
+  const requestUnreadTotal = requestConversations.reduce(
     (sum, c) => sum + (unreadMap[c.id] || 0),
     0
   );
@@ -567,7 +609,12 @@ export default function ConversationsScreen() {
       item.other_user_full_name?.trim() ||
       item.other_user_username?.trim() ||
       "Usuário";
-    const preview = item.last_message || "Comece a conversa";
+    const preview =
+      activeTab === "friend" && friendSubTab === "requests"
+        ? item.last_message
+          ? `✉️ ${item.last_message}`
+          : "✉️ Pedido de mensagem"
+        : item.last_message || "Comece a conversa";
     const unreadCount = unreadMap[item.id] || 0;
     const timeStr = formatRelativeTime(item.last_message_at);
 
@@ -788,13 +835,76 @@ export default function ConversationsScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* ── Caixa de entrada / Pedidos (só em Mensagens) ── */}
+      {activeTab === "friend" && (
+        <View style={styles.friendSubTabs}>
+          <TouchableOpacity
+            style={[
+              styles.friendSubTabBtn,
+              friendSubTab === "inbox" && styles.friendSubTabBtnActive,
+            ]}
+            onPress={() => setFriendSubTab("inbox")}
+            activeOpacity={0.85}
+          >
+            <Text
+              style={[
+                styles.friendSubTabText,
+                friendSubTab === "inbox" && styles.friendSubTabTextActive,
+              ]}
+            >
+              Caixa de entrada
+            </Text>
+            {friendUnreadTotal > 0 && friendSubTab !== "inbox" && (
+              <View style={styles.friendSubTabBadge}>
+                <Text style={styles.friendSubTabBadgeText}>
+                  {friendUnreadTotal > 9 ? "9+" : friendUnreadTotal}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.friendSubTabBtn,
+              friendSubTab === "requests" && styles.friendSubTabBtnActive,
+            ]}
+            onPress={() => setFriendSubTab("requests")}
+            activeOpacity={0.85}
+          >
+            <Text
+              style={[
+                styles.friendSubTabText,
+                friendSubTab === "requests" && styles.friendSubTabTextActive,
+              ]}
+            >
+              Pedidos
+            </Text>
+            {requestUnreadTotal > 0 && (
+              <View
+                style={[
+                  styles.friendSubTabBadge,
+                  friendSubTab !== "requests" && styles.friendSubTabBadgeHighlight,
+                ]}
+              >
+                <Text style={styles.friendSubTabBadgeText}>
+                  {requestUnreadTotal > 9 ? "9+" : requestUnreadTotal}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* ── Search ── */}
       <View style={styles.searchContainer}>
         <View style={styles.searchInputWrapper}>
           <Text style={styles.searchIcon}>🔍</Text>
           <TextInput
             style={styles.searchInput}
-            placeholder="Buscar conversas..."
+            placeholder={
+              activeTab === "friend" && friendSubTab === "requests"
+                ? "Buscar pedidos..."
+                : "Buscar conversas..."
+            }
             placeholderTextColor="#555"
             value={search}
             onChangeText={setSearch}
@@ -823,11 +933,16 @@ export default function ConversationsScreen() {
             {activeTab === "friend" ? "💬" : "💘"}
           </Text>
           <Text style={styles.emptyText}>
-            Nenhuma conversa em{" "}
-            {activeTab === "friend" ? "Mensagens" : "Crushes"}
+            {activeTab === "friend" && friendSubTab === "requests"
+              ? normalizedSearch
+                ? "Nenhum pedido encontrado"
+                : "Nenhum pedido de mensagem"
+              : `Nenhuma conversa em ${activeTab === "friend" ? "Mensagens" : "Crushes"}`}
           </Text>
           <Text style={styles.emptySubtext}>
-            Suas conversas aparecerão aqui
+            {activeTab === "friend" && friendSubTab === "requests"
+              ? "Quando alguém enviar uma mensagem de abertura, aparece aqui até você aceitar."
+              : "Suas conversas aparecerão aqui"}
           </Text>
           <TouchableOpacity
             style={styles.emptyNewChatBtn}
@@ -1070,6 +1185,53 @@ const styles = StyleSheet.create({
   tabBadgeText: {
     color: "#fff",
     fontSize: 11,
+    fontWeight: "700",
+  },
+  friendSubTabs: {
+    flexDirection: "row",
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+    gap: 8,
+  },
+  friendSubTabBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#252538",
+    backgroundColor: "#0a0a12",
+  },
+  friendSubTabBtnActive: {
+    borderColor: "rgba(255,77,109,0.5)",
+    backgroundColor: "rgba(255,77,109,0.12)",
+  },
+  friendSubTabText: {
+    color: "#777",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  friendSubTabTextActive: {
+    color: "#fff",
+  },
+  friendSubTabBadge: {
+    marginLeft: 6,
+    minWidth: 18,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 8,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    alignItems: "center",
+  },
+  friendSubTabBadgeHighlight: {
+    backgroundColor: "#FF4D6D",
+  },
+  friendSubTabBadgeText: {
+    color: "#fff",
+    fontSize: 10,
     fontWeight: "700",
   },
   loadingArea: {

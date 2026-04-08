@@ -405,6 +405,8 @@ export default function Profile() {
   const [interestedCount, setInterestedCount] = useState(0);
 
   const [currentInterestType, setCurrentInterestType] = useState<InterestType | null>(null);
+  /** Seguir como amigo sem mútuo: após 1ª DM, não pode reabrir chat até o mútuo (coluna no Supabase). */
+  const [friendDmIntroUsed, setFriendDmIntroUsed] = useState(false);
   const [theirInterestType, setTheirInterestType] = useState<InterestType | null>(null);
 
   const [isFollowModalVisible, setFollowModalVisible] = useState(false);
@@ -768,15 +770,17 @@ export default function Profile() {
         try {
           const { data: followRow, error: followErr } = await supabase
             .from("follows")
-            .select("interest_type")
+            .select("interest_type, friend_dm_intro_used")
             .eq("follower_id", u.id)
             .eq("following_id", targetUserId)
             .maybeSingle();
           if (!followErr && followRow) {
-            const fr = followRow as { interest_type: InterestType };
+            const fr = followRow as { interest_type: InterestType; friend_dm_intro_used?: boolean | null };
             setCurrentInterestType(fr.interest_type);
+            setFriendDmIntroUsed(!!fr.friend_dm_intro_used);
           } else {
             setCurrentInterestType(null);
+            setFriendDmIntroUsed(false);
           }
 
           const { data: reverseRow, error: reverseErr } = await supabase
@@ -795,12 +799,14 @@ export default function Profile() {
         } catch {
           setCurrentInterestType(null);
           setTheirInterestType(null);
+          setFriendDmIntroUsed(false);
         }
       } else {
         // Own profile — my status IS the loaded status
         setMyRelationshipStatus(relStatus);
         setCurrentInterestType(null);
         setTheirInterestType(null);
+        setFriendDmIntroUsed(false);
       }
 
       await loadStories(targetUserId);
@@ -1450,6 +1456,7 @@ export default function Profile() {
       if (error) throw error;
 
       setCurrentInterestType(null);
+      setFriendDmIntroUsed(false);
 
       try {
         const { data: stats, error: statsError } = await supabase
@@ -1482,6 +1489,18 @@ export default function Profile() {
 
         setCurrentInterestType(result.interestType);
         setFollowModalVisible(false);
+
+        try {
+          const { data: fr } = await supabase
+            .from("follows")
+            .select("friend_dm_intro_used")
+            .eq("follower_id", authUserId)
+            .eq("following_id", userId)
+            .maybeSingle();
+          setFriendDmIntroUsed(!!(fr as { friend_dm_intro_used?: boolean } | null)?.friend_dm_intro_used);
+        } catch {
+          setFriendDmIntroUsed(false);
+        }
 
         // Refresh social stats
         try {
@@ -1571,9 +1590,11 @@ export default function Profile() {
 
   const isMutualFriend = currentInterestType === "friend" && theirInterestType === "friend";
 
+  const isCrushInterest = (t: InterestType | null) =>
+    t === "crush" || t === "silent_crush" || t === "super_crush";
+
   const isCrushMatch =
-    (currentInterestType === "crush" || currentInterestType === "silent_crush") &&
-    (theirInterestType === "crush" || theirInterestType === "silent_crush");
+    isCrushInterest(currentInterestType) && isCrushInterest(theirInterestType);
 
   const viewerIsCommitted = myRelationshipStatus === "committed" || myRelationshipStatus === "other";
   const targetIsCommitted = relationshipStatus === "committed" || relationshipStatus === "other";
@@ -1586,7 +1607,14 @@ export default function Profile() {
   );
 
   const canOpenCrushConversation = isCrushMatch && !viewerIsCommitted && !targetIsCommitted;
-  const canOpenConversation = isMutualFriend || canOpenCrushConversation || (currentInterestType === "friend");
+  /** Amigo sem mútuo: só abre DM se ainda não usou a 1ª mensagem (estilo solicitação Instagram). */
+  const canOpenFriendIntro =
+    currentInterestType === "friend" &&
+    theirInterestType !== "friend" &&
+    !friendDmIntroUsed;
+
+  const canOpenConversation =
+    isMutualFriend || canOpenCrushConversation || canOpenFriendIntro;
 
   const openConversation = useCallback(
     async (conversationType: ConversationType) => {
@@ -3724,7 +3752,7 @@ export default function Profile() {
     const followLabel =
       currentInterestType === "friend"
         ? t("profile.friends")
-        : currentInterestType === "crush"
+        : currentInterestType === "crush" || currentInterestType === "super_crush"
           ? "Crush"
           : currentInterestType === "silent_crush"
             ? t("profile.silentCrush")
@@ -3890,10 +3918,15 @@ export default function Profile() {
                 openPeopleSheet("interested");
               }}
             >
-              <Text style={[styles.statNumber, { color: theme.colors.text }]}>
-                {isCommitted && isOwnProfile ? "🔒" : interestedCount}
-              </Text>
-              <Text style={[styles.statLabel, { color: theme.colors.textMuted }]}>{t("profile.crush")}</Text>
+              <Text style={[styles.statNumber, { color: theme.colors.text }]}>{interestedCount}</Text>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4 }}>
+                {isCommitted && isOwnProfile ? (
+                  <Text style={{ fontSize: 12 }} accessibilityLabel="Crushes ocultos no chat">
+                    🔒
+                  </Text>
+                ) : null}
+                <Text style={[styles.statLabel, { color: theme.colors.textMuted }]}>{t("profile.crush")}</Text>
+              </View>
             </TouchableOpacity>
           </View>
         </View>
@@ -4458,8 +4491,11 @@ export default function Profile() {
             loading={loadingFollow}
             areLinkedPartners={areLinkedPartners}
             hadCrushHistory={
-              !!(theirInterestType === "crush" || theirInterestType === "silent_crush") &&
-              !currentInterestType?.includes("crush")
+              !!(
+                theirInterestType === "crush" ||
+                theirInterestType === "silent_crush" ||
+                theirInterestType === "super_crush"
+              ) && !currentInterestType?.includes("crush")
             }
           />
 

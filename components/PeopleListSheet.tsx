@@ -1,9 +1,11 @@
 // components/PeopleListSheet.tsx — Premium followers/following modal (Instagram-style)
 import { useTheme } from "@/contexts/ThemeContext";
 import { supabase } from "@/lib/supabase";
+import { BlurView } from "expo-blur";
 import { Image as ExpoImage } from "expo-image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Alert,
   Dimensions,
   FlatList,
   Modal,
@@ -13,7 +15,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View
+  View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -32,12 +34,14 @@ type PeopleListSheetProps = {
 type PersonRow = {
   follow_id: string;
   profile_id: string;
-  user_id: string;
+  user_id: string | null;
   username: string | null;
   full_name: string | null;
   avatar_url: string | null;
   interest_type: string | null;
   created_at: string;
+  /** Crush silencioso sem match: UI mistério (view no Supabase). */
+  identity_hidden?: boolean | null;
 };
 
 function getTitle(mode: Mode, isOwnProfile: boolean) {
@@ -146,32 +150,57 @@ export default function PeopleListSheet(props: PeopleListSheetProps) {
   const filtered = useMemo(() => {
     if (!search.trim()) return data;
     const q = search.trim().toLowerCase();
-    return data.filter(
-      (p) =>
+    return data.filter((p) => {
+      if (p.identity_hidden) {
+        const mysteryTokens = "mistério misterio suspense crush silencioso alguém secreto".split(/\s+/);
+        if (mysteryTokens.some((w) => w.includes(q) || q.length >= 2 && w.startsWith(q))) return true;
+      }
+      return (
         (p.full_name && p.full_name.toLowerCase().includes(q)) ||
         (p.username && p.username.toLowerCase().includes(q))
-    );
+      );
+    });
   }, [data, search]);
 
   const showEmptyState = !loading && !error && filtered.length === 0 && !isCrushBlocked;
 
   const renderItem = useCallback(
     ({ item }: { item: PersonRow }) => {
-      const displayName = item.full_name?.trim() || item.username?.trim() || "Usuário do Lupyy";
-      const uname = item.username?.trim() ? `@${item.username}` : "";
-      const showCrushBadge = mode === "interested" && item.interest_type === "crush";
+      const hidden = !!item.identity_hidden && mode === "interested";
+      const displayName = hidden
+        ? "Alguém em silêncio"
+        : item.full_name?.trim() || item.username?.trim() || "Usuário do Lupyy";
+      const uname = hidden ? "Match para revelar ✨" : item.username?.trim() ? `@${item.username}` : "";
+      const showCrushBadge =
+        mode === "interested" && item.interest_type === "crush" && !hidden;
+      const showMysteryBadge = hidden;
+
+      const openProfile = () => {
+        if (hidden || !item.user_id) {
+          Alert.alert(
+            "Mistério 💫",
+            "Quando o interesse for mútuo, você descobre quem é — estilo crush silencioso premium."
+          );
+          return;
+        }
+        onClose();
+        setTimeout(() => onOpenProfile(item.user_id!), 150);
+      };
 
       return (
-        <TouchableOpacity
-          style={s.row}
-          activeOpacity={0.7}
-          onPress={() => {
-            onClose();
-            setTimeout(() => onOpenProfile(item.user_id), 150);
-          }}
-        >
+        <TouchableOpacity style={s.row} activeOpacity={0.7} onPress={openProfile}>
           <View style={s.avatarWrap}>
-            {item.avatar_url ? (
+            {hidden ? (
+              <View style={s.mysteryAvatarShell}>
+                <View style={[s.avatar, s.mysteryAvatarBase, { backgroundColor: theme.colors.surface }]} />
+                {Platform.OS === "ios" ? (
+                  <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} />
+                ) : (
+                  <View style={[StyleSheet.absoluteFill, s.mysteryOverlayAndroid]} />
+                )}
+                <Text style={s.mysteryAvatarMark}>?</Text>
+              </View>
+            ) : item.avatar_url ? (
               <ExpoImage source={{ uri: item.avatar_url }} style={s.avatar} contentFit="cover" cachePolicy="disk" />
             ) : (
               <View style={[s.avatarFallback, { backgroundColor: theme.colors.surface }]}>
@@ -198,9 +227,14 @@ export default function PeopleListSheet(props: PeopleListSheetProps) {
               <Text style={s.crushBadgeText}>💘 Crush</Text>
             </View>
           )}
+          {showMysteryBadge && (
+            <View style={s.mysteryBadge}>
+              <Text style={s.mysteryBadgeText}>✨ Mistério</Text>
+            </View>
+          )}
 
           <View style={[s.profileBtn, { borderColor: theme.colors.border }]}>
-            <Text style={[s.profileBtnText, { color: theme.colors.text }]}>Ver</Text>
+            <Text style={[s.profileBtnText, { color: theme.colors.text }]}>{hidden ? "···" : "Ver"}</Text>
           </View>
         </TouchableOpacity>
       );
@@ -209,7 +243,7 @@ export default function PeopleListSheet(props: PeopleListSheetProps) {
   );
 
   const keyExtractor = useCallback(
-    (item: PersonRow, index: number) => item.follow_id || `${item.user_id}-${index}`,
+    (item: PersonRow, index: number) => item.follow_id || `${item.user_id ?? "x"}-${index}`,
     []
   );
 
@@ -503,6 +537,27 @@ const s = StyleSheet.create({
   avatarWrap: {
     marginRight: 12,
   },
+  mysteryAvatarShell: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+  mysteryAvatarBase: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  mysteryOverlayAndroid: {
+    backgroundColor: "rgba(20,20,28,0.82)",
+  },
+  mysteryAvatarMark: {
+    position: "absolute",
+    fontSize: 20,
+    fontWeight: "800",
+    color: "rgba(255,255,255,0.92)",
+  },
   avatar: {
     width: 48,
     height: 48,
@@ -540,6 +595,18 @@ const s = StyleSheet.create({
   },
   crushBadgeText: {
     color: "rgba(255,180,220,0.95)",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  mysteryBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: "rgba(120,100,200,0.2)",
+    marginRight: 8,
+  },
+  mysteryBadgeText: {
+    color: "rgba(200,190,255,0.95)",
     fontSize: 11,
     fontWeight: "600",
   },

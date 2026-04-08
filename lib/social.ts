@@ -94,6 +94,20 @@ async function fetchRelationshipStatus(userId: string): Promise<string | null> {
   return data?.relationship_status ?? null;
 }
 
+/** Marca que o seguidor já usou a única DM de abertura (follow amigo sem mútuo). */
+export async function markFriendDmIntroUsed(
+  followerId: string,
+  followingId: string
+): Promise<{ error: unknown }> {
+  if (!followerId || !followingId) return { error: null };
+  const { error } = await supabase
+    .from("follows")
+    .update({ friend_dm_intro_used: true })
+    .eq("follower_id", followerId)
+    .eq("following_id", followingId);
+  return { error: error ?? null };
+}
+
 export async function setFollowInterestType(
   followerId: string,
   followingId: string,
@@ -163,10 +177,10 @@ export async function setFollowInterestType(
     const myUsername = myProfile?.username ?? "Alguém";
     const pushBody =
       interestType === "crush" || interestType === "super_crush"
-        ? `${myUsername} tem um crush em você 💘`
+        ? `${myUsername} passou a te seguir e marcou crush em você 💘`
         : interestType === "silent_crush"
-          ? undefined // silent crush = sem notificação
-          : `${myUsername} começou a seguir você 🔥`;
+          ? undefined // silencioso: segue de verdade, mas sem push (evita dedução de quem foi)
+          : `${myUsername} começou a seguir você 👋`;
 
     if (pushBody) {
       supabase.functions.invoke("send-push", {
@@ -189,7 +203,7 @@ export async function setFollowInterestType(
       .select("id, interest_type")
       .eq("follower_id", followingId)
       .eq("following_id", followerId)
-      .in("interest_type", ["crush", "silent_crush"])
+      .in("interest_type", ["crush", "silent_crush", "super_crush"])
       .maybeSingle();
 
     if (!reciprocalErr && reciprocal) {
