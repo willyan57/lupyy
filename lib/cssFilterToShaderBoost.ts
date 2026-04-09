@@ -67,6 +67,31 @@ function clamp(n: number, a: number, b: number) {
   return Math.min(b, Math.max(a, n));
 }
 
+/** Stronger native LUT bake on Android so preview/export reads closer to Instagram-style CSS on web. */
+export function amplifyCssShaderBoost(boost: ShaderBoost, factor: number): ShaderBoost {
+  if (factor <= 1) return boost;
+  const o: ShaderBoost = { ...boost };
+  if (o.contrast != null && o.contrast !== 1) {
+    o.contrast = clamp(1 + (o.contrast - 1) * factor, 0.55, 2.35);
+  }
+  if (o.saturation != null && o.saturation !== 1) {
+    o.saturation = clamp(1 + (o.saturation - 1) * factor, 0, 2.35);
+  }
+  if (o.brightness != null && o.brightness !== 0) {
+    o.brightness = clamp(o.brightness * factor, -0.3, 0.3);
+  }
+  if (o.temperature != null && o.temperature !== 0) {
+    o.temperature = clamp(o.temperature * factor, -0.45, 0.45);
+  }
+  if (o.fade != null && o.fade !== 0) {
+    o.fade = clamp(o.fade * factor, 0, 0.35);
+  }
+  if (o.sharpness != null && o.sharpness !== 0) {
+    o.sharpness = clamp(o.sharpness * factor, -0.15, 0.45);
+  }
+  return o;
+}
+
 /** Merge base beautify params with capture-time CSS boost (multiplicative where appropriate). */
 export function mergeBeautifyWithCssBoost<T extends ShaderBoost>(base: T, boost: ShaderBoost): T {
   const m = { ...base };

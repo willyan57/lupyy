@@ -10,8 +10,9 @@
 // - Collage support
 
 import Colors from "@/constants/Colors";
+import { CollageBakeWebView, type CollageBakeJob as NativeCollageBakeJob } from "@/components/CollageBakeWebView";
 import { EffectBakeWebView, dataUrlToCacheFile, type EffectBakeJob } from "@/components/EffectBakeWebView";
-import { cssFilterStringToShaderBoost, mergeBeautifyWithCssBoost } from "@/lib/cssFilterToShaderBoost";
+import { amplifyCssShaderBoost, cssFilterStringToShaderBoost, mergeBeautifyWithCssBoost } from "@/lib/cssFilterToShaderBoost";
 import type { BeautifyParams } from "@/lib/gl/LutRenderer";
 import LutRenderer from "@/lib/gl/LutRenderer";
 import { OffscreenLutRenderer } from "@/lib/gl/OffscreenLutRenderer";
@@ -329,6 +330,9 @@ export default function CapturePreview() {
   const [nativeEffectBakeJob, setNativeEffectBakeJob] = useState<EffectBakeJob | null>(null);
   const nativeEffectBakeResolverRef = useRef<((uri: string) => void) | null>(null);
 
+  const [collageBakeJob, setCollageBakeJob] = useState<NativeCollageBakeJob | null>(null);
+  const collageBakeResolveRef = useRef<((path: string | null) => void) | null>(null);
+
   useEffect(() => {
     const raw = String(params.activeEffect ?? "");
     if (WEBGL_EFFECTS.some((e) => e.id === raw)) setActiveWebglEffect(raw as WebglEffectId);
@@ -457,7 +461,10 @@ export default function CapturePreview() {
     };
   }, [beautifyValues, quickAdjustment, filter, adjustValues, activeFilter]);
 
-  const captureCssBoost = useMemo(() => cssFilterStringToShaderBoost(incomingLiveFilterCss), [incomingLiveFilterCss]);
+  const captureCssBoost = useMemo(() => {
+    const raw = cssFilterStringToShaderBoost(incomingLiveFilterCss);
+    return isAndroidNative ? amplifyCssShaderBoost(raw, 1.38) : raw;
+  }, [incomingLiveFilterCss, isAndroidNative]);
   const beautifyForNativeExport = useMemo(
     () => mergeBeautifyWithCssBoost(beautifyParams, captureCssBoost) as ExtendedBeautifyParams,
     [beautifyParams, captureCssBoost]
@@ -679,6 +686,42 @@ export default function CapturePreview() {
     });
   }, []);
 
+  /** Multi-slot collage merge on React Native (APK): web uses bakeCollageWeb + document; native has no DOM. */
+  const bakeCollageNative = useCallback(async (uris: string[], layout: CollageLayout): Promise<string | null> => {
+    if (uris.length <= 1) return null;
+    const allSlots = COLLAGE_CONFIGS[layout]?.slots ?? COLLAGE_CONFIGS.none.slots;
+    const total = Math.min(uris.length, allSlots.length);
+    if (total <= 1) return null;
+
+    const dataUrls: string[] = [];
+    try {
+      const IM = await import("expo-image-manipulator");
+      for (let i = 0; i < total; i++) {
+        const resized = await IM.manipulateAsync(
+          uris[i],
+          [{ resize: { width: 560 } }],
+          { compress: 0.82, format: IM.SaveFormat.JPEG }
+        );
+        const b64 = await FileSystem.readAsStringAsync(resized.uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        dataUrls.push(`data:image/jpeg;base64,${b64}`);
+      }
+    } catch (e) {
+      console.warn("bakeCollageNative: prep failed", e);
+      return null;
+    }
+
+    return new Promise<string | null>((resolve) => {
+      collageBakeResolveRef.current = resolve;
+      setCollageBakeJob({
+        id: `collage-bake-${Date.now()}`,
+        dataUrls,
+        slots: allSlots.slice(0, total),
+      });
+    });
+  }, []);
+
   const bakeOverlaysWeb = useCallback(async (inputUri: string): Promise<string> => {
     if (!isWeb || mediaType !== "image") return inputUri;
     if (textOverlays.length === 0 && taggedUsers.length === 0 && drawPaths.length === 0) return inputUri;
@@ -762,10 +805,31 @@ export default function CapturePreview() {
 
   const runNativeCanvasEffectBake = useCallback((fileUri: string, effectId: WebglEffectId): Promise<string> => {
     if (effectId === "none" || isWeb) return Promise.resolve(fileUri);
-    return new Promise((resolve) => {
-      nativeEffectBakeResolverRef.current = resolve;
-      setNativeEffectBakeJob({ fileUri, effectId });
-    });
+    return (async () => {
+      let sourceForWebView = fileUri;
+      let fallbackFileUri: string | undefined;
+      if (Platform.OS === "android") {
+        fallbackFileUri = fileUri;
+        try {
+          const IM = await import("expo-image-manipulator");
+          const resized = await IM.manipulateAsync(
+            fileUri,
+            [{ resize: { width: 960 } }],
+            { compress: 0.88, format: IM.SaveFormat.JPEG }
+          );
+          const b64 = await FileSystem.readAsStringAsync(resized.uri, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+          sourceForWebView = `data:image/jpeg;base64,${b64}`;
+        } catch (e) {
+          console.warn("Android effect bake: data URL prep failed", e);
+        }
+      }
+      return new Promise<string>((resolve) => {
+        nativeEffectBakeResolverRef.current = resolve;
+        setNativeEffectBakeJob({ fileUri: sourceForWebView, effectId, fallbackFileUri });
+      });
+    })();
   }, []);
 
   const maybeBakeMedia = async (inputUri: string, options?: { skipCanvasFx?: boolean }) => {
@@ -995,7 +1059,9 @@ export default function CapturePreview() {
     }
     let workingUri = finalUri || collageUris[0] || "";
     if (mediaType === "image" && collageUris.length > 1) {
-      const merged = await bakeCollageWeb(collageUris, collageLayout);
+      const merged = isWeb
+        ? await bakeCollageWeb(collageUris, collageLayout)
+        : await bakeCollageNative(collageUris, collageLayout);
       if (merged) workingUri = merged;
     }
     let bakedUri = await maybeBakeMedia(workingUri, { skipCanvasFx: false });
@@ -1364,6 +1430,15 @@ export default function CapturePreview() {
           }}
         />
       )}
+      <CollageBakeWebView
+        job={collageBakeJob}
+        onFinish={(path) => {
+          const resolve = collageBakeResolveRef.current;
+          collageBakeResolveRef.current = null;
+          setCollageBakeJob(null);
+          resolve?.(path);
+        }}
+      />
       <EffectBakeWebView
         job={nativeEffectBakeJob}
         onFinish={(out) => {
@@ -1497,6 +1572,7 @@ export default function CapturePreview() {
                     ].filter(Boolean) as any}
                     resizeMode="cover"
                     onLoadEnd={() => setMediaLoaded(true)}
+                    onError={() => setMediaLoaded(true)}
                   />
                 </View>
               )
@@ -1655,7 +1731,12 @@ export default function CapturePreview() {
       </Animated.View>
 
         {((!mediaLoaded) || aiProcessing || (!!androidPreviewJob && !isComparing)) && (
-          <View style={styles.loadingOverlay}>
+          <View
+            style={[
+              styles.loadingOverlay,
+              isAndroidNative && !!androidPreviewJob && styles.loadingOverlayAndroidBaking,
+            ]}
+          >
             <ActivityIndicator color="#fff" />
           </View>
         )}
@@ -2269,6 +2350,7 @@ const styles = StyleSheet.create({
   preview: { width, height: previewHeight },
   videoPreview: { width, height: previewHeight },
   loadingOverlay: { ...StyleSheet.absoluteFillObject as any, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.55)" },
+  loadingOverlayAndroidBaking: { backgroundColor: "rgba(0,0,0,0.2)" },
   sendingOverlay: {
     position: "absolute",
     left: 16,

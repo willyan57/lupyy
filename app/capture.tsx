@@ -392,6 +392,7 @@ export default function CaptureScreen() {
   const previewTintLayers = getPreviewTintLayers({
     isWeb,
     isCapacitor,
+    isAndroidNative: Platform.OS === "android",
     liveFilter,
     activeEffect,
   });

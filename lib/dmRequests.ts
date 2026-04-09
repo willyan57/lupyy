@@ -8,9 +8,11 @@ export async function createDmRequestAfterIntro(params: {
   conversationId: string;
   senderId: string;
   recipientId: string;
-}) {
+}): Promise<{ ok: boolean; error: unknown | null }> {
   const { conversationId, senderId, recipientId } = params;
-  if (!conversationId || !senderId || !recipientId || senderId === recipientId) return;
+  if (!conversationId || !senderId || !recipientId || senderId === recipientId) {
+    return { ok: false, error: null };
+  }
 
   const { error } = await supabase.from("conversation_dm_requests").insert({
     conversation_id: conversationId,
@@ -19,9 +21,12 @@ export async function createDmRequestAfterIntro(params: {
     status: "pending",
   });
 
-  if (error && (error as { code?: string }).code !== "23505") {
+  const code = (error as { code?: string } | null)?.code;
+  // 23505 = unique violation (pedido já existe) — ok
+  if (error && code !== "23505") {
     console.warn("createDmRequestAfterIntro:", error);
   }
+  return { ok: !error || code === "23505", error: error && code !== "23505" ? error : null };
 }
 
 export async function acceptMessageRequest(conversationId: string) {

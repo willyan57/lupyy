@@ -54,13 +54,22 @@ function effectTintLayers(id: EffectId): PreviewTintLayer[] {
  * When `isWeb && !isCapacitor`, normal browsers apply CSS filters on the camera wrapper — skip tints
  * to avoid double grading. Native and Capacitor need these layers for a visible live preview.
  */
+function scaleLayers(layers: PreviewTintLayer[], factor: number, maxOpacity: number): PreviewTintLayer[] {
+  return layers.map((l) => ({
+    ...l,
+    opacity: Math.min(maxOpacity, l.opacity * factor),
+  }));
+}
+
 export function getPreviewTintLayers(params: {
   isWeb: boolean;
   isCapacitor: boolean;
+  /** True React Native on Android — live preview uses tint stacks (no CSS on camera surface). */
+  isAndroidNative?: boolean;
   liveFilter: LiveFilterDef;
   activeEffect: EffectId;
 }): PreviewTintLayer[] {
-  const { isWeb, isCapacitor, liveFilter, activeEffect } = params;
+  const { isWeb, isCapacitor, isAndroidNative, liveFilter, activeEffect } = params;
   if (isWeb && !isCapacitor) {
     return [];
   }
@@ -78,5 +87,9 @@ export function getPreviewTintLayers(params: {
 
   layers.push(...effectTintLayers(activeEffect));
 
+  // APK (RN Android): previous opacities were too subtle vs mobile web CSS grading.
+  if (isAndroidNative) {
+    return scaleLayers(layers, 2.35, 0.34);
+  }
   return layers;
 }

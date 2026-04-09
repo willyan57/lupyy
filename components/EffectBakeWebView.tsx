@@ -163,7 +163,13 @@ function runEffectBake(uri, effectId) {
 }
 </script></body></html>`;
 
-export type EffectBakeJob = { fileUri: string; effectId: string };
+export type EffectBakeJob = {
+  /** `file://` or `data:image/...;base64,...` passed into the hidden WebView */
+  fileUri: string;
+  effectId: string;
+  /** When `fileUri` is a data URL, used on failure/timeout so preview never goes blank */
+  fallbackFileUri?: string;
+};
 
 type Props = {
   job: EffectBakeJob | null;
@@ -186,7 +192,8 @@ export function EffectBakeWebView({ job, onFinish }: Props) {
   useEffect(() => {
     doneRef.current = false;
     if (!job) return;
-    const t = setTimeout(() => finishOnce(job.fileUri), 30000);
+    const fallback = job.fallbackFileUri ?? job.fileUri;
+    const t = setTimeout(() => finishOnce(fallback), 30000);
     return () => clearTimeout(t);
   }, [job, finishOnce]);
 
@@ -209,12 +216,13 @@ export function EffectBakeWebView({ job, onFinish }: Props) {
           setTimeout(() => ref.current?.injectJavaScript(inj), 40);
         }}
         onMessage={(ev) => {
+          const fallback = job.fallbackFileUri ?? job.fileUri;
           try {
             const j = JSON.parse(ev.nativeEvent.data);
             if (j.ok && typeof j.data === "string") finishOnce(j.data);
-            else finishOnce(job.fileUri);
+            else finishOnce(fallback);
           } catch {
-            finishOnce(job.fileUri);
+            finishOnce(fallback);
           }
         }}
         javaScriptEnabled

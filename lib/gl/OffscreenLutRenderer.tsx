@@ -4,7 +4,7 @@
 import { Asset } from "expo-asset";
 import { GLView, type ExpoWebGLRenderingContext } from "expo-gl";
 import { useCallback, useRef } from "react";
-import { StyleSheet, View } from "react-native";
+import { Platform, StyleSheet, View } from "react-native";
 
 import type { FilterId } from "@/lib/mediaFilters/applyFilterAndExport";
 import type { BeautifyParams } from "./LutRenderer";
@@ -128,6 +128,13 @@ export function OffscreenLutRenderer({
         };
 
         const srcAsset = await loadAsset(sourceUri);
+        const srcW0 = srcAsset.width || 0;
+        const srcH0 = srcAsset.height || 0;
+        if (srcW0 < 2 || srcH0 < 2) {
+          console.warn("OffscreenLutRenderer: invalid texture size, skipping GL bake");
+          handleFinishOnce(sourceUri);
+          return;
+        }
 
         const makeTex = (unit: number, asset: any) => {
           const tex = gl.createTexture();
@@ -146,8 +153,8 @@ export function OffscreenLutRenderer({
         makeTex(gl.TEXTURE0, srcAsset);
         gl.uniform1i(uImage, 0);
 
-        const srcW = srcAsset.width || glWidth || 1;
-        const srcH = srcAsset.height || glHeight || 1;
+        const srcW = srcW0 || glWidth || 1;
+        const srcH = srcH0 || glHeight || 1;
         gl.uniform1f(uSrcAspect, srcW / srcH);
         gl.uniform1f(uDstAspect, glWidth / glHeight);
 
@@ -196,8 +203,13 @@ export function OffscreenLutRenderer({
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
         gl.flush();
 
-        // Aguardar o frame ser renderizado completamente
-        await new Promise((r) => setTimeout(r, 150));
+        const waitFrames = async () => {
+          for (let i = 0; i < 6; i += 1) {
+            await new Promise<void>((r) => requestAnimationFrame(() => r()));
+          }
+          await new Promise((r) => setTimeout(r, Platform.OS === "android" ? 220 : 120));
+        };
+        await waitFrames();
 
         // Snapshot ANTES de endFrameEXP
         let resultUri: string | null = null;
@@ -214,7 +226,7 @@ export function OffscreenLutRenderer({
           console.warn("Snapshot falhou, tentando novamente:", snapErr);
           gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
           gl.flush();
-          await new Promise((r) => setTimeout(r, 250));
+          await waitFrames();
           try {
             const snapshot2 = await GLView.takeSnapshotAsync(gl, {
               format: "jpeg",
@@ -239,8 +251,15 @@ export function OffscreenLutRenderer({
     [sourceUri, filter, beautify, handleFinishOnce]
   );
 
+  // Off-screen (-9999) GL often never composites on Android → black snapshots. Keep on-screen but invisible.
+  const nativeHidden = Platform.OS !== "web";
+
   return (
-    <View style={styles.container} pointerEvents="none">
+    <View
+      style={nativeHidden ? styles.containerNativeHidden : styles.container}
+      pointerEvents="none"
+      collapsable={false}
+    >
       <GLView
         style={{ width: glWidth, height: glHeight }}
         onContextCreate={handleContextCreate}
@@ -255,5 +274,12 @@ const styles = StyleSheet.create({
     left: -9999,
     top: -9999,
     overflow: "hidden",
+  },
+  containerNativeHidden: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    opacity: 0.02,
+    zIndex: -20,
   },
 });

@@ -312,11 +312,25 @@ export default function ConversationScreen() {
   }, [conversationId]);
 
   const refreshFriendDmIntroGate = useCallback(
-    async (uid: string, other: string, convType: "friend" | "crush" | null) => {
+    async (uid: string, other: string, convType: "friend" | "crush" | null, convId?: string | null) => {
       friendIntroMarkAfterSendRef.current = false;
       if (convType !== "friend") {
         setFriendDmIntroGate("na");
         return;
+      }
+      // Já existe pedido pendente como remetente → bloquear novas mensagens mesmo se follows.update falhou antes
+      if (convId) {
+        const { data: pendingAsSender } = await supabase
+          .from("conversation_dm_requests")
+          .select("id")
+          .eq("conversation_id", convId)
+          .eq("sender_id", uid)
+          .eq("status", "pending")
+          .maybeSingle();
+        if (pendingAsSender?.id) {
+          setFriendDmIntroGate("blocked");
+          return;
+        }
       }
       const { data: myRow } = await supabase
         .from("follows")
@@ -397,7 +411,7 @@ export default function ConversationScreen() {
     }
 
     if (other) {
-      await refreshFriendDmIntroGate(uid, other, conversation.conversation_type);
+      await refreshFriendDmIntroGate(uid, other, conversation.conversation_type, conversation.id);
     }
     await refreshDmRequestState();
   }, [conversationId, refreshFriendDmIntroGate, refreshDmRequestState]);
@@ -534,7 +548,7 @@ export default function ConversationScreen() {
         setConversationType(c.conversation_type);
 
         if (other) {
-          await refreshFriendDmIntroGate(uid, other, c.conversation_type);
+          await refreshFriendDmIntroGate(uid, other, c.conversation_type, conversationId);
         } else {
           setFriendDmIntroGate("na");
         }
@@ -707,16 +721,24 @@ export default function ConversationScreen() {
 
   async function applyFriendIntroAfterSend() {
     if (!friendIntroMarkAfterSendRef.current || !authUserId || !otherUserId || !conversationId) return;
-    const { error } = await markFriendDmIntroUsed(authUserId, otherUserId);
-    if (!error) {
-      friendIntroMarkAfterSendRef.current = false;
-      setFriendDmIntroGate("blocked");
-      await createDmRequestAfterIntro({
-        conversationId,
-        senderId: authUserId,
-        recipientId: otherUserId,
-      });
+    friendIntroMarkAfterSendRef.current = false;
+
+    // Pedido na caixa "Pedidos" do destinatário deve existir sempre após a 1ª DM (independente do UPDATE em follows).
+    const { ok: requestOk, error: requestErr } = await createDmRequestAfterIntro({
+      conversationId,
+      senderId: authUserId,
+      recipientId: otherUserId,
+    });
+    if (!requestOk && requestErr) {
+      console.warn("createDmRequestAfterIntro failed — destinatário pode não ver em Pedidos:", requestErr);
     }
+
+    const { error: markErr } = await markFriendDmIntroUsed(authUserId, otherUserId);
+    if (markErr) {
+      console.warn("markFriendDmIntroUsed failed:", markErr);
+    }
+
+    setFriendDmIntroGate("blocked");
   }
 
   async function handleAcceptMessageRequest() {
@@ -724,7 +746,7 @@ export default function ConversationScreen() {
     try {
       await acceptMessageRequest(conversationId);
       await refreshDmRequestState();
-      await refreshFriendDmIntroGate(authUserId, otherUserId, conversationType);
+      await refreshFriendDmIntroGate(authUserId, otherUserId, conversationType, conversationId);
     } catch (e: any) {
       Alert.alert("Erro", e?.message ?? "Não foi possível aceitar o pedido.");
     }
