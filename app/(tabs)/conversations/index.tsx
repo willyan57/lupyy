@@ -1,8 +1,8 @@
 // app/(tabs)/conversations/index.tsx
 import SwipeableTabScreen from "@/components/SwipeableTabScreen";
 import {
-  MERGE_CONVERSATION_INTO_LIST,
-  type MergeConversationListPayload,
+    MERGE_CONVERSATION_INTO_LIST,
+    type MergeConversationListPayload,
 } from "@/lib/conversationListEvents";
 import { getOrCreateConversation, syncConversationDeletionInboxState } from "@/lib/conversations";
 import { supabase } from "@/lib/supabase";
@@ -10,19 +10,19 @@ import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
+    ActivityIndicator,
 
-  Animated,
-  BackHandler,
-  DeviceEventEmitter,
-  FlatList,
-  Image,
-  Modal,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    Animated,
+    BackHandler,
+    DeviceEventEmitter,
+    FlatList,
+    Image,
+    Modal,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 
 type RpcConversation = {

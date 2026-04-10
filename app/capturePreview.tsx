@@ -9,18 +9,20 @@
 // - Fixed black image export (proper bake pipeline)
 // - Collage support
 
-import Colors from "@/constants/Colors";
 import { CollageBakeWebView, type CollageBakeJob as NativeCollageBakeJob } from "@/components/CollageBakeWebView";
 import { EffectBakeWebView, dataUrlToCacheFile, type EffectBakeJob } from "@/components/EffectBakeWebView";
+import Colors from "@/constants/Colors";
+import { getLiveFilterById } from "@/components/LiveFilterCarousel";
+import { getPreviewTintLayers } from "@/lib/livePreviewTint";
+import { clearCollageDraft, readCollageDraft } from "@/lib/captureDraftStore";
 import { amplifyCssShaderBoost, cssFilterStringToShaderBoost, mergeBeautifyWithCssBoost } from "@/lib/cssFilterToShaderBoost";
 import type { BeautifyParams } from "@/lib/gl/LutRenderer";
 import LutRenderer from "@/lib/gl/LutRenderer";
 import { OffscreenLutRenderer } from "@/lib/gl/OffscreenLutRenderer";
 import { getFilterShaderParams, getLutForFilter } from "@/lib/gl/filterLuts";
-import { EFFECTS as WEBGL_EFFECTS, type EffectId as WebglEffectId, applyCanvasEffect, getEffectCSSFilter } from "@/lib/gl/webglEffects";
+import { EFFECTS as WEBGL_EFFECTS, applyCanvasEffect, getEffectCSSFilter, type EffectId as WebglEffectId } from "@/lib/gl/webglEffects";
 import { compressImage, prepareVideo } from "@/lib/media";
 import type { FilterId as ExportFilterId } from "@/lib/mediaFilters/applyFilterAndExport";
-import { clearCollageDraft, readCollageDraft } from "@/lib/captureDraftStore";
 import { supabase } from "@/lib/supabase";
 import { ResizeMode, Video } from "expo-av";
 import { BlurView } from "expo-blur";
@@ -30,22 +32,22 @@ import * as MediaLibrary from "expo-media-library";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Dimensions,
-  FlatList,
-  Image,
-  Modal,
-  PanResponder,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Dimensions,
+    FlatList,
+    Image,
+    Modal,
+    PanResponder,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 // @ts-ignore
@@ -326,17 +328,56 @@ export default function CapturePreview() {
   const [quickAdjustment, setQuickAdjustment] = useState<"none" | "bright" | "dark" | "punch">("none");
   const [effectsOpen, setEffectsOpen] = useState(false);
   const [showEffectsPanel, setShowEffectsPanel] = useState(false);
-  const [activeWebglEffect, setActiveWebglEffect] = useState<WebglEffectId>("none");
+  const routeWebglEffect = useMemo((): WebglEffectId => {
+    const raw = String(params.activeEffect ?? "");
+    return WEBGL_EFFECTS.some((e) => e.id === raw) ? (raw as WebglEffectId) : "none";
+  }, [params.activeEffect]);
+
+  const [activeWebglEffect, setActiveWebglEffect] = useState<WebglEffectId>(routeWebglEffect);
+  useEffect(() => {
+    setActiveWebglEffect(routeWebglEffect);
+  }, [routeWebglEffect]);
+
+  const previewLiveFilterForTint = useMemo(() => {
+    const raw = params.liveFilter;
+    const id = typeof raw === "string" ? raw : Array.isArray(raw) ? raw[0] : "";
+    return (
+      getLiveFilterById(id || undefined) ?? {
+        id: "none",
+        name: "Normal",
+        cssFilter: "none",
+        accent: "transparent",
+      }
+    );
+  }, [params.liveFilter]);
+
+  const capacitorPreviewTintLayers = useMemo(
+    () =>
+      isCapacitor
+        ? getPreviewTintLayers({
+            isWeb: true,
+            isCapacitor: true,
+            liveFilter: previewLiveFilterForTint,
+            activeEffect: activeWebglEffect,
+          })
+        : [],
+    [isCapacitor, previewLiveFilterForTint, activeWebglEffect],
+  );
+
+  const webPreviewCombinedCssFilter = useMemo(() => {
+    const parts = [
+      effectiveCaptureCssFilter || "",
+      activeFilter.cssFilter || "",
+      getEffectCSSFilter(activeWebglEffect) || "",
+    ].filter(Boolean);
+    return parts.join(" ").trim() || undefined;
+  }, [effectiveCaptureCssFilter, activeFilter, activeWebglEffect]);
+
   const [nativeEffectBakeJob, setNativeEffectBakeJob] = useState<EffectBakeJob | null>(null);
   const nativeEffectBakeResolverRef = useRef<((uri: string) => void) | null>(null);
 
   const [collageBakeJob, setCollageBakeJob] = useState<NativeCollageBakeJob | null>(null);
   const collageBakeResolveRef = useRef<((path: string | null) => void) | null>(null);
-
-  useEffect(() => {
-    const raw = String(params.activeEffect ?? "");
-    if (WEBGL_EFFECTS.some((e) => e.id === raw)) setActiveWebglEffect(raw as WebglEffectId);
-  }, [params.activeEffect]);
 
   // Beautify
   const [showBeautifyPanel, setShowBeautifyPanel] = useState(false);
@@ -620,7 +661,7 @@ export default function CapturePreview() {
       img.src = inputUri;
       setTimeout(() => resolve(inputUri), 12000);
     });
-  }, []);
+  }, [isCapacitor]);
 
   const bakeCollageWeb = useCallback(async (uris: string[], layout: CollageLayout): Promise<string | null> => {
     if (!isWeb || uris.length === 0) return null;
@@ -1496,20 +1537,35 @@ export default function CapturePreview() {
                       }}
                     >
                       {isWeb ? (
-                        <img
-                          src={item}
-                          style={{
-                            width: "100%",
-                            height: "100%",
-                            objectFit: "cover",
-                            borderRadius: 6,
-                            filter: !isComparing
-                              ? [effectiveCaptureCssFilter || "", activeFilter.cssFilter || "", getEffectCSSFilter(activeWebglEffect) || ""].filter(Boolean).join(" ") || undefined
-                              : undefined,
-                          } as any}
-                          onLoad={() => setMediaLoaded(true)}
-                          onError={() => setMediaLoaded(true)}
-                        />
+                        <View style={{ width: "100%", height: "100%", position: "relative", borderRadius: 6, overflow: "hidden" }}>
+                          <img
+                            src={item}
+                            style={{
+                              width: "100%",
+                              height: "100%",
+                              objectFit: "cover",
+                              borderRadius: 6,
+                              filter:
+                                !isComparing && !isCapacitor
+                                  ? webPreviewCombinedCssFilter
+                                  : undefined,
+                            } as any}
+                            onLoad={() => setMediaLoaded(true)}
+                            onError={() => setMediaLoaded(true)}
+                          />
+                          {isCapacitor &&
+                            !isComparing &&
+                            capacitorPreviewTintLayers.map((layer, i) => (
+                              <View
+                                key={`coll-tint-${idx}-${i}`}
+                                pointerEvents="none"
+                                style={[
+                                  StyleSheet.absoluteFill,
+                                  { backgroundColor: layer.color, opacity: layer.opacity, zIndex: 2 + i },
+                                ]}
+                              />
+                            ))}
+                        </View>
                       ) : (
                         <Image
                           source={{ uri: item }}
@@ -1524,8 +1580,7 @@ export default function CapturePreview() {
               </View>
             ) : (
             isWeb && !isComparing && (activeFilter.cssFilter || effectiveCaptureCssFilter || activeWebglEffect !== "none") ? (
-              // On web AND Capacitor (APK) use native <img> tag with live CSS filters — instant like Instagram
-              <View style={[styles.preview, previewMediaStyle]}>
+              <View style={[styles.preview, previewMediaStyle, { position: "relative" }]}>
                 <img
                   key={`${nonce}::stable`}
                   src={(isCapacitor && stableImageUri) ? stableImageUri : previewImageUri}
@@ -1533,16 +1588,36 @@ export default function CapturePreview() {
                     width: "100%",
                     height: "100%",
                     objectFit: "cover",
-                    filter: [
-                      effectiveCaptureCssFilter || "",
-                      activeFilter.cssFilter || "",
-                      getEffectCSSFilter(activeWebglEffect) || "",
-                    ].filter(Boolean).join(" ") || undefined,
+                    filter: isCapacitor ? undefined : webPreviewCombinedCssFilter,
                     transform: isFrontCamera ? "scaleX(-1)" : undefined,
                   } as any}
                   onLoad={() => setMediaLoaded(true)}
                   onError={() => setMediaLoaded(true)}
                 />
+                {isCapacitor &&
+                  capacitorPreviewTintLayers.map((layer, i) => (
+                    <View
+                      key={`apk-prev-tint-${i}`}
+                      pointerEvents="none"
+                      style={[
+                        StyleSheet.absoluteFill,
+                        { backgroundColor: layer.color, opacity: layer.opacity, zIndex: 4 + i },
+                      ]}
+                    />
+                  ))}
+                {isCapacitor && activeFilter.overlay && activeFilter.id !== "none" && (
+                  <View
+                    pointerEvents="none"
+                    style={[
+                      StyleSheet.absoluteFill,
+                      {
+                        backgroundColor: activeFilter.overlay,
+                        opacity: 0.12,
+                        zIndex: 20,
+                      },
+                    ]}
+                  />
+                )}
               </View>
             ) : (
               isWeb ? (

@@ -2,14 +2,14 @@
 import Colors from "@/constants/Colors";
 import { emitMergeConversationIntoList } from "@/lib/conversationListEvents";
 import {
-  acceptMessageRequest,
-  createDmRequestAfterIntro,
-  declineMessageRequest,
-  fetchDmRequestForConversation,
-  type DmRequestRow,
+    acceptMessageRequest,
+    createDmRequestAfterIntro,
+    declineMessageRequest,
+    fetchDmRequestForConversation,
+    type DmRequestRow,
 } from "@/lib/dmRequests";
-import { markFriendDmIntroUsed } from "@/lib/social";
 import { touchUserPresence, useUserPresence } from "@/lib/presence";
+import { markFriendDmIntroUsed } from "@/lib/social";
 import { supabase } from "@/lib/supabase";
 import { useTypingIndicator } from "@/lib/useTypingIndicator";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
@@ -20,23 +20,23 @@ import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Dimensions,
-  FlatList,
-  Image,
-  Keyboard,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
-  Animated as RNAnimated,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Dimensions,
+    FlatList,
+    Image,
+    Keyboard,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    Pressable,
+    Animated as RNAnimated,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 

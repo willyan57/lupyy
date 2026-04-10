@@ -1,11 +1,9 @@
-// app/capture.tsx — Premium Instagram-style Camera with Layout Collage, Video, Live Filters, AR & Effects
-import FaceAROverlay from "@/components/FaceAROverlay";
-import { LIVE_FILTERS, type LiveFilterDef } from "@/components/LiveFilterCarousel";
-import type { AREffectId } from "@/lib/ar/faceDetection";
+// app/capture.tsx — Câmera: collage, vídeo, filtros ao vivo, efeitos FX (AR removido — instável no APK/WebView)
+import LiveFilterCarousel, { LIVE_FILTERS, type LiveFilterDef } from "@/components/LiveFilterCarousel";
+import { saveCollageDraft } from "@/lib/captureDraftStore";
 import { EFFECTS, getEffectCSSFilter, type EffectId } from "@/lib/gl/webglEffects";
 import { getPreviewTintLayers } from "@/lib/livePreviewTint";
 import { createVideoRecorder, type VideoRecorderInstance } from "@/lib/videoRecorder";
-import { saveCollageDraft } from "@/lib/captureDraftStore";
 import { useFocusEffect } from "@react-navigation/native";
 import { CameraType, CameraView, useCameraPermissions } from "expo-camera";
 import { Image } from "expo-image";
@@ -15,18 +13,18 @@ import * as MediaLibrary from "expo-media-library";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Dimensions,
-  FlatList,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Dimensions,
+    FlatList,
+    Modal,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import DraggableFlatList, { RenderItemParams } from "react-native-draggable-flatlist";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -117,10 +115,6 @@ export default function CaptureScreen() {
   // ── Live filter (Instagram-style, applied before capture) ──
   const [liveFilter, setLiveFilter] = useState<LiveFilterDef>(LIVE_FILTERS[0]);
 
-  // ── AR Face effects ──
-  const [arEffect, setArEffect] = useState<AREffectId>("none");
-  const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
-
   // ── WebGL Effects ──
   const [activeEffect, setActiveEffect] = useState<EffectId>("none");
   const [showEffectsPicker, setShowEffectsPicker] = useState(false);
@@ -200,7 +194,6 @@ export default function CaptureScreen() {
     liveFilter: liveFilter.id !== "none" ? liveFilter.id : undefined,
     liveFilterCSS: liveFilter.cssFilter !== "none" ? liveFilter.cssFilter : undefined,
     activeEffect: activeEffect !== "none" ? activeEffect : undefined,
-    arEffect: arEffect !== "none" ? arEffect : undefined,
   };
   const capturePreviewMediaParamsRef = useRef(capturePreviewMediaParams);
   capturePreviewMediaParamsRef.current = capturePreviewMediaParams;
@@ -310,37 +303,6 @@ export default function CaptureScreen() {
     };
   }, [cameraReady, facing, mode, recording, getActiveCameraStream, router, filter, shotScale]);
 
-  // Web/APK: bind the actual camera <video> element for AR detection.
-  useEffect(() => {
-    if (!isWeb || arEffect === "none") {
-      cameraVideoRef.current = null;
-      return;
-    }
-
-    let cancelled = false;
-    const bindVideo = () => {
-      if (cancelled) return;
-      try {
-        const videos = Array.from(document.querySelectorAll("video")) as HTMLVideoElement[];
-        if (!videos.length) return;
-        const best = videos
-          .map((v) => ({
-            el: v,
-            area: (v.videoWidth || v.clientWidth || 0) * (v.videoHeight || v.clientHeight || 0),
-          }))
-          .sort((a, b) => b.area - a.area)[0]?.el;
-        if (best) cameraVideoRef.current = best;
-      } catch {}
-    };
-
-    bindVideo();
-    const interval = setInterval(bindVideo, 450);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [arEffect, cameraKey]);
-
   // Initialize collage photos array when layout changes
   useEffect(() => {
     if (isCollageMode) {
@@ -385,10 +347,13 @@ export default function CaptureScreen() {
     if (effectCSS) f = f ? `${f} ${effectCSS}` : effectCSS;
     return f || undefined;
   })();
-  const liveCameraWebFilterStyle = isWeb && liveCSSFilter
-    ? ({ filter: liveCSSFilter, WebkitFilter: liveCSSFilter } as any)
-    : undefined;
-  const shouldUseTintOverlay = !isWeb;
+  // APK/Capacitor: CSS em <video> ou wrapper costuma dar tela preta — só browser “puro” usa filter no preview.
+  const applyCssFilterOnCameraSurface = isWeb && !isCapacitor;
+  const liveCameraWebFilterStyle =
+    applyCssFilterOnCameraSurface && liveCSSFilter
+      ? ({ filter: liveCSSFilter, WebkitFilter: liveCSSFilter } as any)
+      : undefined;
+  const shouldUseTintOverlay = !isWeb || isCapacitor;
   const previewTintLayers = getPreviewTintLayers({
     isWeb,
     isCapacitor,
@@ -397,10 +362,9 @@ export default function CaptureScreen() {
     activeEffect,
   });
 
-  // Force CSS filter on the real camera <video> element (important for WebView/Capacitor).
-  // Keep this hook above any early returns to preserve hooks order.
+  // Browser: aplica filtro direto no <video> (melhor que só no wrapper). APK: desligado — usa camadas de tint.
   useEffect(() => {
-    if (!isWeb) return;
+    if (!applyCssFilterOnCameraSurface) return;
     let cancelled = false;
     let tries = 0;
     const maxTries = 24;
@@ -431,7 +395,7 @@ export default function CaptureScreen() {
         } catch {}
       }
     };
-  }, [getActiveCameraVideo, liveCSSFilter, cameraKey]);
+  }, [getActiveCameraVideo, liveCSSFilter, cameraKey, applyCssFilterOnCameraSurface]);
 
   const loadGalleryAssets = async (albumId?: string) => {
     try {
@@ -880,7 +844,7 @@ export default function CaptureScreen() {
     { key: "flash", icon: flashOn ? "⚡" : "⚡︎", label: flashOn ? "On" : "Off", onPress: toggleFlash, active: flashOn },
     { key: "timer", icon: "⏱", label: timerSeconds === 0 ? "Timer" : `${timerSeconds}s`, onPress: cycleTimer, active: timerSeconds > 0 },
     { key: "grid", icon: "⊞", label: "Grid", onPress: toggleGrid, active: showGrid },
-    { key: "effects", icon: "✦", label: "Efeitos", onPress: () => { setShowEffectsPicker(p => !p); }, active: activeEffect !== "none" },
+    { key: "effects", icon: "✦", label: "FX", onPress: () => { setShowEffectsPicker(p => !p); }, active: activeEffect !== "none" },
     { key: "collage", icon: "⊡", label: "Layout", onPress: () => setShowCollageMenu(p => !p), active: isCollageMode },
   ];
 
@@ -983,7 +947,7 @@ export default function CaptureScreen() {
             mode={isVideoMode ? "video" : "picture"}
             onCameraReady={() => setCameraReady(true)}
           />
-          {/* Native APK / Capacitor: CSS filter does not affect the camera surface — use tint layers */}
+          {/* RN nativo + Capacitor APK: gradientes por cima do preview (evita tela preta do CSS no vídeo) */}
           {shouldUseTintOverlay && previewTintLayers.map((layer, i) => (
             <View
               key={`preview-tint-${i}`}
@@ -994,17 +958,6 @@ export default function CaptureScreen() {
               ]}
             />
           ))}
-          {/* AR Face overlay */}
-          {isWeb && arEffect !== "none" && (
-            <FaceAROverlay
-              videoRef={cameraVideoRef}
-              activeEffect={arEffect}
-              onEffectChange={setArEffect}
-              showPicker={false}
-              canvasWidth={cameraWidth}
-              canvasHeight={cameraHeight}
-            />
-          )}
         </Animated.View>
       )}
 
@@ -1350,7 +1303,13 @@ export default function CaptureScreen() {
       {/* ── Effects picker (WebGL effects) ── */}
       {showEffectsPicker && !isCollageMode && (
         <View style={styles.effectsPickerOverlay}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 8, gap: 4 }}>
+          <Text style={styles.effectsPickerTitle}>Efeitos FX</Text>
+          <Text style={styles.effectsPickerSubtitle}>
+            {isCapacitor
+              ? "No APK a prévia é por cor; o resultado final usa o processamento completo ao publicar."
+              : "Prévia aproximada ao vivo; publicação aplica o efeito completo."}
+          </Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 8, gap: 4, paddingTop: 6 }}>
             {EFFECTS.map(effect => {
               const isActive = effect.id === activeEffect;
               return (
@@ -1369,12 +1328,17 @@ export default function CaptureScreen() {
         </View>
       )}
 
-      {/* AR picker hidden in APK/native for now: current implementation is web-only face mesh */}
-
       {/* Bottom (not in collage mode) */}
       {!isCollageMode && !isPostMode ? (
         <View style={[styles.bottomStory, { paddingBottom: (Platform.OS === "android" ? Math.max(insets.bottom, 18) + 20 : insets.bottom + 10) }]}>
           <LinearGradient colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.8)"]} style={styles.bottomGradientInner} />
+
+          {!recording && (
+            <View style={styles.liveFiltersSection}>
+              <Text style={styles.liveFiltersSectionTitle}>Filtros ao vivo</Text>
+              <LiveFilterCarousel activeFilter={liveFilter.id} onFilterChange={setLiveFilter} />
+            </View>
+          )}
 
           <View style={styles.captureRow}>
             <TouchableOpacity
@@ -1445,6 +1409,10 @@ export default function CaptureScreen() {
         </View>
       ) : !isCollageMode ? (
         <View style={[styles.bottomPost, galleryExpanded && styles.bottomPostExpanded]}>
+          <View style={styles.liveFiltersSectionPost}>
+            <Text style={styles.liveFiltersSectionTitle}>Filtros ao vivo</Text>
+            <LiveFilterCarousel activeFilter={liveFilter.id} onFilterChange={setLiveFilter} />
+          </View>
           {!galleryExpanded && selectedGalleryUri && (
             <View style={styles.selectedPreviewRow}>
               <TouchableOpacity onPress={() => setGalleryExpanded(true)} activeOpacity={0.7} style={styles.expandBtn}>
@@ -1738,6 +1706,23 @@ const styles = StyleSheet.create({
   videoHint: { color: "rgba(255,255,255,0.4)", fontSize: 11, textAlign: "center", marginBottom: 4, fontWeight: "600" },
 
   // Bottom Story/Reel
+  liveFiltersSection: { width: "100%", paddingBottom: 4, zIndex: 4 },
+  liveFiltersSectionPost: {
+    width: "100%",
+    paddingTop: 8,
+    paddingBottom: 6,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(255,255,255,0.08)",
+  },
+  liveFiltersSectionTitle: {
+    color: "rgba(255,255,255,0.5)",
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.6,
+    textTransform: "uppercase" as const,
+    marginLeft: 16,
+    marginBottom: 6,
+  },
   bottomStory: { position: "absolute", left: 0, right: 0, bottom: 0, paddingBottom: 24 },
   captureRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-evenly", paddingHorizontal: 30, marginBottom: 10 },
   galleryThumb: { width: 48, height: 48, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.15)", overflow: "hidden", alignItems: "center", justifyContent: "center" },
@@ -1809,6 +1794,15 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     marginHorizontal: 8,
     paddingVertical: 12,
+  },
+  effectsPickerTitle: { color: "#fff", fontSize: 14, fontWeight: "800", paddingHorizontal: 14 },
+  effectsPickerSubtitle: {
+    color: "rgba(255,255,255,0.55)",
+    fontSize: 11,
+    lineHeight: 15,
+    paddingHorizontal: 14,
+    marginTop: 4,
+    marginBottom: 2,
   },
   arPickerOverlay: {
     position: "absolute",

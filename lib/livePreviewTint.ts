@@ -91,5 +91,9 @@ export function getPreviewTintLayers(params: {
   if (isAndroidNative) {
     return scaleLayers(layers, 2.35, 0.34);
   }
+  // Capacitor WebView: não aplicamos CSS no <video> (tela preta em vários devices) — reforça o gradiente por cima.
+  if (isCapacitor) {
+    return scaleLayers(layers, 2.15, 0.33);
+  }
   return layers;
 }

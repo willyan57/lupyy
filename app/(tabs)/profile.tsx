@@ -15,21 +15,21 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { StyleProp, ViewStyle } from "react-native";
 import {
-  ActivityIndicator,
-  Animated, Dimensions,
-  FlatList,
-  Modal,
-  Platform,
-  Pressable,
-  RefreshControl,
-  SafeAreaView,
-  ScrollView,
-  Share,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Animated, Dimensions,
+    FlatList,
+    Modal,
+    Platform,
+    Pressable,
+    RefreshControl,
+    SafeAreaView,
+    ScrollView,
+    Share,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from "react-native";
 
 import CommentsSheet from "@/components/CommentsSheet";
@@ -45,29 +45,29 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { ConversationType, getOrCreateConversation, syncConversationDeletionInboxState } from "@/lib/conversations";
 import type { ProfileVisitor } from "@/lib/engagement";
 import {
-  BADGE_CONFIG,
-  type Badge,
-  type BoostInfo,
-  LEVEL_CONFIG,
-  type PostBoostInfo,
-  type ProfileViewStats,
-  type UserLevelInfo,
-  boostPost,
-  cancelPostBoost,
-  getActiveBoost,
-  getMyBoostedPosts,
-  getProfileViewStats,
-  getProfileVisitors,
-  getUserLevelAndBadges,
-  getXpProgress,
-  registerProfileView
+    BADGE_CONFIG,
+    type Badge,
+    type BoostInfo,
+    LEVEL_CONFIG,
+    type PostBoostInfo,
+    type ProfileViewStats,
+    type UserLevelInfo,
+    boostPost,
+    cancelPostBoost,
+    getActiveBoost,
+    getMyBoostedPosts,
+    getProfileViewStats,
+    getProfileVisitors,
+    getUserLevelAndBadges,
+    getXpProgress,
+    registerProfileView
 } from "@/lib/engagement";
 import { type BlockedUser, blockUser, getBlockedUsers, isUserBlocked, unblockUser, unblockUser as unblockUserMod } from "@/lib/moderation";
 import {
-  type Highlight,
-  fetchHighlightItems,
-  fetchPostViewCounts,
-  fetchUserHighlights
+    type Highlight,
+    fetchHighlightItems,
+    fetchPostViewCounts,
+    fetchUserHighlights
 } from "@/lib/profileHighlights";
 import { setFollowInterestType } from "@/lib/social";
 import { useIsMobileWeb } from "@/lib/useIsMobileWeb";
