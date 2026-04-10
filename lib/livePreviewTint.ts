@@ -16,7 +16,7 @@ export type PreviewTintLayer = {
   opacity: number;
   /** Solid overlay (RN View) */
   color?: string;
-  /** Light leaks, duotone, chromatic separation, etc. */
+  /** Gradient hints for live preview */
   gradient?: PreviewTintGradient;
 };
 
@@ -24,92 +24,107 @@ function effectTintLayers(id: EffectId): PreviewTintLayer[] {
   switch (id) {
     case "none":
       return [];
-    case "glitch":
+    case "preto_branco":
       return [
         {
-          opacity: 0.11,
+          opacity: 0.06,
           gradient: {
-            colors: ["rgba(120,255,80,0.55)", "rgba(255,40,200,0.28)", "rgba(0,0,0,0)"],
-            start: { x: 0, y: 0 },
-            end: { x: 1, y: 1 },
-            locations: [0, 0.42, 1],
-          },
-        },
-      ];
-    case "chromatic":
-      return [
-        {
-          opacity: 0.1,
-          gradient: {
-            colors: [
-              "rgba(255,55,95,0.5)",
-              "rgba(255,55,95,0.08)",
-              "rgba(0,235,255,0.5)",
-              "rgba(0,235,255,0.08)",
-            ],
-            start: { x: 0, y: 0.5 },
-            end: { x: 1, y: 0.5 },
-            locations: [0, 0.46, 0.54, 1],
-          },
-        },
-      ];
-    case "light_leaks":
-      return [
-        {
-          opacity: 0.16,
-          gradient: {
-            colors: ["rgba(255,215,130,0.75)", "rgba(255,150,80,0.28)", "rgba(0,0,0,0)"],
-            start: { x: 0, y: 0 },
-            end: { x: 0.62, y: 0.58 },
-            locations: [0, 0.38, 1],
-          },
-        },
-        {
-          opacity: 0.12,
-          gradient: {
-            colors: ["rgba(255,110,195,0.6)", "rgba(255,90,130,0)", "rgba(0,0,0,0)"],
-            start: { x: 1, y: 1 },
-            end: { x: 0.32, y: 0.42 },
-          },
-        },
-      ];
-    case "vhs":
-      return [
-        {
-          opacity: 0.13,
-          gradient: {
-            colors: ["rgba(200,175,130,0.45)", "rgba(90,75,55,0.35)", "rgba(25,22,18,0.5)"],
+            colors: ["rgba(255,255,255,0.25)", "rgba(120,120,120,0.08)", "rgba(0,0,0,0.12)"],
             start: { x: 0.5, y: 0 },
             end: { x: 0.5, y: 1 },
             locations: [0, 0.5, 1],
           },
         },
-        {
-          opacity: 0.06,
-          color: "rgba(0,0,0,0.4)",
-        },
       ];
-    case "prism":
+    case "golden_mist":
       return [
         {
-          opacity: 0.12,
+          opacity: 0.1,
           gradient: {
-            colors: ["rgba(255,200,255,0.5)", "rgba(180,220,255,0.35)", "rgba(255,255,200,0.25)", "rgba(0,0,0,0)"],
+            colors: ["rgba(255,220,170,0.55)", "rgba(255,190,140,0.2)", "rgba(0,0,0,0)"],
             start: { x: 0, y: 0 },
-            end: { x: 1, y: 1 },
-            locations: [0, 0.35, 0.7, 1],
+            end: { x: 0.55, y: 0.5 },
+            locations: [0, 0.4, 1],
+          },
+        },
+        {
+          opacity: 0.07,
+          gradient: {
+            colors: ["rgba(255,200,210,0.4)", "rgba(255,180,200,0)", "rgba(0,0,0,0)"],
+            start: { x: 1, y: 1 },
+            end: { x: 0.4, y: 0.45 },
           },
         },
       ];
-    case "duotone":
+    case "veludo":
       return [
         {
-          opacity: 0.14,
+          opacity: 0.11,
           gradient: {
-            colors: ["rgba(40,55,200,0.55)", "rgba(255,120,80,0.4)", "rgba(20,25,60,0.45)"],
-            start: { x: 0, y: 1 },
-            end: { x: 1, y: 0 },
-            locations: [0, 0.5, 1],
+            colors: ["rgba(0,0,0,0)", "rgba(0,0,0,0.12)", "rgba(0,0,0,0.38)"],
+            start: { x: 0.5, y: 0.5 },
+            end: { x: 1, y: 1 },
+            locations: [0, 0.55, 1],
+          },
+        },
+        {
+          opacity: 0.06,
+          gradient: {
+            colors: ["rgba(255,255,255,0.35)", "rgba(255,255,255,0)", "rgba(0,0,0,0)"],
+            start: { x: 0.5, y: 0.5 },
+            end: { x: 0, y: 0 },
+          },
+        },
+      ];
+    case "aurora":
+      return [
+        {
+          opacity: 0.09,
+          gradient: {
+            colors: ["rgba(120,200,255,0.45)", "rgba(100,180,240,0.15)", "rgba(0,0,0,0)"],
+            start: { x: 0, y: 0 },
+            end: { x: 0.55, y: 0.45 },
+            locations: [0, 0.4, 1],
+          },
+        },
+        {
+          opacity: 0.07,
+          gradient: {
+            colors: ["rgba(140,220,255,0.35)", "rgba(100,190,255,0)", "rgba(0,0,0,0)"],
+            start: { x: 1, y: 1 },
+            end: { x: 0.5, y: 0.55 },
+          },
+        },
+      ];
+    case "claridade":
+      return [
+        {
+          opacity: 0.05,
+          gradient: {
+            colors: ["rgba(255,255,255,0.2)", "rgba(255,255,255,0.06)", "rgba(0,0,0,0.06)"],
+            start: { x: 0.5, y: 0 },
+            end: { x: 0.5, y: 1 },
+            locations: [0, 0.45, 1],
+          },
+        },
+      ];
+    case "brisa_rosa":
+      return [
+        {
+          opacity: 0.09,
+          gradient: {
+            colors: ["rgba(255,205,225,0.5)", "rgba(255,190,210,0.18)", "rgba(0,0,0,0)"],
+            start: { x: 0.15, y: 0.1 },
+            end: { x: 0.55, y: 0.45 },
+            locations: [0, 0.42, 1],
+          },
+        },
+        {
+          opacity: 0.07,
+          gradient: {
+            colors: ["rgba(235,215,255,0.42)", "rgba(225,200,255,0)", "rgba(0,0,0,0)"],
+            start: { x: 0.9, y: 0.5 },
+            end: { x: 0.45, y: 0.5 },
           },
         },
       ];
@@ -134,25 +149,6 @@ function effectTintLayers(id: EffectId): PreviewTintLayer[] {
             start: { x: 0.5, y: 0 },
             end: { x: 0.5, y: 1 },
             locations: [0, 0.55, 1],
-          },
-        },
-      ];
-    case "rgb_split":
-      return [
-        {
-          opacity: 0.1,
-          gradient: {
-            colors: ["rgba(255,40,40,0.45)", "rgba(255,40,40,0)", "rgba(0,0,0,0)"],
-            start: { x: 0, y: 0.5 },
-            end: { x: 0.55, y: 0.5 },
-          },
-        },
-        {
-          opacity: 0.1,
-          gradient: {
-            colors: ["rgba(0,255,160,0.45)", "rgba(0,255,160,0)", "rgba(0,0,0,0)"],
-            start: { x: 1, y: 0.5 },
-            end: { x: 0.45, y: 0.5 },
           },
         },
       ];

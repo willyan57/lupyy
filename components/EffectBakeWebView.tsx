@@ -1,5 +1,5 @@
 // Hidden WebView: bakes effect approximations into JPEG on native (Android/iOS).
-// Aligns with lib/gl/webglEffects getEffectCSSFilter + chromatic/rgb_shift pixel pass.
+// Kept in sync with lib/gl/webglEffects: CSS + canvas passes. Claridade = pixel loop (same as applyClaridade in TS).
 
 import * as FileSystem from "expo-file-system";
 import { useCallback, useEffect, useRef } from "react";
@@ -11,104 +11,116 @@ const BAKE_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name=
 <script>
 var CSS = {
   none: "none",
-  vhs: "saturate(0.75) contrast(1.15) sepia(0.15) brightness(1.05)",
-  duotone: "saturate(0.3) contrast(1.2) sepia(0.6) hue-rotate(180deg)",
-  neon_edges: "contrast(1.5) brightness(1.1) saturate(1.5)",
-  halftone: "contrast(1.3) grayscale(0.4)",
-  light_leaks: "brightness(1.08) contrast(0.95) saturate(1.15)",
-  glitch: "contrast(1.25) saturate(1.4) hue-rotate(8deg) brightness(1.03)",
-  chromatic: "saturate(1.45) contrast(1.12) hue-rotate(-6deg)",
-  prism: "saturate(1.25) brightness(1.06) hue-rotate(12deg)",
+  preto_branco: "grayscale(1) contrast(1.14) brightness(1.02)",
+  golden_mist: "brightness(1.04) contrast(1.03) saturate(1.06) sepia(0.06)",
+  veludo: "contrast(1.06) brightness(0.97)",
+  aurora: "brightness(1.02) contrast(1.04) saturate(1.05) hue-rotate(-10deg)",
+  brisa_rosa: "brightness(1.03) contrast(1.02) saturate(1.1) sepia(0.05)",
   pixelate: "contrast(1.1) saturate(0.85)",
-  rgb_split: "saturate(1.35) contrast(1.1) hue-rotate(4deg)",
+  halftone: "contrast(1.3) grayscale(0.4)",
+  neon_edges: "contrast(1.5) brightness(1.1) saturate(1.5)",
   mirror: "contrast(1.05) saturate(1.1)",
   kaleidoscope: "saturate(1.5) contrast(1.08) hue-rotate(25deg)",
   fisheye: "saturate(1.15) contrast(1.08)",
   wave_distort: "saturate(1.2) contrast(1.05) hue-rotate(-4deg)"
 };
-function chromaShift(data, w, h, px) {
-  var copy = new Uint8ClampedArray(data);
-  for (var i = 0; i < data.length; i += 4) {
-    var x = (i / 4) % w, y = ((i / 4) / w) | 0;
-    var rI = (y * w + Math.min(x + px, w - 1)) * 4;
-    var bI = (y * w + Math.max(x - px, 0)) * 4;
-    data[i] = copy[rI];
-    data[i + 1] = copy[i + 1];
-    data[i + 2] = copy[bI + 2];
-    data[i + 3] = 255;
-  }
-}
-function applyLightLeaks(ctx, w, h) {
-  var g1 = ctx.createRadialGradient(w * 0.1, h * 0.1, 0, w * 0.3, h * 0.3, w * 0.7);
-  g1.addColorStop(0, "rgba(255,180,80,0.45)");
-  g1.addColorStop(0.5, "rgba(255,120,60,0.2)");
-  g1.addColorStop(1, "rgba(255,100,50,0)");
+function applyGoldenMist(ctx, w, h) {
+  var k = 0.42;
+  var g1 = ctx.createRadialGradient(w * 0.12, h * 0.1, 0, w * 0.32, h * 0.28, w * 0.62);
+  g1.addColorStop(0, "rgba(255,220,170,0.12)");
+  g1.addColorStop(0.55, "rgba(255,185,120,0.04)");
+  g1.addColorStop(1, "rgba(255,160,100,0)");
   ctx.globalCompositeOperation = "screen";
   ctx.fillStyle = g1;
   ctx.fillRect(0, 0, w, h);
-  var g2 = ctx.createRadialGradient(w * 0.85, h * 0.9, 0, w * 0.7, h * 0.7, w * 0.6);
-  g2.addColorStop(0, "rgba(255,100,180,0.35)");
-  g2.addColorStop(0.6, "rgba(255,80,120,0.15)");
-  g2.addColorStop(1, "rgba(255,60,100,0)");
+  var g2 = ctx.createRadialGradient(w * 0.88, h * 0.85, 0, w * 0.72, h * 0.68, w * 0.45);
+  g2.addColorStop(0, "rgba(255,200,210,0.08)");
+  g2.addColorStop(1, "rgba(255,180,200,0)");
   ctx.fillStyle = g2;
   ctx.fillRect(0, 0, w, h);
   ctx.globalCompositeOperation = "source-over";
 }
-function applyVhsPass(ctx, w, h) {
+function applyVeludo(ctx, w, h) {
+  var cx = w / 2, cy = h / 2, r = Math.sqrt(w * w + h * h) * 0.66;
+  var edgeRgb = Math.round(108 - 28);
+  var g = ctx.createRadialGradient(cx, cy, r * 0.12, cx, cy, r);
+  g.addColorStop(0, "rgba(255,255,255,1)");
+  g.addColorStop(0.52, "rgba(248,248,248,0.96)");
+  g.addColorStop(1, "rgb(" + edgeRgb + "," + edgeRgb + "," + edgeRgb + ")");
+  ctx.save();
   ctx.globalCompositeOperation = "multiply";
-  for (var y = 0; y < h; y += 2) {
-    ctx.fillStyle = "rgba(0,0,0,0.12)";
-    ctx.fillRect(0, y, w, 1);
-  }
-  ctx.globalCompositeOperation = "screen";
-  for (var i = 0; i < 80; i++) {
-    var x = Math.random() * w;
-    var yy = Math.random() * h;
-    var g = Math.floor(Math.random() * 255);
-    ctx.fillStyle = "rgba(" + g + "," + g + "," + g + ",0.08)";
-    ctx.fillRect(x, yy, Math.random() * 40, 1);
-  }
-  var trackY = Math.floor(Math.random() * h);
-  ctx.globalCompositeOperation = "source-over";
-  ctx.fillStyle = "rgba(255,255,255,0.15)";
-  ctx.fillRect(0, trackY, w, 4);
-}
-function applyPrismPass(ctx, img, w, h) {
-  var off = 12;
-  ctx.globalCompositeOperation = "screen";
-  ctx.globalAlpha = 0.45;
-  ctx.drawImage(img, off, off, w, h);
-  ctx.globalCompositeOperation = "multiply";
-  ctx.fillStyle = "rgba(255,0,0,0.35)";
-  ctx.fillRect(0, 0, w + off, h + off);
-  ctx.globalCompositeOperation = "screen";
-  ctx.drawImage(img, -off, -off, w, h);
-  ctx.globalCompositeOperation = "multiply";
-  ctx.fillStyle = "rgba(0,0,255,0.35)";
+  ctx.fillStyle = g;
   ctx.fillRect(0, 0, w, h);
-  ctx.globalAlpha = 1;
+  ctx.restore();
+  var g2 = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 0.48);
+  g2.addColorStop(0, "rgba(255,255,255,0.08)");
+  g2.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.globalCompositeOperation = "screen";
+  ctx.fillStyle = g2;
+  ctx.fillRect(0, 0, w, h);
+  ctx.globalCompositeOperation = "source-over";
+}
+function applyAurora(ctx, w, h) {
+  var k = 0.36;
   ctx.globalCompositeOperation = "overlay";
-  var grad = ctx.createLinearGradient(0, 0, w, h);
-  grad.addColorStop(0, "rgba(255,0,0,0.09)");
-  grad.addColorStop(0.25, "rgba(255,255,0,0.09)");
-  grad.addColorStop(0.5, "rgba(0,255,255,0.09)");
-  grad.addColorStop(0.75, "rgba(0,0,255,0.09)");
-  grad.addColorStop(1, "rgba(255,0,255,0.09)");
-  ctx.fillStyle = grad;
+  var g1 = ctx.createRadialGradient(0, 0, 0, w * 0.38, h * 0.32, w * 0.78);
+  g1.addColorStop(0, "rgba(110,200,255,0.072)");
+  g1.addColorStop(0.45, "rgba(90,170,230,0.029)");
+  g1.addColorStop(1, "rgba(70,140,210,0)");
+  ctx.fillStyle = g1;
+  ctx.fillRect(0, 0, w, h);
+  var g2 = ctx.createRadialGradient(w, h, 0, w * 0.62, h * 0.68, w * 0.58);
+  g2.addColorStop(0, "rgba(130,215,255,0.05)");
+  g2.addColorStop(1, "rgba(100,190,240,0)");
+  ctx.fillStyle = g2;
   ctx.fillRect(0, 0, w, h);
   ctx.globalCompositeOperation = "source-over";
 }
-function applyDuotonePass(ctx, data, w, h) {
-  var dark = [60, 20, 120], light = [255, 160, 40];
-  for (var i = 0; i < data.length; i += 4) {
-    var lum = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114) / 255;
-    var r = dark[0] + (light[0] - dark[0]) * lum;
-    var g = dark[1] + (light[1] - dark[1]) * lum;
-    var b = dark[2] + (light[2] - dark[2]) * lum;
-    data[i] = Math.round(data[i] * 0.15 + r * 0.85);
-    data[i + 1] = Math.round(data[i + 1] * 0.15 + g * 0.85);
-    data[i + 2] = Math.round(data[i + 2] * 0.15 + b * 0.85);
+function applyBrisaRosa(ctx, w, h) {
+  var k = 0.38;
+  ctx.globalCompositeOperation = "screen";
+  var g1 = ctx.createRadialGradient(w * 0.18, h * 0.12, 0, w * 0.38, h * 0.32, w * 0.58);
+  g1.addColorStop(0, "rgba(255,205,225,0.084)");
+  g1.addColorStop(0.55, "rgba(255,190,210,0.03)");
+  g1.addColorStop(1, "rgba(255,180,200,0)");
+  ctx.fillStyle = g1;
+  ctx.fillRect(0, 0, w, h);
+  var g2 = ctx.createRadialGradient(w * 0.88, h * 0.45, 0, w * 0.58, h * 0.48, w * 0.52);
+  g2.addColorStop(0, "rgba(235,215,255,0.068)");
+  g2.addColorStop(1, "rgba(225,200,255,0)");
+  ctx.fillStyle = g2;
+  ctx.fillRect(0, 0, w, h);
+  ctx.globalCompositeOperation = "source-over";
+}
+/** Same math as lib/gl/webglEffects applyClaridade (intensity 1 in bake). */
+function applyClaridadePass(ctx, w, h, intensity) {
+  var t = typeof intensity === "number" ? intensity : 1;
+  var contrastBoost = 1 + 0.11 * t;
+  var satBoost = 1 + 0.1 * t;
+  var id = ctx.getImageData(0, 0, w, h);
+  var data = id.data;
+  var len = data.length;
+  var out = new Uint8ClampedArray(len);
+  for (var i = 0; i < len; i += 4) {
+    var r = data[i];
+    var g = data[i + 1];
+    var b = data[i + 2];
+    r = (r - 128) * contrastBoost + 128;
+    g = (g - 128) * contrastBoost + 128;
+    b = (b - 128) * contrastBoost + 128;
+    r = r < 0 ? 0 : r > 255 ? 255 : r;
+    g = g < 0 ? 0 : g > 255 ? 255 : g;
+    b = b < 0 ? 0 : b > 255 ? 255 : b;
+    var lum = r * 0.299 + g * 0.587 + b * 0.114;
+    r = lum + (r - lum) * satBoost;
+    g = lum + (g - lum) * satBoost;
+    b = lum + (b - lum) * satBoost;
+    out[i] = Math.round(r < 0 ? 0 : r > 255 ? 255 : r);
+    out[i + 1] = Math.round(g < 0 ? 0 : g > 255 ? 255 : g);
+    out[i + 2] = Math.round(b < 0 ? 0 : b > 255 ? 255 : b);
+    out[i + 3] = data[i + 3];
   }
+  ctx.putImageData(new ImageData(out, w, h), 0, 0);
 }
 function runEffectBake(uri, effectId) {
   var img = new Image();
@@ -127,29 +139,26 @@ function runEffectBake(uri, effectId) {
       cv.height = h;
       var ctx = cv.getContext("2d");
       var css = CSS[effectId] || "none";
+      if (effectId === "claridade") {
+        css = "none";
+      }
       ctx.filter = css === "none" ? "none" : css;
       ctx.drawImage(img, 0, 0, w, h);
       ctx.filter = "none";
-      if (effectId === "light_leaks") {
-        applyLightLeaks(ctx, w, h);
+      if (effectId === "claridade") {
+        applyClaridadePass(ctx, w, h, 1);
       }
-      if (effectId === "vhs") {
-        var vhsData = ctx.getImageData(0, 0, w, h);
-        chromaShift(vhsData.data, w, h, 6);
-        ctx.putImageData(vhsData, 0, 0);
-        applyVhsPass(ctx, w, h);
+      if (effectId === "golden_mist") {
+        applyGoldenMist(ctx, w, h);
       }
-      if (effectId === "prism") {
-        applyPrismPass(ctx, img, w, h);
+      if (effectId === "veludo") {
+        applyVeludo(ctx, w, h);
       }
-      if (effectId === "chromatic" || effectId === "rgb_split" || effectId === "glitch") {
-        var id = ctx.getImageData(0, 0, w, h);
-        chromaShift(id.data, w, h, effectId === "rgb_split" ? 18 : (effectId === "glitch" ? 8 : 16));
-        ctx.putImageData(id, 0, 0);
-      } else if (effectId === "duotone") {
-        var duoData = ctx.getImageData(0, 0, w, h);
-        applyDuotonePass(ctx, duoData.data, w, h);
-        ctx.putImageData(duoData, 0, 0);
+      if (effectId === "aurora") {
+        applyAurora(ctx, w, h);
+      }
+      if (effectId === "brisa_rosa") {
+        applyBrisaRosa(ctx, w, h);
       }
       window.ReactNativeWebView.postMessage(JSON.stringify({ ok: true, data: cv.toDataURL("image/jpeg", 0.92) }));
     } catch (e) {

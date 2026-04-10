@@ -1,17 +1,15 @@
-// lib/gl/webglEffects.ts — Custom WebGL/Canvas shader effects
-// Glitch, Chromatic Aberration, Light Leaks, VHS, Prism, Duotone, Pixelate, Halftone
+// lib/gl/webglEffects.ts — Canvas effects for story preview (export) only
 
 export type EffectId =
   | "none"
-  | "glitch"
-  | "chromatic"
-  | "light_leaks"
-  | "vhs"
-  | "prism"
-  | "duotone"
+  | "preto_branco"
+  | "golden_mist"
+  | "veludo"
+  | "aurora"
+  | "claridade"
+  | "brisa_rosa"
   | "pixelate"
   | "halftone"
-  | "rgb_split"
   | "mirror"
   | "kaleidoscope"
   | "fisheye"
@@ -28,19 +26,18 @@ export type EffectDef = {
 
 export const EFFECTS: EffectDef[] = [
   { id: "none", name: "Nenhum", description: "Sem efeito", icon: "⊘", category: "color" },
-  { id: "glitch", name: "Glitch", description: "Distorção digital aleatória", icon: "⚡", category: "distortion" },
-  { id: "chromatic", name: "Chromatic", description: "Aberração cromática RGB", icon: "🌈", category: "distortion" },
-  { id: "light_leaks", name: "Light Leaks", description: "Vazamento de luz vintage", icon: "☀️", category: "artistic" },
-  { id: "vhs", name: "VHS", description: "Estilo fita VHS anos 90", icon: "📼", category: "retro" },
-  { id: "prism", name: "Prisma", description: "Efeito prisma holográfico", icon: "💎", category: "distortion" },
-  { id: "duotone", name: "Duotone", description: "Duas cores intensas", icon: "🎨", category: "color" },
+  { id: "preto_branco", name: "Preto e branco", description: "Tons de cinza elegantes", icon: "◐", category: "color" },
+  { id: "golden_mist", name: "Luz dourada", description: "Brilho suave estilo editorial", icon: "✦", category: "artistic" },
+  { id: "veludo", name: "Veludo", description: "Vignette suave e foco no centro", icon: "◆", category: "artistic" },
+  { id: "aurora", name: "Aurora", description: "Tom frio cinematográfico", icon: "❄", category: "artistic" },
+  { id: "claridade", name: "Claridade", description: "Contraste e cor mais vivos", icon: "◇", category: "color" },
+  { id: "brisa_rosa", name: "Brisa rosa", description: "Luz rosada delicada", icon: "🌸", category: "artistic" },
   { id: "pixelate", name: "Pixel", description: "Pixelização estilizada", icon: "🟩", category: "artistic" },
   { id: "halftone", name: "Halftone", description: "Pontos de meio-tom", icon: "⚫", category: "artistic" },
-  { id: "rgb_split", name: "RGB Split", description: "Canais RGB separados", icon: "🔴", category: "distortion" },
   { id: "mirror", name: "Espelho", description: "Reflexo simétrico", icon: "🪞", category: "distortion" },
   { id: "kaleidoscope", name: "Caleidoscópio", description: "Padrão caleidoscópico", icon: "🔮", category: "artistic" },
   { id: "fisheye", name: "Fisheye", description: "Lente olho de peixe", icon: "🐟", category: "distortion" },
-  { id: "wave_distort", name: "Wave", description: "Distorção de onda", icon: "🌊", category: "distortion" },
+  { id: "wave_distort", name: "Wave", description: "Distorção de onda suave", icon: "🌊", category: "distortion" },
   { id: "neon_edges", name: "Neon Edges", description: "Bordas neon brilhantes", icon: "✨", category: "artistic" },
 ];
 
@@ -69,38 +66,34 @@ export async function applyCanvasEffect(
         const ctx = canvas.getContext("2d")!;
         if (!ctx) { resolve(imageUri); return; }
 
-        // Draw original
         ctx.drawImage(img, 0, 0, w, h);
         const imageData = ctx.getImageData(0, 0, w, h);
         const data = imageData.data;
 
         switch (effectId) {
-          case "glitch":
-            applyGlitch(ctx, w, h, data, intensity);
+          case "preto_branco":
+            applyPretoBranco(ctx, w, h, data, intensity);
             break;
-          case "chromatic":
-            applyChromatic(ctx, w, h, data, intensity);
+          case "golden_mist":
+            applyGoldenMist(ctx, w, h, intensity);
             break;
-          case "light_leaks":
-            applyLightLeaks(ctx, w, h, intensity);
+          case "veludo":
+            applyVeludo(ctx, w, h, intensity);
             break;
-          case "vhs":
-            applyVHS(ctx, w, h, data, intensity);
+          case "aurora":
+            applyAurora(ctx, w, h, intensity);
             break;
-          case "prism":
-            applyPrism(ctx, img, w, h, intensity);
+          case "claridade":
+            applyClaridade(ctx, w, h, data, intensity);
             break;
-          case "duotone":
-            applyDuotone(ctx, w, h, data, intensity);
+          case "brisa_rosa":
+            applyBrisaRosa(ctx, w, h, intensity);
             break;
           case "pixelate":
             applyPixelate(ctx, img, w, h, intensity);
             break;
           case "halftone":
             applyHalftone(ctx, w, h, data, intensity);
-            break;
-          case "rgb_split":
-            applyRGBSplit(ctx, w, h, data, intensity);
             break;
           case "mirror":
             applyMirror(ctx, img, w, h);
@@ -131,223 +124,180 @@ export async function applyCanvasEffect(
 }
 
 /**
- * Get CSS filter string for live preview (lightweight approximation).
- * Used on the camera screen for instant preview.
+ * Lightweight CSS approximation for preview (capturePreview only — camera uses none).
  */
 export function getEffectCSSFilter(effectId: EffectId): string | null {
   switch (effectId) {
-    case "vhs": return "saturate(0.75) contrast(1.15) sepia(0.15) brightness(1.05)";
-    case "duotone": return "saturate(0.3) contrast(1.2) sepia(0.6) hue-rotate(180deg)";
-    case "neon_edges": return "contrast(1.5) brightness(1.1) saturate(1.5)";
-    case "halftone": return "contrast(1.3) grayscale(0.4)";
-    case "light_leaks": return "brightness(1.08) contrast(0.95) saturate(1.15)";
-    // Lightweight approximations so live preview changes in browser (full quality is canvas export)
-    case "glitch": return "contrast(1.25) saturate(1.4) hue-rotate(8deg) brightness(1.03)";
-    case "chromatic": return "saturate(1.45) contrast(1.12) hue-rotate(-6deg)";
-    case "prism": return "saturate(1.25) brightness(1.06) hue-rotate(12deg)";
-    case "pixelate": return "contrast(1.1) saturate(0.85)";
-    case "rgb_split": return "saturate(1.35) contrast(1.1) hue-rotate(4deg)";
-    case "mirror": return "contrast(1.05) saturate(1.1)";
-    case "kaleidoscope": return "saturate(1.5) contrast(1.08) hue-rotate(25deg)";
-    case "fisheye": return "saturate(1.15) contrast(1.08)";
-    case "wave_distort": return "saturate(1.2) contrast(1.05) hue-rotate(-4deg)";
-    default: return null;
+    case "preto_branco":
+      return "grayscale(1) contrast(1.14) brightness(1.02)";
+    case "golden_mist":
+      return "brightness(1.04) contrast(1.03) saturate(1.06) sepia(0.06)";
+    case "veludo":
+      return "contrast(1.06) brightness(0.97)";
+    case "aurora":
+      return "brightness(1.02) contrast(1.04) saturate(1.05) hue-rotate(-10deg)";
+    case "claridade":
+      return "contrast(1.1) saturate(1.08) brightness(1.02)";
+    case "brisa_rosa":
+      return "brightness(1.03) contrast(1.02) saturate(1.1) sepia(0.05)";
+    case "pixelate":
+      return "contrast(1.1) saturate(0.85)";
+    case "halftone":
+      return "contrast(1.3) grayscale(0.4)";
+    case "neon_edges":
+      return "contrast(1.5) brightness(1.1) saturate(1.5)";
+    case "mirror":
+      return "contrast(1.05) saturate(1.1)";
+    case "kaleidoscope":
+      return "saturate(1.5) contrast(1.08) hue-rotate(25deg)";
+    case "fisheye":
+      return "saturate(1.15) contrast(1.08)";
+    case "wave_distort":
+      return "saturate(1.2) contrast(1.05) hue-rotate(-4deg)";
+    default:
+      return null;
   }
 }
 
-// ── Effect implementations ──
-
-function applyGlitch(ctx: CanvasRenderingContext2D, w: number, h: number, data: Uint8ClampedArray, intensity: number) {
-  // Put original back first
-  ctx.putImageData(new ImageData(new Uint8ClampedArray(data), w, h), 0, 0);
-
-  const sliceCount = Math.floor(8 + intensity * 15);
-  for (let i = 0; i < sliceCount; i++) {
-    const y = Math.floor(Math.random() * h);
-    const sliceH = Math.floor(2 + Math.random() * 20 * intensity);
-    const offset = Math.floor((Math.random() - 0.5) * 40 * intensity);
-    const sliceData = ctx.getImageData(0, y, w, Math.min(sliceH, h - y));
-    ctx.putImageData(sliceData, offset, y);
-  }
-
-  // RGB channel shift
-  const shift = Math.floor(3 + intensity * 8);
-  const original = ctx.getImageData(0, 0, w, h);
-  const shifted = ctx.createImageData(w, h);
-  for (let i = 0; i < original.data.length; i += 4) {
-    const x = (i / 4) % w;
-    const y = Math.floor(i / 4 / w);
-    // Red channel shifted right
-    const rIdx = (y * w + Math.min(x + shift, w - 1)) * 4;
-    shifted.data[i] = original.data[rIdx];
-    // Green channel stays
-    shifted.data[i + 1] = original.data[i + 1];
-    // Blue channel shifted left
-    const bIdx = (y * w + Math.max(x - shift, 0)) * 4;
-    shifted.data[i + 2] = original.data[bIdx + 2];
-    shifted.data[i + 3] = 255;
-  }
-  ctx.putImageData(shifted, 0, 0);
-
-  // Random noise lines
-  const lineCount = Math.floor(3 * intensity);
-  for (let i = 0; i < lineCount; i++) {
-    const y = Math.floor(Math.random() * h);
-    ctx.fillStyle = `rgba(${Math.random() > 0.5 ? 255 : 0},${Math.random() > 0.5 ? 255 : 0},${Math.random() > 0.5 ? 255 : 0},${0.3 * intensity})`;
-    ctx.fillRect(0, y, w, 1 + Math.floor(Math.random() * 3));
-  }
-}
-
-function applyChromatic(ctx: CanvasRenderingContext2D, w: number, h: number, data: Uint8ClampedArray, intensity: number) {
-  const offset = Math.floor(4 + intensity * 12);
+function applyPretoBranco(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  data: Uint8ClampedArray,
+  intensity: number
+) {
+  const contrast = 1.06 + intensity * 0.1;
   const result = ctx.createImageData(w, h);
   for (let i = 0; i < data.length; i += 4) {
-    const x = (i / 4) % w;
-    const y = Math.floor(i / 4 / w);
-    // Red shifted right
-    const rIdx = (y * w + Math.min(x + offset, w - 1)) * 4;
-    result.data[i] = data[rIdx];
-    // Green stays
-    result.data[i + 1] = data[i + 1];
-    // Blue shifted left
-    const bIdx = (y * w + Math.max(x - offset, 0)) * 4;
-    result.data[i + 2] = data[bIdx + 2];
-    result.data[i + 3] = 255;
+    const origLum = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+    let lum = Math.min(255, Math.max(0, (origLum - 128) * contrast + 128));
+    const g = Math.round(lum * intensity + origLum * (1 - intensity));
+    result.data[i] = g;
+    result.data[i + 1] = g;
+    result.data[i + 2] = g;
+    result.data[i + 3] = data[i + 3];
   }
   ctx.putImageData(result, 0, 0);
 }
 
-function applyLightLeaks(ctx: CanvasRenderingContext2D, w: number, h: number, intensity: number) {
-  // Warm gradient from top-left
-  const grad1 = ctx.createRadialGradient(w * 0.1, h * 0.1, 0, w * 0.3, h * 0.3, w * 0.7);
-  grad1.addColorStop(0, `rgba(255,180,80,${0.45 * intensity})`);
-  grad1.addColorStop(0.5, `rgba(255,120,60,${0.2 * intensity})`);
-  grad1.addColorStop(1, "rgba(255,100,50,0)");
+function applyGoldenMist(ctx: CanvasRenderingContext2D, w: number, h: number, intensity: number) {
+  const k = 0.42 * intensity;
+  const grad1 = ctx.createRadialGradient(w * 0.12, h * 0.1, 0, w * 0.32, h * 0.28, w * 0.62);
+  grad1.addColorStop(0, `rgba(255, 220, 170, ${0.28 * k})`);
+  grad1.addColorStop(0.55, `rgba(255, 185, 120, ${0.1 * k})`);
+  grad1.addColorStop(1, "rgba(255, 160, 100, 0)");
   ctx.globalCompositeOperation = "screen";
   ctx.fillStyle = grad1;
   ctx.fillRect(0, 0, w, h);
 
-  // Pink leak from bottom-right
-  const grad2 = ctx.createRadialGradient(w * 0.85, h * 0.9, 0, w * 0.7, h * 0.7, w * 0.6);
-  grad2.addColorStop(0, `rgba(255,100,180,${0.35 * intensity})`);
-  grad2.addColorStop(0.6, `rgba(255,80,120,${0.15 * intensity})`);
-  grad2.addColorStop(1, "rgba(255,60,100,0)");
+  const grad2 = ctx.createRadialGradient(w * 0.88, h * 0.85, 0, w * 0.72, h * 0.68, w * 0.45);
+  grad2.addColorStop(0, `rgba(255, 200, 210, ${0.18 * k})`);
+  grad2.addColorStop(1, "rgba(255, 180, 200, 0)");
   ctx.fillStyle = grad2;
   ctx.fillRect(0, 0, w, h);
 
-  // Golden flare
-  const grad3 = ctx.createRadialGradient(w * 0.6, h * 0.2, 0, w * 0.5, h * 0.3, w * 0.4);
-  grad3.addColorStop(0, `rgba(255,220,120,${0.3 * intensity})`);
-  grad3.addColorStop(1, "rgba(255,200,100,0)");
-  ctx.fillStyle = grad3;
-  ctx.fillRect(0, 0, w, h);
-
   ctx.globalCompositeOperation = "source-over";
 }
 
-function applyVHS(ctx: CanvasRenderingContext2D, w: number, h: number, data: Uint8ClampedArray, intensity: number) {
-  // Chromatic offset
-  const offset = Math.floor(2 + intensity * 4);
-  const result = ctx.createImageData(w, h);
+/** Vignette suave (multiply) + leve brilho central — não altera geometria. */
+function applyVeludo(ctx: CanvasRenderingContext2D, w: number, h: number, intensity: number) {
+  const cx = w / 2;
+  const cy = h / 2;
+  const r = Math.hypot(w, h) * 0.66;
+  const edgeRgb = Math.round(108 - 28 * intensity);
+  const g = ctx.createRadialGradient(cx, cy, r * 0.12, cx, cy, r);
+  g.addColorStop(0, "rgba(255,255,255,1)");
+  g.addColorStop(0.52, `rgba(248,248,248,${1 - 0.04 * intensity})`);
+  g.addColorStop(1, `rgb(${edgeRgb},${edgeRgb},${edgeRgb})`);
+  ctx.save();
+  ctx.globalCompositeOperation = "multiply";
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, w, h);
+  ctx.restore();
+
+  const g2 = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 0.48);
+  g2.addColorStop(0, `rgba(255,255,255,${0.08 * intensity})`);
+  g2.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.globalCompositeOperation = "screen";
+  ctx.fillStyle = g2;
+  ctx.fillRect(0, 0, w, h);
+  ctx.globalCompositeOperation = "source-over";
+}
+
+/** Gradiente azul-esverdeado suave (overlay) — look premium frio. */
+function applyAurora(ctx: CanvasRenderingContext2D, w: number, h: number, intensity: number) {
+  const k = 0.36 * intensity;
+  ctx.globalCompositeOperation = "overlay";
+  const g1 = ctx.createRadialGradient(0, 0, 0, w * 0.38, h * 0.32, w * 0.78);
+  g1.addColorStop(0, `rgba(110,200,255,${0.2 * k})`);
+  g1.addColorStop(0.45, `rgba(90,170,230,${0.08 * k})`);
+  g1.addColorStop(1, "rgba(70,140,210,0)");
+  ctx.fillStyle = g1;
+  ctx.fillRect(0, 0, w, h);
+
+  const g2 = ctx.createRadialGradient(w, h, 0, w * 0.62, h * 0.68, w * 0.58);
+  g2.addColorStop(0, `rgba(130,215,255,${0.14 * k})`);
+  g2.addColorStop(1, "rgba(100,190,240,0)");
+  ctx.fillStyle = g2;
+  ctx.fillRect(0, 0, w, h);
+  ctx.globalCompositeOperation = "source-over";
+}
+
+/** Contraste em torno do meio-tom + saturação leve — “HDR” discreto. APK: mesma lógica em EffectBakeWebView (`applyClaridadePass`). */
+function applyClaridade(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  data: Uint8ClampedArray,
+  intensity: number
+) {
+  const t = intensity;
+  const contrastBoost = 1 + 0.11 * t;
+  const satBoost = 1 + 0.1 * t;
+  const out = new Uint8ClampedArray(data.length);
   for (let i = 0; i < data.length; i += 4) {
-    const x = (i / 4) % w;
-    const y = Math.floor(i / 4 / w);
-    const rIdx = (y * w + Math.min(x + offset, w - 1)) * 4;
-    result.data[i] = data[rIdx];
-    result.data[i + 1] = data[i + 1];
-    const bIdx = (y * w + Math.max(x - offset, 0)) * 4;
-    result.data[i + 2] = data[bIdx + 2];
-    result.data[i + 3] = 255;
+    let r = data[i];
+    let g = data[i + 1];
+    let b = data[i + 2];
+    r = (r - 128) * contrastBoost + 128;
+    g = (g - 128) * contrastBoost + 128;
+    b = (b - 128) * contrastBoost + 128;
+    r = Math.max(0, Math.min(255, r));
+    g = Math.max(0, Math.min(255, g));
+    b = Math.max(0, Math.min(255, b));
+    const lum = r * 0.299 + g * 0.587 + b * 0.114;
+    r = lum + (r - lum) * satBoost;
+    g = lum + (g - lum) * satBoost;
+    b = lum + (b - lum) * satBoost;
+    out[i] = Math.round(Math.max(0, Math.min(255, r)));
+    out[i + 1] = Math.round(Math.max(0, Math.min(255, g)));
+    out[i + 2] = Math.round(Math.max(0, Math.min(255, b)));
+    out[i + 3] = data[i + 3];
   }
-  ctx.putImageData(result, 0, 0);
-
-  // Scanlines
-  ctx.globalCompositeOperation = "multiply";
-  for (let y = 0; y < h; y += 2) {
-    ctx.fillStyle = `rgba(0,0,0,${0.12 * intensity})`;
-    ctx.fillRect(0, y, w, 1);
-  }
-
-  // Noise
-  ctx.globalCompositeOperation = "screen";
-  for (let i = 0; i < 80 * intensity; i++) {
-    const x = Math.random() * w;
-    const y = Math.random() * h;
-    const gray = Math.floor(Math.random() * 255);
-    ctx.fillStyle = `rgba(${gray},${gray},${gray},${0.08 * intensity})`;
-    ctx.fillRect(x, y, Math.random() * 40, 1);
-  }
-
-  // Slight color wash
-  ctx.globalCompositeOperation = "overlay";
-  ctx.fillStyle = `rgba(100,60,180,${0.08 * intensity})`;
-  ctx.fillRect(0, 0, w, h);
-
-  // Tracking lines
-  const trackY = Math.floor(Math.random() * h);
-  ctx.globalCompositeOperation = "source-over";
-  ctx.fillStyle = `rgba(255,255,255,${0.15 * intensity})`;
-  ctx.fillRect(0, trackY, w, 3 + Math.floor(Math.random() * 5));
-
-  ctx.globalCompositeOperation = "source-over";
+  ctx.putImageData(new ImageData(out, w, h), 0, 0);
 }
 
-function applyPrism(ctx: CanvasRenderingContext2D, img: HTMLImageElement, w: number, h: number, intensity: number) {
-  const offset = 6 + intensity * 10;
+/** Luz rosada e lavanda em screen — retrato editorial. */
+function applyBrisaRosa(ctx: CanvasRenderingContext2D, w: number, h: number, intensity: number) {
+  const k = 0.38 * intensity;
   ctx.globalCompositeOperation = "screen";
-  ctx.globalAlpha = 0.5;
-
-  // Red channel offset
-  ctx.drawImage(img, offset, offset, w, h);
-  ctx.globalCompositeOperation = "multiply";
-  ctx.fillStyle = `rgba(255,0,0,${0.4 * intensity})`;
-  ctx.fillRect(0, 0, w + offset, h + offset);
-
-  // Reset and draw blue offset
-  ctx.globalCompositeOperation = "screen";
-  ctx.drawImage(img, -offset, -offset, w, h);
-  ctx.globalCompositeOperation = "multiply";
-  ctx.fillStyle = `rgba(0,0,255,${0.4 * intensity})`;
+  const g1 = ctx.createRadialGradient(w * 0.18, h * 0.12, 0, w * 0.38, h * 0.32, w * 0.58);
+  g1.addColorStop(0, `rgba(255,205,225,${0.22 * k})`);
+  g1.addColorStop(0.55, `rgba(255,190,210,${0.08 * k})`);
+  g1.addColorStop(1, "rgba(255,180,200,0)");
+  ctx.fillStyle = g1;
   ctx.fillRect(0, 0, w, h);
 
-  ctx.globalAlpha = 1.0;
-  ctx.globalCompositeOperation = "source-over";
-
-  // Rainbow gradient overlay
-  const grad = ctx.createLinearGradient(0, 0, w, h);
-  grad.addColorStop(0, `rgba(255,0,0,${0.1 * intensity})`);
-  grad.addColorStop(0.2, `rgba(255,255,0,${0.1 * intensity})`);
-  grad.addColorStop(0.4, `rgba(0,255,0,${0.1 * intensity})`);
-  grad.addColorStop(0.6, `rgba(0,255,255,${0.1 * intensity})`);
-  grad.addColorStop(0.8, `rgba(0,0,255,${0.1 * intensity})`);
-  grad.addColorStop(1, `rgba(255,0,255,${0.1 * intensity})`);
-  ctx.globalCompositeOperation = "overlay";
-  ctx.fillStyle = grad;
+  const g2 = ctx.createRadialGradient(w * 0.88, h * 0.45, 0, w * 0.58, h * 0.48, w * 0.52);
+  g2.addColorStop(0, `rgba(235,215,255,${0.18 * k})`);
+  g2.addColorStop(1, "rgba(225,200,255,0)");
+  ctx.fillStyle = g2;
   ctx.fillRect(0, 0, w, h);
   ctx.globalCompositeOperation = "source-over";
-}
-
-function applyDuotone(ctx: CanvasRenderingContext2D, w: number, h: number, data: Uint8ClampedArray, intensity: number) {
-  // Purple + Orange duotone
-  const dark = [60, 20, 120]; // purple for shadows
-  const light = [255, 160, 40]; // orange for highlights
-  const result = new Uint8ClampedArray(data);
-
-  for (let i = 0; i < result.length; i += 4) {
-    const lum = (result[i] * 0.299 + result[i + 1] * 0.587 + result[i + 2] * 0.114) / 255;
-    const r = dark[0] + (light[0] - dark[0]) * lum;
-    const g = dark[1] + (light[1] - dark[1]) * lum;
-    const b = dark[2] + (light[2] - dark[2]) * lum;
-    result[i] = Math.round(result[i] * (1 - intensity) + r * intensity);
-    result[i + 1] = Math.round(result[i + 1] * (1 - intensity) + g * intensity);
-    result[i + 2] = Math.round(result[i + 2] * (1 - intensity) + b * intensity);
-  }
-  ctx.putImageData(new ImageData(result, w, h), 0, 0);
 }
 
 function applyPixelate(ctx: CanvasRenderingContext2D, img: HTMLImageElement, w: number, h: number, intensity: number) {
   const blockSize = Math.max(2, Math.floor(4 + intensity * 16));
-  // Draw small then scale up
   const smallW = Math.ceil(w / blockSize);
   const smallH = Math.ceil(h / blockSize);
   const tempCanvas = document.createElement("canvas");
@@ -376,54 +326,6 @@ function applyHalftone(ctx: CanvasRenderingContext2D, w: number, h: number, data
       ctx.fill();
     }
   }
-}
-
-function applyRGBSplit(ctx: CanvasRenderingContext2D, w: number, h: number, data: Uint8ClampedArray, intensity: number) {
-  const offset = Math.floor(8 + intensity * 15);
-  // Create separate channels
-  ctx.clearRect(0, 0, w, h);
-
-  // Red channel
-  const rData = ctx.createImageData(w, h);
-  for (let i = 0; i < data.length; i += 4) {
-    rData.data[i] = data[i];
-    rData.data[i + 1] = 0;
-    rData.data[i + 2] = 0;
-    rData.data[i + 3] = 200;
-  }
-  const rCanvas = document.createElement("canvas");
-  rCanvas.width = w; rCanvas.height = h;
-  rCanvas.getContext("2d")!.putImageData(rData, 0, 0);
-
-  // Green channel
-  const gData = ctx.createImageData(w, h);
-  for (let i = 0; i < data.length; i += 4) {
-    gData.data[i] = 0;
-    gData.data[i + 1] = data[i + 1];
-    gData.data[i + 2] = 0;
-    gData.data[i + 3] = 200;
-  }
-  const gCanvas = document.createElement("canvas");
-  gCanvas.width = w; gCanvas.height = h;
-  gCanvas.getContext("2d")!.putImageData(gData, 0, 0);
-
-  // Blue channel
-  const bData = ctx.createImageData(w, h);
-  for (let i = 0; i < data.length; i += 4) {
-    bData.data[i] = 0;
-    bData.data[i + 1] = 0;
-    bData.data[i + 2] = data[i + 2];
-    bData.data[i + 3] = 200;
-  }
-  const bCanvas = document.createElement("canvas");
-  bCanvas.width = w; bCanvas.height = h;
-  bCanvas.getContext("2d")!.putImageData(bData, 0, 0);
-
-  ctx.drawImage(rCanvas, -offset, 0);
-  ctx.globalCompositeOperation = "lighter";
-  ctx.drawImage(gCanvas, 0, 0);
-  ctx.drawImage(bCanvas, offset, 0);
-  ctx.globalCompositeOperation = "source-over";
 }
 
 function applyMirror(ctx: CanvasRenderingContext2D, img: HTMLImageElement, w: number, h: number) {
@@ -504,16 +406,13 @@ function applyWaveDistort(ctx: CanvasRenderingContext2D, img: HTMLImageElement, 
 }
 
 function applyNeonEdges(ctx: CanvasRenderingContext2D, w: number, h: number, data: Uint8ClampedArray, intensity: number) {
-  // Sobel edge detection
   const result = ctx.createImageData(w, h);
   const gray = new Float32Array(w * h);
 
-  // Convert to grayscale
   for (let i = 0; i < data.length; i += 4) {
     gray[i / 4] = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
   }
 
-  // Sobel
   for (let y = 1; y < h - 1; y++) {
     for (let x = 1; x < w - 1; x++) {
       const i = y * w + x;
@@ -525,7 +424,6 @@ function applyNeonEdges(ctx: CanvasRenderingContext2D, w: number, h: number, dat
       const edge = Math.min(255, Math.sqrt(gx * gx + gy * gy) * intensity * 2);
 
       const idx = i * 4;
-      // Neon colors based on angle
       const angle = Math.atan2(gy, gx);
       const hue = ((angle + Math.PI) / (2 * Math.PI)) * 360;
       const [r, g, b] = hslToRgb(hue, 100, 50 + edge * 0.2);
@@ -536,7 +434,6 @@ function applyNeonEdges(ctx: CanvasRenderingContext2D, w: number, h: number, dat
     }
   }
 
-  // Blend with original
   const blended = ctx.createImageData(w, h);
   for (let i = 0; i < data.length; i += 4) {
     blended.data[i] = Math.min(255, data[i] * (1 - intensity * 0.5) + result.data[i]);
