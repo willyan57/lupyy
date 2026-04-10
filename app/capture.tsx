@@ -1,5 +1,5 @@
 // app/capture.tsx — Câmera: collage, vídeo, filtros ao vivo, efeitos FX (AR removido — instável no APK/WebView)
-import LiveFilterCarousel, { LIVE_FILTERS, type LiveFilterDef } from "@/components/LiveFilterCarousel";
+import { LIVE_FILTERS, type LiveFilterDef } from "@/components/LiveFilterCarousel";
 import { saveCollageDraft } from "@/lib/captureDraftStore";
 import { EFFECTS, getEffectCSSFilter, type EffectId } from "@/lib/gl/webglEffects";
 import { getPreviewTintLayers } from "@/lib/livePreviewTint";
@@ -118,6 +118,7 @@ export default function CaptureScreen() {
   // ── WebGL Effects ──
   const [activeEffect, setActiveEffect] = useState<EffectId>("none");
   const [showEffectsPicker, setShowEffectsPicker] = useState(false);
+  const [showFiltersPicker, setShowFiltersPicker] = useState(false);
 
   // ── Video Recorder (MediaRecorder API for APK) ──
   const videoRecorderRef = useRef<VideoRecorderInstance | null>(null);
@@ -844,7 +845,8 @@ export default function CaptureScreen() {
     { key: "flash", icon: flashOn ? "⚡" : "⚡︎", label: flashOn ? "On" : "Off", onPress: toggleFlash, active: flashOn },
     { key: "timer", icon: "⏱", label: timerSeconds === 0 ? "Timer" : `${timerSeconds}s`, onPress: cycleTimer, active: timerSeconds > 0 },
     { key: "grid", icon: "⊞", label: "Grid", onPress: toggleGrid, active: showGrid },
-    { key: "effects", icon: "✦", label: "FX", onPress: () => { setShowEffectsPicker(p => !p); }, active: activeEffect !== "none" },
+    { key: "filters", icon: "◐", label: "Filtro", onPress: () => { setShowEffectsPicker(false); setShowFiltersPicker((p) => !p); }, active: liveFilter.id !== "none" },
+    { key: "effects", icon: "✦", label: "FX", onPress: () => { setShowFiltersPicker(false); setShowEffectsPicker((p) => !p); }, active: activeEffect !== "none" },
     { key: "collage", icon: "⊡", label: "Layout", onPress: () => setShowCollageMenu(p => !p), active: isCollageMode },
   ];
 
@@ -948,16 +950,33 @@ export default function CaptureScreen() {
             onCameraReady={() => setCameraReady(true)}
           />
           {/* RN nativo + Capacitor APK: gradientes por cima do preview (evita tela preta do CSS no vídeo) */}
-          {shouldUseTintOverlay && previewTintLayers.map((layer, i) => (
-            <View
-              key={`preview-tint-${i}`}
-              pointerEvents="none"
-              style={[
-                StyleSheet.absoluteFill,
-                { backgroundColor: layer.color, opacity: layer.opacity, zIndex: 2 + i },
-              ]}
-            />
-          ))}
+          {shouldUseTintOverlay &&
+            previewTintLayers.map((layer, i) =>
+              layer.gradient ? (
+                <LinearGradient
+                  key={`preview-tint-${i}`}
+                  pointerEvents="none"
+                  colors={layer.gradient.colors as [string, string, ...string[]]}
+                  locations={layer.gradient.locations}
+                  start={layer.gradient.start}
+                  end={layer.gradient.end}
+                  style={[StyleSheet.absoluteFill, { opacity: layer.opacity, zIndex: 2 + i }]}
+                />
+              ) : (
+                <View
+                  key={`preview-tint-${i}`}
+                  pointerEvents="none"
+                  style={[
+                    StyleSheet.absoluteFill,
+                    {
+                      backgroundColor: layer.color ?? "transparent",
+                      opacity: layer.opacity,
+                      zIndex: 2 + i,
+                    },
+                  ]}
+                />
+              )
+            )}
         </Animated.View>
       )}
 
@@ -1306,7 +1325,7 @@ export default function CaptureScreen() {
           <Text style={styles.effectsPickerTitle}>Efeitos FX</Text>
           <Text style={styles.effectsPickerSubtitle}>
             {isCapacitor
-              ? "No APK a prévia é por cor; o resultado final usa o processamento completo ao publicar."
+              ? "No APK a câmera usa luzes e gradientes por cima do vídeo (CSS no vídeo dá tela preta). O resultado final ao publicar usa o processamento completo."
               : "Prévia aproximada ao vivo; publicação aplica o efeito completo."}
           </Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 8, gap: 4, paddingTop: 6 }}>
@@ -1316,7 +1335,10 @@ export default function CaptureScreen() {
                 <TouchableOpacity
                   key={effect.id}
                   activeOpacity={0.8}
-                  onPress={() => { setActiveEffect(effect.id); if (effect.id !== "none") setShowEffectsPicker(false); }}
+                  onPress={() => {
+                    setActiveEffect(effect.id);
+                    setShowEffectsPicker(false);
+                  }}
                   style={[styles.effectPickerItem, isActive && styles.effectPickerItemActive]}
                 >
                   <Text style={styles.effectPickerIcon}>{effect.icon}</Text>
@@ -1328,17 +1350,51 @@ export default function CaptureScreen() {
         </View>
       )}
 
+      {/* ── Live filters picker (same sheet style as FX) ── */}
+      {showFiltersPicker && !isCollageMode && (
+        <View style={styles.effectsPickerOverlay}>
+          <Text style={styles.effectsPickerTitle}>Filtros ao vivo</Text>
+          <Text style={styles.effectsPickerSubtitle}>
+            {isCapacitor
+              ? "No APK a cor do chip indica o filtro; o tom na prévia segue o ajuste do dispositivo."
+              : "Filtros CSS na prévia; resultado alinhado ao que você vê ao capturar."}
+          </Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 8, gap: 4, paddingTop: 6 }}>
+            {LIVE_FILTERS.map((lf) => {
+              const isActive = lf.id === liveFilter.id;
+              return (
+                <TouchableOpacity
+                  key={lf.id}
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    setLiveFilter(lf);
+                    setShowFiltersPicker(false);
+                  }}
+                  style={[styles.effectPickerItem, isActive && styles.effectPickerItemActive]}
+                >
+                  <View
+                    style={[
+                      styles.filterPickerThumb,
+                      { backgroundColor: lf.accent === "transparent" ? "rgba(255,255,255,0.2)" : lf.accent },
+                      isActive && styles.filterPickerThumbActive,
+                    ]}
+                  >
+                    {lf.id === "none" ? <Text style={styles.filterPickerThumbNone}>⊘</Text> : null}
+                  </View>
+                  <Text style={[styles.effectPickerLabel, isActive && { color: "#fff" }]} numberOfLines={1}>
+                    {lf.name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
+
       {/* Bottom (not in collage mode) */}
       {!isCollageMode && !isPostMode ? (
         <View style={[styles.bottomStory, { paddingBottom: (Platform.OS === "android" ? Math.max(insets.bottom, 18) + 20 : insets.bottom + 10) }]}>
           <LinearGradient colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.8)"]} style={styles.bottomGradientInner} />
-
-          {!recording && (
-            <View style={styles.liveFiltersSection}>
-              <Text style={styles.liveFiltersSectionTitle}>Filtros ao vivo</Text>
-              <LiveFilterCarousel activeFilter={liveFilter.id} onFilterChange={setLiveFilter} />
-            </View>
-          )}
 
           <View style={styles.captureRow}>
             <TouchableOpacity
@@ -1409,10 +1465,6 @@ export default function CaptureScreen() {
         </View>
       ) : !isCollageMode ? (
         <View style={[styles.bottomPost, galleryExpanded && styles.bottomPostExpanded]}>
-          <View style={styles.liveFiltersSectionPost}>
-            <Text style={styles.liveFiltersSectionTitle}>Filtros ao vivo</Text>
-            <LiveFilterCarousel activeFilter={liveFilter.id} onFilterChange={setLiveFilter} />
-          </View>
           {!galleryExpanded && selectedGalleryUri && (
             <View style={styles.selectedPreviewRow}>
               <TouchableOpacity onPress={() => setGalleryExpanded(true)} activeOpacity={0.7} style={styles.expandBtn}>
@@ -1434,10 +1486,23 @@ export default function CaptureScreen() {
               <Text style={styles.albumText}>{selectedAlbum}</Text>
               <Text style={styles.albumArrow}>ˇ</Text>
             </TouchableOpacity>
-            <TouchableOpacity activeOpacity={0.7} style={styles.selectMultiBtn}>
-              <Text style={styles.selectMultiIcon}>⧉</Text>
-              <Text style={styles.selectMultiText}>Selecionar</Text>
-            </TouchableOpacity>
+            <View style={styles.albumRowActions}>
+              <TouchableOpacity
+                activeOpacity={0.7}
+                style={[styles.selectMultiBtn, liveFilter.id !== "none" && styles.selectMultiBtnActive]}
+                onPress={() => {
+                  setShowEffectsPicker(false);
+                  setShowFiltersPicker((p) => !p);
+                }}
+              >
+                <Text style={styles.selectMultiIcon}>◐</Text>
+                <Text style={styles.selectMultiText}>Filtro</Text>
+              </TouchableOpacity>
+              <TouchableOpacity activeOpacity={0.7} style={styles.selectMultiBtn}>
+                <Text style={styles.selectMultiIcon}>⧉</Text>
+                <Text style={styles.selectMultiText}>Selecionar</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           {showAlbumPicker && (
@@ -1706,23 +1771,6 @@ const styles = StyleSheet.create({
   videoHint: { color: "rgba(255,255,255,0.4)", fontSize: 11, textAlign: "center", marginBottom: 4, fontWeight: "600" },
 
   // Bottom Story/Reel
-  liveFiltersSection: { width: "100%", paddingBottom: 4, zIndex: 4 },
-  liveFiltersSectionPost: {
-    width: "100%",
-    paddingTop: 8,
-    paddingBottom: 6,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "rgba(255,255,255,0.08)",
-  },
-  liveFiltersSectionTitle: {
-    color: "rgba(255,255,255,0.5)",
-    fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 0.6,
-    textTransform: "uppercase" as const,
-    marginLeft: 16,
-    marginBottom: 6,
-  },
   bottomStory: { position: "absolute", left: 0, right: 0, bottom: 0, paddingBottom: 24 },
   captureRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-evenly", paddingHorizontal: 30, marginBottom: 10 },
   galleryThumb: { width: 48, height: 48, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.15)", overflow: "hidden", alignItems: "center", justifyContent: "center" },
@@ -1752,10 +1800,12 @@ const styles = StyleSheet.create({
   expandBtn: { padding: 6 },
   expandIcon: { color: "rgba(255,255,255,0.6)", fontSize: 18, fontWeight: "700" },
   albumRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 16, paddingVertical: 10 },
-  albumSelector: { flexDirection: "row", alignItems: "center", gap: 6 },
+  albumRowActions: { flexDirection: "row", alignItems: "center", gap: 8 },
+  albumSelector: { flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 1 },
   albumText: { color: "#fff", fontSize: 16, fontWeight: "700" },
   albumArrow: { color: "rgba(255,255,255,0.6)", fontSize: 18, fontWeight: "700" },
-  selectMultiBtn: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.12)", paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, gap: 6 },
+  selectMultiBtn: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.12)", paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, gap: 5 },
+  selectMultiBtnActive: { backgroundColor: "rgba(255,51,85,0.22)", borderWidth: 1, borderColor: "rgba(255,51,85,0.45)" },
   selectMultiIcon: { color: "#fff", fontSize: 14 },
   selectMultiText: { color: "#fff", fontSize: 13, fontWeight: "600" },
   albumDropdown: { position: "absolute", top: 80, left: 16, right: 16, maxHeight: 200, backgroundColor: "rgba(30,30,30,0.97)", borderRadius: 14, padding: 8, zIndex: 20 },
@@ -1830,6 +1880,25 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "600",
     textAlign: "center",
+  },
+  filterPickerThumb: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    marginBottom: 4,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "transparent",
+  },
+  filterPickerThumbActive: {
+    borderColor: "#fff",
+    borderWidth: 2,
+  },
+  filterPickerThumbNone: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "700",
   },
   liveFilterThumb: {
     width: 38,

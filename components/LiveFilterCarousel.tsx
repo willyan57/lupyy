@@ -50,6 +50,11 @@ export const LIVE_FILTERS: LiveFilterDef[] = [
   { id: "nashville", name: "Nashville", cssFilter: "sepia(0.2) contrast(1.2) brightness(1.05) saturate(1.2) hue-rotate(-5deg)", accent: "#FF9EBB" },
 ];
 
+export function getLiveFilterById(id: string | undefined): LiveFilterDef | undefined {
+  if (id == null || id === "") return undefined;
+  return LIVE_FILTERS.find((f) => f.id === id);
+}
+
 type LiveFilterCarouselProps = {
   activeFilter: string;
   onFilterChange: (filter: LiveFilterDef) => void;
