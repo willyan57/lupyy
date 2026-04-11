@@ -20,7 +20,7 @@ type TribeMessage = {
   tribe_id: string;
   channel_id: string;
   user_id: string;
-  text: string | null;
+  content: string;
   created_at: string;
 };
 
@@ -63,12 +63,16 @@ export default function ChannelScreen() {
     const { data: authData, error: authError } = await supabase.auth.getUser();
     if (authError || !authData?.user) return;
 
-    await supabase.from("tribe_messages").insert({
+    const { error } = await supabase.from("tribe_messages").insert({
       tribe_id: id,
       channel_id: channelId,
       user_id: authData.user.id,
-      text: text.trim(),
-    });
+      content: text.trim(),
+    } as any);
+    if (error) {
+      console.warn("tribe_messages:", error);
+      return;
+    }
 
     setText("");
     await loadMessages();
@@ -100,7 +104,7 @@ export default function ChannelScreen() {
               {item.user_id}
             </Text>
             <Text style={[styles.messageText, { color: theme.colors.text }]}>
-              {item.text}
+              {item.content}
             </Text>
           </View>
         )}

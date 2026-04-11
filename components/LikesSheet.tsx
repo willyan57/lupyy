@@ -32,9 +32,11 @@ type Props = {
   onClose: () => void;
   /** Callback quando o usuário clica em "Conectar" — abre o FollowModal para esse userId */
   onConnect?: (userId: string) => void;
+  /** Feed: tabela `likes`. Tribo: `tribe_post_likes` + `tribe_post_id`. */
+  source?: "feed" | "tribe";
 };
 
-export default function LikesSheet({ visible, postId, onClose, onConnect }: Props) {
+export default function LikesSheet({ visible, postId, onClose, onConnect, source = "feed" }: Props) {
   const router = useRouter();
   const [users, setUsers] = useState<LikeUser[]>([]);
   const [filtered, setFiltered] = useState<LikeUser[]>([]);
@@ -49,28 +51,45 @@ export default function LikesSheet({ visible, postId, onClose, onConnect }: Prop
   }, []);
 
   const load = useCallback(async () => {
-    if (!postId || !currentUserId) return;
+    if (!postId) return;
     setLoading(true);
 
-    const { data, error } = await supabase
-      .from("likes")
-      .select(`
-        user_id,
-        profiles (
-          username,
-          full_name,
-          avatar_url
-        )
-      `)
-      .eq("post_id", postId)
-      .order("created_at", { ascending: false });
+    const isTribe = source === "tribe";
+
+    const { data, error } = isTribe
+      ? await supabase
+          .from("tribe_post_likes")
+          .select(`
+            user_id,
+            created_at,
+            profiles (
+              username,
+              full_name,
+              avatar_url
+            )
+          `)
+          .eq("tribe_post_id", postId as string)
+          .order("created_at", { ascending: false })
+      : await supabase
+          .from("likes")
+          .select(`
+            user_id,
+            profiles (
+              username,
+              full_name,
+              avatar_url
+            )
+          `)
+          .eq("post_id", postId)
+          .order("created_at", { ascending: false });
 
     if (!error && data) {
-      // Fetch who I already follow among these users
-      const userIds = (data as any[]).map((r) => r.user_id).filter((id: string) => id !== currentUserId);
+      const userIds = (data as any[])
+        .map((r) => r.user_id)
+        .filter((uid: string) => uid && uid !== currentUserId);
       let followingSet = new Set<string>();
 
-      if (userIds.length > 0) {
+      if (currentUserId && userIds.length > 0) {
         const { data: followRows } = await supabase
           .from("follows")
           .select("following_id")
@@ -91,10 +110,13 @@ export default function LikesSheet({ visible, postId, onClose, onConnect }: Prop
       }));
       setUsers(mapped);
       setFiltered(mapped);
+    } else {
+      setUsers([]);
+      setFiltered([]);
     }
 
     setLoading(false);
-  }, [postId, currentUserId]);
+  }, [postId, currentUserId, source]);
 
   useEffect(() => {
     if (visible && postId) {

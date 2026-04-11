@@ -12,8 +12,6 @@ const BAKE_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name=
 var CSS = {
   none: "none",
   preto_branco: "grayscale(1) contrast(1.14) brightness(1.02)",
-  golden_mist: "brightness(1.04) contrast(1.03) saturate(1.06) sepia(0.06)",
-  veludo: "contrast(1.06) brightness(0.97)",
   aurora: "brightness(1.02) contrast(1.04) saturate(1.05) hue-rotate(-10deg)",
   brisa_rosa: "brightness(1.03) contrast(1.02) saturate(1.1) sepia(0.05)",
   pixelate: "contrast(1.1) saturate(0.85)",
@@ -24,42 +22,6 @@ var CSS = {
   fisheye: "saturate(1.15) contrast(1.08)",
   wave_distort: "saturate(1.2) contrast(1.05) hue-rotate(-4deg)"
 };
-function applyGoldenMist(ctx, w, h) {
-  var k = 0.42;
-  var g1 = ctx.createRadialGradient(w * 0.12, h * 0.1, 0, w * 0.32, h * 0.28, w * 0.62);
-  g1.addColorStop(0, "rgba(255,220,170,0.12)");
-  g1.addColorStop(0.55, "rgba(255,185,120,0.04)");
-  g1.addColorStop(1, "rgba(255,160,100,0)");
-  ctx.globalCompositeOperation = "screen";
-  ctx.fillStyle = g1;
-  ctx.fillRect(0, 0, w, h);
-  var g2 = ctx.createRadialGradient(w * 0.88, h * 0.85, 0, w * 0.72, h * 0.68, w * 0.45);
-  g2.addColorStop(0, "rgba(255,200,210,0.08)");
-  g2.addColorStop(1, "rgba(255,180,200,0)");
-  ctx.fillStyle = g2;
-  ctx.fillRect(0, 0, w, h);
-  ctx.globalCompositeOperation = "source-over";
-}
-function applyVeludo(ctx, w, h) {
-  var cx = w / 2, cy = h / 2, r = Math.sqrt(w * w + h * h) * 0.66;
-  var edgeRgb = Math.round(108 - 28);
-  var g = ctx.createRadialGradient(cx, cy, r * 0.12, cx, cy, r);
-  g.addColorStop(0, "rgba(255,255,255,1)");
-  g.addColorStop(0.52, "rgba(248,248,248,0.96)");
-  g.addColorStop(1, "rgb(" + edgeRgb + "," + edgeRgb + "," + edgeRgb + ")");
-  ctx.save();
-  ctx.globalCompositeOperation = "multiply";
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, w, h);
-  ctx.restore();
-  var g2 = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 0.48);
-  g2.addColorStop(0, "rgba(255,255,255,0.08)");
-  g2.addColorStop(1, "rgba(255,255,255,0)");
-  ctx.globalCompositeOperation = "screen";
-  ctx.fillStyle = g2;
-  ctx.fillRect(0, 0, w, h);
-  ctx.globalCompositeOperation = "source-over";
-}
 function applyAurora(ctx, w, h) {
   var k = 0.36;
   ctx.globalCompositeOperation = "overlay";
@@ -147,12 +109,6 @@ function runEffectBake(uri, effectId) {
       ctx.filter = "none";
       if (effectId === "claridade") {
         applyClaridadePass(ctx, w, h, 1);
-      }
-      if (effectId === "golden_mist") {
-        applyGoldenMist(ctx, w, h);
-      }
-      if (effectId === "veludo") {
-        applyVeludo(ctx, w, h);
       }
       if (effectId === "aurora") {
         applyAurora(ctx, w, h);

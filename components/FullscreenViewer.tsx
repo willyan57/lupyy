@@ -27,6 +27,8 @@ import { CrossPlatformVideo } from "./CrossPlatformVideo";
 
 export type ViewerItem = {
   id: string | number;
+  /** Id real do post (likes, comentários, BD). Se omitido, usa-se `id` (ex.: itens duplicados no modo reel). */
+  postId?: string | number;
   media_type: "image" | "video";
   media_url: string;
   filter?: string | null;
@@ -36,6 +38,10 @@ export type ViewerItem = {
   user_id?: string | null;
   avatar_url?: string | null;
 };
+
+export function viewerItemPostId(item: ViewerItem): string | number {
+  return item.postId ?? item.id;
+}
 
 export type Counts = {
   likes: number;
@@ -401,7 +407,7 @@ export default function FullscreenViewer({
     if (!ok) return;
     try {
       setMenuBusy(true);
-      await onDeletePost(currentItem.id);
+      await onDeletePost(viewerItemPostId(currentItem));
       setMenuOpen(false);
     } finally {
       setMenuBusy(false);
@@ -475,17 +481,18 @@ export default function FullscreenViewer({
     if (!commentText.trim()) return;
     const item = data[clampIndex(current)];
     if (!item) return;
+    const pid = viewerItemPostId(item);
     try {
       const { data: authData } = await supabase.auth.getUser();
       const uid = authData?.user?.id;
       if (!uid) return;
       await supabase.from("comments").insert({
-        post_id: item.id,
+        post_id: typeof pid === "number" ? pid : Number(pid),
         user_id: uid,
         content: commentText.trim(),
       });
       setCommentText("");
-      setFsCommentsPostId(item.id as number);
+      setFsCommentsPostId(typeof pid === "number" ? pid : Number(pid));
       setFsCommentsOpen(true);
     } catch (err) {
       console.log("Comment error:", err);
@@ -536,7 +543,7 @@ export default function FullscreenViewer({
           </View>
         ) : (
           <FlatList
-            key={`viewer-v-${visible ? 1 : 0}-${initialIndex}-${itemCount}`}
+            key={`viewer-v-${visible ? 1 : 0}-${initialIndex}`}
             ref={listRef}
             data={data}
             keyExtractor={keyExtractor}
@@ -561,22 +568,26 @@ export default function FullscreenViewer({
               }
             }}
             onEndReachedThreshold={0.6}
-            windowSize={5}
-            maxToRenderPerBatch={3}
+            windowSize={9}
+            maxToRenderPerBatch={5}
             removeClippedSubviews={Platform.OS !== "web"}
-            extraData={current}
+            extraData={{ current, itemCount }}
             renderItem={({ item, index }) => (
               <ViewerPage
                 item={item}
                 index={index}
                 current={current}
-                counts={countsForId(item.id)}
+                counts={countsForId(viewerItemPostId(item))}
                 controlsVisible={controlsVisible}
                 commentBarH={commentBarH}
-                onLike={() => onLike?.(item.id)}
-                onComment={() => { setFsCommentsPostId(item.id as number); setFsCommentsOpen(true); }}
-                onRepost={() => onRepost?.(item.id)}
-                onShare={() => onShare?.(item.id)}
+                onLike={() => onLike?.(viewerItemPostId(item))}
+                onComment={() => {
+                  const pid = viewerItemPostId(item);
+                  setFsCommentsPostId(typeof pid === "number" ? pid : Number(pid));
+                  setFsCommentsOpen(true);
+                }}
+                onRepost={() => onRepost?.(viewerItemPostId(item))}
+                onShare={() => onShare?.(viewerItemPostId(item))}
                 onPressUser={() => item.user_id && onPressUser?.(item.user_id)}
                 onToggleControls={toggleControls}
                 onHideControls={onHideControls}

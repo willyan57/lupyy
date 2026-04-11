@@ -1,6 +1,6 @@
 import CommentsSheet from "@/components/CommentsSheet";
 import FollowModal from "@/components/FollowModal";
-import FullscreenViewer, { ViewerItem } from "@/components/FullscreenViewer";
+import FullscreenViewer, { type ViewerItem } from "@/components/FullscreenViewer";
 import LikesSheet from "@/components/LikesSheet";
 import { PostCard } from "@/components/PostCard";
 import SkeletonPost from "@/components/SkeletonPost";
@@ -98,8 +98,10 @@ export default function Feed() {
   const [boostedPostIds, setBoostedPostIds] = useState<Set<number>>(new Set());
 
   const [viewerOpen, setViewerOpen] = useState(false);
-  const [viewerPostId, setViewerPostId] = useState<string | number | null>(null);
   const [viewerIndex, setViewerIndex] = useState(0);
+  /** Rounds extra de todo o feed no viewer (reel infinito quando não há mais páginas). */
+  const [viewerLoopExtra, setViewerLoopExtra] = useState(0);
+  const viewerLoadBurstGuard = useRef(false);
 
   const [counts, setCounts] = useState<Record<string | number, Counter>>({});
 
@@ -635,16 +637,42 @@ export default function Feed() {
     setFollowModalLoading(false);
   }, [authUserId, followModalTargetId]);
 
-  const viewerItems: ViewerItem[] = posts.map((p) => ({
-    id: p.id,
-    media_type: p.media_type,
-    media_url: p.media_url,
-    thumb_url: p.thumb_url ?? undefined,
-    username: p.username ?? undefined,
-    caption: p.caption ?? undefined,
-    user_id: p.user_id ?? undefined,
-    avatar_url: p.avatar_url ?? undefined,
-  }));
+  const viewerItems: ViewerItem[] = useMemo(() => {
+    if (posts.length === 0) return [];
+    const row = (p: UiPost, round: number): ViewerItem => ({
+      id: round === 0 ? p.id : `fsloop-${String(p.id)}-${round}`,
+      postId: p.id,
+      media_type: p.media_type,
+      media_url: p.media_url,
+      thumb_url: p.thumb_url ?? undefined,
+      username: p.username ?? undefined,
+      caption: p.caption ?? undefined,
+      user_id: p.user_id ?? undefined,
+      avatar_url: p.avatar_url ?? undefined,
+    });
+    const out: ViewerItem[] = [];
+    for (let r = 0; r <= viewerLoopExtra; r++) {
+      for (const p of posts) {
+        out.push(row(p, r));
+      }
+    }
+    return out;
+  }, [posts, viewerLoopExtra]);
+
+  const onViewerLoadMore = useCallback(() => {
+    if (viewerLoadBurstGuard.current) return;
+    viewerLoadBurstGuard.current = true;
+    setTimeout(() => {
+      viewerLoadBurstGuard.current = false;
+    }, 500);
+    if (hasMore) {
+      void loadPage();
+      return;
+    }
+    if (posts.length > 0) {
+      setViewerLoopExtra((n) => Math.min(n + 1, 80));
+    }
+  }, [hasMore, posts.length, loadPage]);
 
   const videoAutoplayEnabled = isFocused && !viewerOpen && !storyViewerVisible;
 
@@ -730,9 +758,12 @@ export default function Feed() {
               liked={!!counts[item.id]?.liked}
               isBoosted={item.isBoosted}
               onPressMedia={() => {
+                setViewerLoopExtra(0);
                 setViewerIndex(index);
-                setViewerPostId(item.id);
                 setViewerOpen(true);
+                if (hasMore && index >= Math.max(0, posts.length - 3)) {
+                  void loadPage();
+                }
               }}
               onPressUser={() => {
                 router.push({ pathname: "/profile", params: { userId: item.user_id } });
@@ -782,7 +813,10 @@ export default function Feed() {
         visible={viewerOpen}
         items={viewerItems}
         startIndex={viewerIndex}
-        onClose={() => setViewerOpen(false)}
+        onClose={() => {
+          setViewerOpen(false);
+          setViewerLoopExtra(0);
+        }}
         getCounts={(id) => {
           const c = counts[id as number];
           return { likes: c?.likes ?? 0, comments: c?.comments ?? 0, reposts: c?.reposts ?? 0, liked: !!c?.liked };
@@ -791,8 +825,11 @@ export default function Feed() {
         onComment={(id) => openComments(id as number)}
         onRepost={() => {}}
         onShare={(id) => sharePost(id)}
+        currentUserId={authUserId}
+        onLoadMore={onViewerLoadMore}
         onPressUser={(userId) => {
           setViewerOpen(false);
+          setViewerLoopExtra(0);
           router.push({ pathname: "/profile", params: { userId } });
         }}
       />

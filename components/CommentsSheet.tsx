@@ -23,12 +23,13 @@ import {
 /* ── Types ── */
 
 type CommentRow = {
-  id: number;
-  post_id: number;
+  id: number | string;
+  post_id?: number;
+  tribe_post_id?: string;
   user_id: string;
   content: string;
   created_at: string;
-  parent_id: number | null;
+  parent_id: number | string | null;
   profiles?: {
     username: string | null;
     full_name: string | null;
@@ -37,12 +38,13 @@ type CommentRow = {
 };
 
 type UiComment = {
-  id: number;
-  post_id: number;
+  id: number | string;
+  post_id?: number;
+  tribe_post_id?: string;
   user_id: string;
   content: string;
   created_at: string;
-  parent_id: number | null;
+  parent_id: number | string | null;
   username: string;
   full_name: string | null;
   avatar_url: string | null;
@@ -54,8 +56,11 @@ type UiComment = {
 
 type Props = {
   visible: boolean;
-  postId: number | null;
+  /** Feed: id numérico do `posts`. Tribo: uuid do `tribe_posts`. */
+  postId: number | string | null;
   onClose: () => void;
+  /** `tribe` usa `tribe_post_comments` (sem likes em comentários por agora). */
+  source?: "feed" | "tribe";
 };
 
 /* ── Helpers ── */
@@ -71,7 +76,7 @@ function timeAgo(ts: string) {
 
 /* ── Component ── */
 
-export default function CommentsSheet({ visible, postId, onClose }: Props) {
+export default function CommentsSheet({ visible, postId, onClose, source = "feed" }: Props) {
   const [comments, setComments] = useState<UiComment[]>([]);
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
@@ -96,15 +101,25 @@ export default function CommentsSheet({ visible, postId, onClose }: Props) {
     setLoading(true);
     setError(null);
 
-    // Fetch all comments for post
-    const { data: rows, error: qErr } = await supabase
-      .from("comments")
-      .select(`
-        id, post_id, user_id, content, created_at, parent_id,
-        profiles ( username, full_name, avatar_url )
-      `)
-      .eq("post_id", postId)
-      .order("created_at", { ascending: true });
+    const isTribe = source === "tribe";
+
+    const { data: rows, error: qErr } = isTribe
+      ? await supabase
+          .from("tribe_post_comments")
+          .select(`
+            id, tribe_post_id, user_id, content, created_at, parent_id,
+            profiles ( username, full_name, avatar_url )
+          `)
+          .eq("tribe_post_id", postId as string)
+          .order("created_at", { ascending: true })
+      : await supabase
+          .from("comments")
+          .select(`
+            id, post_id, user_id, content, created_at, parent_id,
+            profiles ( username, full_name, avatar_url )
+          `)
+          .eq("post_id", postId as number)
+          .order("created_at", { ascending: true });
 
     if (qErr) {
       setError(qErr.message);
@@ -115,39 +130,39 @@ export default function CommentsSheet({ visible, postId, onClose }: Props) {
     const allRows = (rows ?? []) as CommentRow[];
     const commentIds = allRows.map((r) => r.id);
 
-    // Fetch comment likes counts
-    let likesMap: Record<number, number> = {};
-    let myLikes = new Set<number>();
+    let likesMap: Record<string | number, number> = {};
+    let myLikes = new Set<string | number>();
 
-    if (commentIds.length > 0) {
-      // Counts
-      const { data: likeCounts } = await supabase
-        .from("comment_like_counts")
-        .select("comment_id, likes_count")
-        .in("comment_id", commentIds);
+    if (!isTribe && commentIds.length > 0) {
+      const numericIds = commentIds.filter((id): id is number => typeof id === "number");
+      if (numericIds.length > 0) {
+        const { data: likeCounts } = await supabase
+          .from("comment_like_counts")
+          .select("comment_id, likes_count")
+          .in("comment_id", numericIds);
 
-      (likeCounts ?? []).forEach((r: any) => {
-        likesMap[r.comment_id] = r.likes_count ?? 0;
-      });
-
-      // My likes
-      if (currentUserId) {
-        const { data: myLikeRows } = await supabase
-          .from("comment_likes")
-          .select("comment_id")
-          .eq("user_id", currentUserId)
-          .in("comment_id", commentIds);
-
-        (myLikeRows ?? []).forEach((r: any) => {
-          myLikes.add(r.comment_id);
+        (likeCounts ?? []).forEach((r: any) => {
+          likesMap[r.comment_id] = r.likes_count ?? 0;
         });
+
+        if (currentUserId) {
+          const { data: myLikeRows } = await supabase
+            .from("comment_likes")
+            .select("comment_id")
+            .eq("user_id", currentUserId)
+            .in("comment_id", numericIds);
+
+          (myLikeRows ?? []).forEach((r: any) => {
+            myLikes.add(r.comment_id);
+          });
+        }
       }
     }
 
-    // Map to UI
     const allUi: UiComment[] = allRows.map((row) => ({
       id: row.id,
       post_id: row.post_id,
+      tribe_post_id: row.tribe_post_id,
       user_id: row.user_id,
       content: row.content,
       created_at: row.created_at,
@@ -156,19 +171,22 @@ export default function CommentsSheet({ visible, postId, onClose }: Props) {
       full_name: row.profiles?.full_name ?? null,
       avatar_url: row.profiles?.avatar_url ?? null,
       canDelete: !!currentUserId && row.user_id === currentUserId,
-      likesCount: likesMap[row.id] ?? 0,
-      likedByMe: myLikes.has(row.id),
+      likesCount: isTribe ? 0 : likesMap[row.id] ?? 0,
+      likedByMe: isTribe ? false : myLikes.has(row.id),
       replies: [],
     }));
 
-    // Build tree: top-level comments + nested replies
+    // Build tree: top-level comments + nested replies (ids podem ser number ou uuid)
     const topLevel: UiComment[] = [];
-    const byId: Record<number, UiComment> = {};
-    allUi.forEach((c) => (byId[c.id] = c));
+    const byId: Record<string, UiComment> = {};
+    allUi.forEach((c) => {
+      byId[String(c.id)] = c;
+    });
 
     allUi.forEach((c) => {
-      if (c.parent_id && byId[c.parent_id]) {
-        byId[c.parent_id].replies.push(c);
+      const pid = c.parent_id != null ? String(c.parent_id) : "";
+      if (pid && byId[pid]) {
+        byId[pid].replies.push(c);
       } else {
         topLevel.push(c);
       }
@@ -180,7 +198,7 @@ export default function CommentsSheet({ visible, postId, onClose }: Props) {
     setTimeout(() => {
       listRef.current?.scrollToEnd({ animated: false });
     }, 100);
-  }, [postId, currentUserId]);
+  }, [postId, currentUserId, source]);
 
   useEffect(() => {
     if (visible && postId) loadComments();
@@ -207,18 +225,26 @@ export default function CommentsSheet({ visible, postId, onClose }: Props) {
       return;
     }
 
-    const insertPayload: any = {
-      post_id: postId,
-      user_id: user.id,
-      content: value,
-    };
+    const isTribe = source === "tribe";
+
+    const insertPayload: Record<string, unknown> = isTribe
+      ? {
+          tribe_post_id: postId as string,
+          user_id: user.id,
+          content: value,
+        }
+      : {
+          post_id: postId as number,
+          user_id: user.id,
+          content: value,
+        };
     if (replyingTo) {
       insertPayload.parent_id = replyingTo.id;
     }
 
     const { error: insErr } = await supabase
-      .from("comments")
-      .insert(insertPayload);
+      .from(isTribe ? "tribe_post_comments" : "comments")
+      .insert(insertPayload as any);
 
     if (insErr) {
       setError(insErr.message);
@@ -228,22 +254,41 @@ export default function CommentsSheet({ visible, postId, onClose }: Props) {
 
     // ── Push notification para o dono do post ──
     try {
-      const { data: postData } = await supabase
-        .from("posts")
-        .select("user_id")
-        .eq("id", postId)
-        .single();
+      if (isTribe) {
+        const { data: postData } = await supabase
+          .from("tribe_posts")
+          .select("author_id")
+          .eq("id", postId as string)
+          .single();
+        if (postData && (postData as { author_id?: string }).author_id && (postData as { author_id: string }).author_id !== user.id) {
+          const myUsername = user.user_metadata?.username ?? "Alguém";
+          supabase.functions.invoke("send-push", {
+            body: {
+              recipientId: (postData as { author_id: string }).author_id,
+              title: "LUPYY",
+              body: `${myUsername} comentou no mural da tribo 💬`,
+              data: { type: "comment", tribePostId: postId },
+            },
+          }).catch(() => {});
+        }
+      } else {
+        const { data: postData } = await supabase
+          .from("posts")
+          .select("user_id")
+          .eq("id", postId as number)
+          .single();
 
-      if (postData && postData.user_id !== user.id) {
-        const myUsername = user.user_metadata?.username ?? "Alguém";
-        supabase.functions.invoke("send-push", {
-          body: {
-            recipientId: postData.user_id,
-            title: "LUPYY",
-            body: `${myUsername} comentou na sua publicação 💬`,
-            data: { type: "comment", postId },
-          },
-        }).catch(() => {});
+        if (postData && postData.user_id !== user.id) {
+          const myUsername = user.user_metadata?.username ?? "Alguém";
+          supabase.functions.invoke("send-push", {
+            body: {
+              recipientId: postData.user_id,
+              title: "LUPYY",
+              body: `${myUsername} comentou na sua publicação 💬`,
+              data: { type: "comment", postId },
+            },
+          }).catch(() => {});
+        }
       }
     } catch {}
 
@@ -255,27 +300,28 @@ export default function CommentsSheet({ visible, postId, onClose }: Props) {
     setTimeout(() => {
       listRef.current?.scrollToEnd({ animated: true });
     }, 100);
-  }, [text, postId, sending, replyingTo, loadComments]);
+  }, [text, postId, sending, replyingTo, loadComments, source]);
 
   /* ── Delete comment ── */
   const handleDelete = useCallback(
-    async (commentId: number) => {
+    async (commentId: number | string) => {
       if (!currentUserId) return;
+      const isTribe = source === "tribe";
       const { error: delErr } = await supabase
-        .from("comments")
+        .from(isTribe ? "tribe_post_comments" : "comments")
         .delete()
         .eq("id", commentId)
         .eq("user_id", currentUserId);
 
       if (!delErr) await loadComments();
     },
-    [currentUserId, loadComments]
+    [currentUserId, loadComments, source]
   );
 
   /* ── Toggle comment like ── */
   const toggleCommentLike = useCallback(
-    async (commentId: number) => {
-      if (!currentUserId) return;
+    async (commentId: number | string) => {
+      if (source === "tribe" || !currentUserId) return;
 
       // Optimistic
       const updateLike = (items: UiComment[]): UiComment[] =>
@@ -315,7 +361,7 @@ export default function CommentsSheet({ visible, postId, onClose }: Props) {
         setComments((prev) => updateLike(prev));
       }
     },
-    [currentUserId, comments]
+    [currentUserId, comments, source]
   );
 
   /* ── Navigate to profile ── */
@@ -381,8 +427,9 @@ export default function CommentsSheet({ visible, postId, onClose }: Props) {
               {renderContentWithMentions(item.content)}
             </Text>
 
-            {/* Actions row */}
+            {/* Actions row — likes em comentários só no feed principal */}
             <View style={styles.commentActions}>
+              {source === "feed" && (
               <TouchableOpacity
                 style={styles.commentActionBtn}
                 onPress={() => toggleCommentLike(item.id)}
@@ -398,6 +445,7 @@ export default function CommentsSheet({ visible, postId, onClose }: Props) {
                   </Text>
                 )}
               </TouchableOpacity>
+              )}
 
               <TouchableOpacity
                 style={styles.commentActionBtn}
@@ -532,9 +580,9 @@ export default function CommentsSheet({ visible, postId, onClose }: Props) {
 
 /* ── Helpers ── */
 
-function findComment(items: UiComment[], id: number): UiComment | null {
+function findComment(items: UiComment[], id: number | string): UiComment | null {
   for (const c of items) {
-    if (c.id === id) return c;
+    if (c.id === id || String(c.id) === String(id)) return c;
     const found = findComment(c.replies, id);
     if (found) return found;
   }

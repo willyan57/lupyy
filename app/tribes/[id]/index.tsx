@@ -1,4 +1,8 @@
+import CommentsSheet from "@/components/CommentsSheet";
+import FollowModal from "@/components/FollowModal";
+import LikesSheet from "@/components/LikesSheet";
 import { useTheme } from "@/contexts/ThemeContext";
+import { getFollowState, setFollowInterestType, type InterestType } from "@/lib/social";
 import { supabase } from "@/lib/supabase";
 import { Ionicons } from "@expo/vector-icons";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
@@ -7,11 +11,13 @@ import * as FileSystem from "expo-file-system";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { Video, ResizeMode } from "expo-av";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -35,7 +41,11 @@ type Tribe = {
   created_at: string; owner_id: string;
 };
 type TribePost = {
-  id: string; tribe_id: string; user_id: string; content: string | null;
+  id: string; tribe_id: string;
+  /** Coluna real no Supabase; legacy pode expor user_id */
+  author_id: string;
+  user_id?: string;
+  content: string | null;
   media_url: string | null; created_at: string;
   // enriched
   username?: string | null; avatar_url?: string | null; full_name?: string | null;
@@ -61,18 +71,19 @@ type TribeMemberDetailed = {
 type TabKey = "feed" | "chat" | "ranking" | "about" | "members";
 
 const TAB_ICONS: Record<TabKey, string> = {
-  feed: "newspaper-outline",
+  feed: "images-outline",
   chat: "chatbubbles-outline",
   ranking: "trophy-outline",
   members: "people-outline",
   about: "information-circle-outline",
 };
 
+/** Chat primeiro — experiência estilo Discord. */
 const tabs: { key: TabKey; label: string }[] = [
-  { key: "feed", label: "Feed" },
-  { key: "chat", label: "Chat" },
-  { key: "ranking", label: "Ranking" },
+  { key: "chat", label: "Canais" },
+  { key: "feed", label: "Mural" },
   { key: "members", label: "Membros" },
+  { key: "ranking", label: "Ranking" },
   { key: "about", label: "Sobre" },
 ];
 
@@ -89,9 +100,29 @@ export default function TribeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { theme } = useTheme();
-  const { width, height } = useWindowDimensions();
+  const { width } = useWindowDimensions();
   const isLargeWeb = Platform.OS === "web" && width >= 1024;
   const chatScrollRef = useRef<ScrollView>(null);
+  /** No Android (sobretudo edge-to-edge), o teclado pode cobrir o input — empurra o layout com a altura real do teclado. */
+  const [androidKeyboardInset, setAndroidKeyboardInset] = useState(0);
+
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    const show = Keyboard.addListener("keyboardDidShow", (e) => {
+      const h = e.endCoordinates?.height ?? 0;
+      setAndroidKeyboardInset(h);
+      requestAnimationFrame(() => {
+        chatScrollRef.current?.scrollToEnd({ animated: true });
+      });
+    });
+    const hide = Keyboard.addListener("keyboardDidHide", () => {
+      setAndroidKeyboardInset(0);
+    });
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
 
   const goBackToTribes = () => {
     // Use router.back() to preserve tab bar and safe area context
@@ -109,6 +140,13 @@ export default function TribeScreen() {
     const { data } = supabase.storage.from("tribes").getPublicUrl(v);
     return data?.publicUrl ?? null;
   };
+
+  const getPostMediaUri = (raw: string | null | undefined) => {
+    if (!raw) return null;
+    return getCoverUri(raw);
+  };
+
+  const isVideoUrl = (url: string) => /\.(mp4|webm|mov)(\?|$)/i.test(url) || url.includes("video");
 
   const guessContentTypeFromExt = (ext: string) => {
     const e = ext.toLowerCase();
@@ -150,7 +188,7 @@ export default function TribeScreen() {
   const [isMember, setIsMember] = useState(false);
   const [membershipLoading, setMembershipLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<TabKey>("feed");
+  const [activeTab, setActiveTab] = useState<TabKey>("chat");
 
   // Join requests (private tribes)
   const [myJoinRequest, setMyJoinRequest] = useState<{ id: string; status: string } | null>(null);
@@ -182,6 +220,20 @@ export default function TribeScreen() {
   const [postsLoading, setPostsLoading] = useState(false);
   const [creatingPost, setCreatingPost] = useState(false);
   const [newPostContent, setNewPostContent] = useState("");
+  const [postMediaLocalUri, setPostMediaLocalUri] = useState<string | null>(null);
+  const [postMediaType, setPostMediaType] = useState<"image" | "video" | null>(null);
+  const [postingMedia, setPostingMedia] = useState(false);
+  const [postInteractionStats, setPostInteractionStats] = useState<
+    Record<string, { likes: number; comments: number; liked: boolean }>
+  >({});
+  const [tribeCommentsOpen, setTribeCommentsOpen] = useState(false);
+  const [tribeCommentsPostId, setTribeCommentsPostId] = useState<string | null>(null);
+  const [tribeLikesOpen, setTribeLikesOpen] = useState(false);
+  const [tribeLikesPostId, setTribeLikesPostId] = useState<string | null>(null);
+  const [followModalVisible, setFollowModalVisible] = useState(false);
+  const [followModalTargetId, setFollowModalTargetId] = useState<string | null>(null);
+  const [followModalExisting, setFollowModalExisting] = useState<InterestType | null>(null);
+  const [followModalLoading, setFollowModalLoading] = useState(false);
 
   // Chat
   const [channels, setChannels] = useState<TribeChannel[]>([]);
@@ -200,8 +252,11 @@ export default function TribeScreen() {
   const [newChannelType, setNewChannelType] = useState<"text" | "voice">("text");
 
   /* ─── Profile enrichment ─── */
-  const enrichWithProfiles = async <T extends { user_id: string }>(items: T[]): Promise<(T & { username?: string | null; avatar_url?: string | null; full_name?: string | null })[]> => {
-    const uncached = items.filter(i => !profilesCache.current.has(i.user_id)).map(i => i.user_id);
+  const profileId = (i: { user_id?: string; author_id?: string }) => i.user_id ?? i.author_id ?? "";
+
+  const enrichWithProfiles = async <T extends { user_id?: string; author_id?: string }>(items: T[]): Promise<(T & { username?: string | null; avatar_url?: string | null; full_name?: string | null })[]> => {
+    const ids = items.map(profileId).filter(Boolean);
+    const uncached = ids.filter(id => !profilesCache.current.has(id));
     const unique = [...new Set(uncached)];
     if (unique.length > 0) {
       const { data } = await supabase.from("profiles").select("id, username, avatar_url, full_name").in("id", unique);
@@ -210,9 +265,46 @@ export default function TribeScreen() {
       });
     }
     return items.map(i => {
-      const p = profilesCache.current.get(i.user_id);
+      const id = profileId(i);
+      const p = id ? profilesCache.current.get(id) : undefined;
       return { ...i, username: p?.username ?? null, avatar_url: p?.avatar_url ?? null, full_name: p?.full_name ?? null };
     });
+  };
+
+  const hydrateTribePostStats = async (postList: TribePost[], uid: string | null) => {
+    if (!postList.length) {
+      setPostInteractionStats({});
+      return;
+    }
+    const ids = postList.map((p) => p.id);
+    try {
+      const { data: likeRows } = await supabase.from("tribe_post_likes").select("tribe_post_id, user_id").in("tribe_post_id", ids);
+      const { data: comRows } = await supabase.from("tribe_post_comments").select("tribe_post_id").in("tribe_post_id", ids);
+      const next: Record<string, { likes: number; comments: number; liked: boolean }> = {};
+      ids.forEach((pid) => {
+        next[pid] = { likes: 0, comments: 0, liked: false };
+      });
+      (likeRows ?? []).forEach((r: { tribe_post_id: string; user_id: string }) => {
+        if (!next[r.tribe_post_id]) return;
+        next[r.tribe_post_id].likes += 1;
+        if (uid && r.user_id === uid) next[r.tribe_post_id].liked = true;
+      });
+      (comRows ?? []).forEach((r: { tribe_post_id: string }) => {
+        if (next[r.tribe_post_id]) next[r.tribe_post_id].comments += 1;
+      });
+      setPostInteractionStats(next);
+    } catch {
+      setPostInteractionStats({});
+    }
+  };
+
+  const refreshTribePostStatsFromDb = async () => {
+    if (!id) return;
+    const { data: auth } = await supabase.auth.getUser();
+    const uid = auth?.user?.id ?? null;
+    const { data: rows } = await supabase.from("tribe_posts").select("id").eq("tribe_id", id);
+    const list = (rows ?? []).map((r: { id: string }) => ({ id: r.id } as TribePost));
+    await hydrateTribePostStats(list, uid);
   };
 
   /* ─── Load tribe ─── */
@@ -264,6 +356,7 @@ export default function TribeScreen() {
       if (isMounted && postsData) {
         const enriched = await enrichWithProfiles(postsData as TribePost[]);
         setPosts(enriched);
+        await hydrateTribePostStats(enriched, currentUserId);
       }
       if (isMounted) { setPostsLoading(false); setMembershipLoading(false); }
     };
@@ -271,27 +364,67 @@ export default function TribeScreen() {
     return () => { isMounted = false; };
   }, [id]);
 
+  const ensuringChannelRef = useRef(false);
+  const triedEnsureDefaultChannelRef = useRef(false);
+
   /* ─── Channels ─── */
   const loadChannels = async (opts?: { forceSelectFirst?: boolean; selectChannelId?: string | null }) => {
     if (!id) return;
     setChannelsLoading(true);
     const { data, error } = await supabase.from("tribe_channels").select("*").eq("tribe_id", id).order("created_at", { ascending: true });
-    if (!error && data) {
-      const list = data as TribeChannel[];
-      setChannels(list);
-      const desired = opts?.selectChannelId ?? null;
-      setActiveChannelId((prev) => {
-        if (desired) return desired;
-        if (!prev || opts?.forceSelectFirst) {
-          const geral = list.find((c) => c.slug === "geral") ?? (list.length > 0 ? list[0] : null);
-          return geral ? geral.id : null;
-        }
-        const stillExists = list.some((c) => c.id === prev);
-        if (!stillExists) { const geral = list.find((c) => c.slug === "geral") ?? (list.length > 0 ? list[0] : null); return geral ? geral.id : null; }
-        return prev;
-      });
+    if (error) {
+      console.warn("tribe_channels load:", error);
+      notify("Canais", (error as any)?.message || "Não foi possível carregar os canais. Tente sair e entrar de novo.");
+      setChannels([]);
+      setActiveChannelId(null);
+      setChannelsLoading(false);
+      return;
     }
+    const list = (data || []) as TribeChannel[];
+    setChannels(list);
+    const desired = opts?.selectChannelId ?? null;
+    setActiveChannelId((prev) => {
+      if (desired) return desired;
+      if (!prev || opts?.forceSelectFirst) {
+        const geral = list.find((c) => c.slug === "geral") ?? (list.length > 0 ? list[0] : null);
+        return geral ? geral.id : null;
+      }
+      const stillExists = list.some((c) => c.id === prev);
+      if (!stillExists) {
+        const geral = list.find((c) => c.slug === "geral") ?? (list.length > 0 ? list[0] : null);
+        return geral ? geral.id : null;
+      }
+      return prev;
+    });
     setChannelsLoading(false);
+  };
+
+  /** Tribos antigas sem linha em tribe_messages: cria #geral uma vez (donos/mods). */
+  const ensureDefaultTextChannel = async () => {
+    if (!id || !userId || ensuringChannelRef.current) return;
+    ensuringChannelRef.current = true;
+    try {
+      const { error } = await supabase.from("tribe_channels").insert({
+        tribe_id: id,
+        name: "Geral",
+        slug: "geral",
+        description: "Canal principal — estilo Discord.",
+        type: "text",
+        is_private: false,
+        created_by: userId,
+      } as any);
+      if (error) {
+        const code = (error as any)?.code;
+        if (code !== "23505") {
+          console.warn("ensureDefaultTextChannel:", error);
+          notify("Canais", (error as any)?.message || "Não foi possível criar o canal #geral.");
+        }
+        return;
+      }
+      await loadChannels({ forceSelectFirst: true });
+    } finally {
+      ensuringChannelRef.current = false;
+    }
   };
 
   const createChannel = async () => {
@@ -310,7 +443,24 @@ export default function TribeScreen() {
     await loadChannels({ selectChannelId: newId ?? null, forceSelectFirst: true });
   };
 
-  useEffect(() => { if (id) loadChannels(); }, [id]);
+  useEffect(() => {
+    if (id) loadChannels();
+  }, [id]);
+
+  useEffect(() => {
+    triedEnsureDefaultChannelRef.current = false;
+  }, [id]);
+
+  useEffect(() => {
+    if (id && isMember) loadChannels({ forceSelectFirst: true });
+  }, [id, isMember]);
+
+  useEffect(() => {
+    if (!id || channelsLoading || channels.length > 0 || triedEnsureDefaultChannelRef.current) return;
+    if (!isMember || !(isOwner || canManageChannels)) return;
+    triedEnsureDefaultChannelRef.current = true;
+    void ensureDefaultTextChannel();
+  }, [id, channelsLoading, channels.length, isMember, isOwner, canManageChannels]);
 
   /* ─── Messages ─── */
   useEffect(() => {
@@ -494,24 +644,212 @@ export default function TribeScreen() {
     } catch (err: any) { notify("Ops", err?.message || "Erro ao rejeitar."); }
   };
 
+  const pickPostMedia = async () => {
+    if (!isMember || postingMedia) return;
+    try {
+      if (Platform.OS !== "web") {
+        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (perm.status !== "granted") {
+          notify("Permissão", "Autorize acesso à galeria para anexar mídia.");
+          return;
+        }
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.All,
+        quality: 0.85,
+        videoMaxDuration: 120,
+      });
+      if ((result as any)?.canceled) return;
+      const asset = (result as any)?.assets?.[0];
+      const uri = asset?.uri as string | undefined;
+      if (!uri) return;
+      const type = asset?.type === "video" ? "video" : "image";
+      setPostMediaLocalUri(uri);
+      setPostMediaType(type);
+    } catch (e: any) {
+      notify("Mídia", e?.message || "Não foi possível abrir a galeria.");
+    }
+  };
+
   const handleCreatePost = async () => {
     if (!tribe || !userId || !isMember || creatingPost) return;
     const content = newPostContent.trim();
-    if (!content.length) return;
+    if (!content.length && !postMediaLocalUri) return;
     setCreatingPost(true);
-    const { data, error } = await supabase.from("tribe_posts").insert({ tribe_id: tribe.id, user_id: userId, content } as any).select("*").single();
-    if (!error && data) {
-      const [enriched] = await enrichWithProfiles([data as TribePost]);
-      setPosts((prev) => [enriched, ...prev]);
-      setNewPostContent("");
+    try {
+      let mediaUrl: string | null = null;
+      if (postMediaLocalUri) {
+        setPostingMedia(true);
+        const clean = postMediaLocalUri.split("?")[0];
+        const extGuess = postMediaType === "video" ? "mp4" : (clean.split(".").pop() || "jpg").toLowerCase();
+        const ext = extGuess.length > 5 ? "jpg" : extGuess;
+        const path = `posts/${tribe.id}/${Date.now()}.${ext}`;
+        const body = await uriToUploadBody(postMediaLocalUri);
+        const { error: upErr } = await supabase.storage.from("tribes").upload(path, body.body as any, {
+          contentType: body.contentType || (postMediaType === "video" ? "video/mp4" : "image/jpeg"),
+          upsert: true,
+        });
+        if (upErr) {
+          notify("Upload", upErr.message || "Falha ao enviar mídia.");
+          setCreatingPost(false);
+          setPostingMedia(false);
+          return;
+        }
+        const { data: pub } = supabase.storage.from("tribes").getPublicUrl(path);
+        mediaUrl = pub?.publicUrl ?? path;
+        setPostingMedia(false);
+      }
+      const { data, error } = await supabase
+        .from("tribe_posts")
+        .insert({
+          tribe_id: tribe.id,
+          author_id: userId,
+          content: content.length ? content : (postMediaType === "video" ? "Vídeo" : "Foto"),
+          media_url: mediaUrl,
+        } as any)
+        .select("*")
+        .single();
+      if (error) {
+        console.warn("tribe_posts insert:", error);
+        notify("Publicar", (error as any)?.message || "Não foi possível publicar no mural.");
+        return;
+      }
+      if (data) {
+        const [enriched] = await enrichWithProfiles([data as TribePost]);
+        setPosts((prev) => [enriched, ...prev]);
+        setNewPostContent("");
+        setPostMediaLocalUri(null);
+        setPostMediaType(null);
+        await refreshTribePostStatsFromDb();
+      }
+    } finally {
+      setCreatingPost(false);
+      setPostingMedia(false);
     }
-    setCreatingPost(false);
+  };
+
+  const toggleTribePostLike = async (postId: string) => {
+    if (!userId || !isMember) {
+      notify("Mural", "Entre na tribo para curtir publicações.");
+      return;
+    }
+    const cur = postInteractionStats[postId] ?? { likes: 0, comments: 0, liked: false };
+    const nextLiked = !cur.liked;
+    const delta = nextLiked ? 1 : -1;
+    setPostInteractionStats((prev) => ({
+      ...prev,
+      [postId]: {
+        ...cur,
+        liked: nextLiked,
+        likes: Math.max(0, cur.likes + delta),
+      },
+    }));
+    try {
+      if (nextLiked) {
+        const { error } = await supabase.from("tribe_post_likes").insert({ tribe_post_id: postId, user_id: userId } as any);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("tribe_post_likes").delete().eq("tribe_post_id", postId).eq("user_id", userId);
+        if (error) throw error;
+      }
+    } catch (e) {
+      console.warn("tribe_post_likes:", e);
+      setPostInteractionStats((prev) => ({ ...prev, [postId]: cur }));
+      notify("Curtida", "Não foi possível atualizar. Verifique se a base de dados tem as tabelas do mural (migration).");
+    }
+  };
+
+  const openTribeComments = (postId: string) => {
+    if (!userId || !isMember) {
+      notify("Comentários", "Entre na tribo para comentar.");
+      return;
+    }
+    setTribeCommentsPostId(postId);
+    setTribeCommentsOpen(true);
+  };
+
+  const closeTribeComments = () => {
+    setTribeCommentsOpen(false);
+    setTribeCommentsPostId(null);
+    void refreshTribePostStatsFromDb();
+  };
+
+  const openTribeLikesSheet = useCallback((postId: string) => {
+    setTribeLikesPostId(postId);
+    setTribeLikesOpen(true);
+  }, []);
+
+  const closeTribeLikesSheet = useCallback(() => {
+    setTribeLikesOpen(false);
+    setTimeout(() => setTribeLikesPostId(null), 200);
+  }, []);
+
+  const handleConnectFromTribeLikes = useCallback(
+    async (targetUserId: string) => {
+      closeTribeLikesSheet();
+      setFollowModalTargetId(targetUserId);
+      if (userId) {
+        const state = await getFollowState(userId, targetUserId);
+        setFollowModalExisting(state.interestType);
+      } else {
+        setFollowModalExisting(null);
+      }
+      setFollowModalVisible(true);
+    },
+    [userId, closeTribeLikesSheet]
+  );
+
+  const handleFollowSelectFromTribe = useCallback(
+    async (interestType: InterestType) => {
+      if (!userId || !followModalTargetId) return;
+      setFollowModalLoading(true);
+      try {
+        await setFollowInterestType(userId, followModalTargetId, interestType);
+        setFollowModalVisible(false);
+      } catch {
+        /* toast opcional */
+      }
+      setFollowModalLoading(false);
+    },
+    [userId, followModalTargetId]
+  );
+
+  const confirmDeleteTribePost = (post: TribePost) => {
+    const author = post.author_id ?? post.user_id;
+    if (!userId || author !== userId) return;
+    const run = async () => {
+      const { error } = await supabase.from("tribe_posts").delete().eq("id", post.id);
+      if (error) {
+        console.warn("tribe_posts delete:", error);
+        notify("Apagar", (error as any)?.message || "Não foi possível apagar o post.");
+        return;
+      }
+      setPosts((p) => p.filter((x) => x.id !== post.id));
+      setPostInteractionStats((s) => {
+        const n = { ...s };
+        delete n[post.id];
+        return n;
+      });
+    };
+    if (Platform.OS === "web") {
+      if (typeof window !== "undefined" && window.confirm("Apagar este post do mural?")) void run();
+      return;
+    }
+    Alert.alert("Apagar post", "Tem certeza que deseja apagar esta publicação?", [
+      { text: "Cancelar", style: "cancel" },
+      { text: "Apagar", style: "destructive", onPress: () => void run() },
+    ]);
   };
 
   const handleSendChatMessage = async () => {
-    if (!tribe || !userId || !isMember || sendingChat || !activeChannelId) return;
+    if (!tribe || !userId || !isMember || sendingChat) return;
     const content = newChatMessage.trim();
     if (!content.length) return;
+    if (!activeChannelId) {
+      notify("Canal", "Nenhum canal selecionado. Aguarde carregar ou peça a um moderador para criar o canal #geral.");
+      void loadChannels({ forceSelectFirst: true });
+      return;
+    }
     setSendingChat(true);
     const finalContent = replyingTo
       ? `↩︎ ${replyingTo.user_id === userId ? "Você" : (replyingTo.username || replyingTo.full_name || "Membro")}: ${replyingTo.content.slice(0, 80)}\n${content}`
@@ -519,7 +857,10 @@ export default function TribeScreen() {
     const { data, error } = await supabase.from("tribe_messages").insert({
       tribe_id: tribe.id, channel_id: activeChannelId, user_id: userId, content: finalContent,
     } as any).select("*").single();
-    if (!error && data) {
+    if (error) {
+      console.warn("tribe_messages insert:", error);
+      notify("Chat", (error as any)?.message || "Não foi possível enviar. Verifique permissões da tribo.");
+    } else if (data) {
       const [enriched] = await enrichWithProfiles([data as TribeMessage]);
       setChatMessages((prev) => { if (prev.some((m) => m.id === enriched.id)) return prev; return [...prev, enriched]; });
       setNewChatMessage(""); setReplyingTo(null);
@@ -555,6 +896,13 @@ export default function TribeScreen() {
   const roleLabel = (role: "owner" | "moderator" | "member") => role === "owner" ? "Dono" : role === "moderator" ? "Mod" : "Membro";
   const openMemberModal = (m: TribeMemberDetailed) => { if (!(myRole === "owner" || myRole === "moderator")) return; setSelectedMember(m); setMemberModalVisible(true); };
   const closeMemberModal = () => { setMemberModalVisible(false); setSelectedMember(null); };
+
+  const visitProfileFromMemberModal = () => {
+    if (!selectedMember) return;
+    const uid = selectedMember.user_id;
+    closeMemberModal();
+    openUserProfile(uid);
+  };
 
   const handleRemoveMember = async () => {
     if (!tribe || !selectedMember || !userId || selectedMember.user_id === userId || selectedMember.role === "owner") return;
@@ -615,9 +963,15 @@ export default function TribeScreen() {
     return `${days}d`;
   };
 
-  const getDisplayName = (item: { user_id: string; username?: string | null; full_name?: string | null }) => {
-    if (userId && item.user_id === userId) return "Você";
+  const getDisplayName = (item: { user_id?: string; author_id?: string; username?: string | null; full_name?: string | null }) => {
+    const uid = item.user_id ?? item.author_id;
+    if (userId && uid === userId) return "Você";
     return item.full_name?.trim() || item.username?.trim() || "Membro";
+  };
+
+  const openUserProfile = (targetUserId: string) => {
+    if (!targetUserId) return;
+    router.push({ pathname: "/profile", params: { userId: targetUserId } } as any);
   };
 
   const getAvatarInitial = (name: string) => name.charAt(0).toUpperCase();
@@ -636,32 +990,51 @@ export default function TribeScreen() {
           {isMember ? (
             <View style={[st.feedCard, { backgroundColor: theme.colors.surfaceElevated }]}>
               <View style={st.feedNewHeader}>
-                <Ionicons name="create-outline" size={16} color={theme.colors.primary} />
-                <Text style={[st.feedNewLabel, { color: theme.colors.text }]}>Compartilhar com a tribo</Text>
+                <Ionicons name="images-outline" size={16} color={theme.colors.primary} />
+                <Text style={[st.feedNewLabel, { color: theme.colors.text }]}>Mural da tribo</Text>
               </View>
+              <Text style={[st.feedHint, { color: theme.colors.textMuted }]}>Posts longos e mídia — o chat rápido fica em Canais.</Text>
+              {postMediaLocalUri ? (
+                <View style={st.feedMediaPreview}>
+                  {postMediaType === "video" ? (
+                    <Video source={{ uri: postMediaLocalUri }} style={st.feedMediaPreviewImg} resizeMode={ResizeMode.COVER} shouldPlay={false} />
+                  ) : (
+                    <Image source={{ uri: postMediaLocalUri }} style={st.feedMediaPreviewImg} resizeMode="cover" />
+                  )}
+                  <TouchableOpacity style={st.feedMediaRemove} onPress={() => { setPostMediaLocalUri(null); setPostMediaType(null); }}>
+                    <Ionicons name="close-circle" size={22} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+              ) : null}
               <View style={[st.feedInputWrap, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
                 <TextInput
                   value={newPostContent}
                   onChangeText={setNewPostContent}
-                  placeholder="Compartilhe uma ideia, anúncio ou insight..."
+                  placeholder="Texto opcional — ou só mídia..."
                   placeholderTextColor={theme.colors.textMuted}
                   multiline
                   style={[st.feedInput, { color: theme.colors.text }]}
                 />
               </View>
-              <TouchableOpacity
-                activeOpacity={0.9}
-                onPress={handleCreatePost}
-                disabled={creatingPost || !newPostContent.trim().length}
-                style={[st.postBtn, { backgroundColor: creatingPost || !newPostContent.trim().length ? theme.colors.surface : theme.colors.primary }]}
-              >
-                {creatingPost ? <ActivityIndicator size="small" color="#fff" /> : (
-                  <View style={st.postBtnContent}>
-                    <Ionicons name="send" size={14} color="#fff" />
-                    <Text style={st.postBtnText}>Publicar</Text>
-                  </View>
-                )}
-              </TouchableOpacity>
+              <View style={st.feedActionsRow}>
+                <TouchableOpacity activeOpacity={0.85} onPress={pickPostMedia} style={[st.feedAttachBtn, { borderColor: theme.colors.border }]}>
+                  <Ionicons name="image-outline" size={18} color={theme.colors.primary} />
+                  <Text style={[st.feedAttachText, { color: theme.colors.text }]}>Foto ou vídeo</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  onPress={handleCreatePost}
+                  disabled={creatingPost || (!newPostContent.trim().length && !postMediaLocalUri)}
+                  style={[st.postBtn, { flex: 1, marginTop: 0 }, { backgroundColor: creatingPost || (!newPostContent.trim().length && !postMediaLocalUri) ? theme.colors.surface : theme.colors.primary }]}
+                >
+                  {creatingPost || postingMedia ? <ActivityIndicator size="small" color="#fff" /> : (
+                    <View style={st.postBtnContent}>
+                      <Ionicons name="send" size={14} color="#fff" />
+                      <Text style={st.postBtnText}>Publicar</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
           ) : (
             <View style={[st.feedCard, { backgroundColor: theme.colors.surfaceElevated }]}>
@@ -696,6 +1069,70 @@ export default function TribeScreen() {
                   </View>
                 </View>
                 {post.content ? <Text style={[st.postContent, { color: theme.colors.text }]}>{post.content}</Text> : null}
+                {post.media_url ? (
+                  (() => {
+                    const mUri = getPostMediaUri(post.media_url);
+                    if (!mUri) return null;
+                    if (isVideoUrl(mUri)) {
+                      return (
+                        <Video
+                          source={{ uri: mUri }}
+                          style={st.postMedia}
+                          resizeMode={ResizeMode.COVER}
+                          shouldPlay={false}
+                          useNativeControls
+                        />
+                      );
+                    }
+                    return <Image source={{ uri: mUri }} style={st.postMedia} resizeMode="cover" />;
+                  })()
+                ) : null}
+                {(() => {
+                  const stats = postInteractionStats[post.id] ?? { likes: 0, comments: 0, liked: false };
+                  const isAuthor = !!(userId && (post.author_id ?? post.user_id) === userId);
+                  const likeColor = stats.liked ? "#ff3b5c" : theme.colors.text;
+                  return (
+                    <>
+                      <View style={[st.postActionsBar, { borderTopColor: theme.colors.border }]}>
+                        <TouchableOpacity
+                          activeOpacity={0.85}
+                          onPress={() => void toggleTribePostLike(post.id)}
+                          style={st.postActionBtn}
+                          disabled={!userId || !isMember}
+                        >
+                          <Ionicons name={stats.liked ? "heart" : "heart-outline"} size={22} color={likeColor} />
+                          <Text style={[st.postActionCount, { color: theme.colors.text }]}>{stats.likes}</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          activeOpacity={0.85}
+                          onPress={() => openTribeComments(post.id)}
+                          style={st.postActionBtn}
+                          disabled={!userId || !isMember}
+                        >
+                          <Ionicons name="chatbubble-outline" size={21} color={theme.colors.text} />
+                          <Text style={[st.postActionCount, { color: theme.colors.text }]}>{stats.comments}</Text>
+                        </TouchableOpacity>
+                        <View style={{ flex: 1 }} />
+                        {isAuthor ? (
+                          <TouchableOpacity activeOpacity={0.85} onPress={() => confirmDeleteTribePost(post)} style={st.postActionBtn}>
+                            <Ionicons name="trash-outline" size={20} color={theme.colors.textMuted} />
+                          </TouchableOpacity>
+                        ) : null}
+                      </View>
+                      {stats.likes > 0 ? (
+                        <TouchableOpacity
+                          activeOpacity={0.7}
+                          onPress={() => openTribeLikesSheet(post.id)}
+                          style={st.postLikesSummaryWrap}
+                        >
+                          <Text style={[st.postLikesSummary, { color: theme.colors.text }]}>
+                            {stats.likes} curtida{stats.likes === 1 ? "" : "s"}
+                          </Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </>
+                  );
+                })()}
               </View>
             ))
           )}
@@ -707,7 +1144,6 @@ export default function TribeScreen() {
     if (activeTab === "chat") {
       const activeChannel = channels.find((c) => c.id === activeChannelId) || null;
       const isWeb = Platform.OS === "web";
-      const chatHeight = isWeb ? (isLargeWeb ? Math.max(520, Math.min(800, height - 340)) : Math.max(420, Math.min(600, height - 380))) : Math.max(380, Math.min(540, height - 380));
 
       // Group consecutive messages from same user
       const groupedMessages: (TribeMessage & { showHeader: boolean })[] = chatMessages.map((msg, i) => {
@@ -719,12 +1155,31 @@ export default function TribeScreen() {
       });
 
       return (
-        <View style={[st.chatContainer, { backgroundColor: theme.colors.surfaceElevated, height: chatHeight, marginTop: isWeb ? 8 : 12, flexDirection: isLargeWeb ? "row" : "column" }]}>
+        <View
+          style={[
+            st.chatContainer,
+            {
+              backgroundColor: theme.colors.surfaceElevated,
+              marginTop: isLargeWeb ? 4 : isWeb ? 8 : 12,
+              flexDirection: isLargeWeb ? "row" : "column",
+              flex: 1,
+              minHeight: 0,
+              minWidth: 0,
+              alignSelf: "stretch",
+              ...(isLargeWeb
+                ? {
+                    borderWidth: 1,
+                    borderColor: theme.colors.border,
+                  }
+                : {}),
+            },
+          ]}
+        >
           {/* Channels sidebar */}
           <View style={[
             st.channelsSidebar,
-            { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
-            !isLargeWeb ? { width: "100%", borderRightWidth: 0, borderBottomWidth: 1, maxHeight: 50 } : null,
+            { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, ...(isLargeWeb ? { width: 220 } : {}) },
+            !isLargeWeb ? { width: "100%", borderRightWidth: 0, borderBottomWidth: 1, maxHeight: 104, paddingVertical: 4 } : null,
           ]}>
             {isLargeWeb && (
               <View style={st.channelsSidebarHeader}>
@@ -801,8 +1256,31 @@ export default function TribeScreen() {
                     {activeChannel.description || "Canal principal"}
                   </Text>
                 </View>
+              ) : channelsLoading ? (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                  <ActivityIndicator size="small" color={theme.colors.primary} />
+                  <Text style={[st.infoText, { color: theme.colors.textMuted }]}>Carregando canais…</Text>
+                </View>
+              ) : channels.filter((c) => c.type !== "voice").length === 0 ? (
+                <View style={{ gap: 8 }}>
+                  <Text style={[st.infoText, { color: theme.colors.text }]}>Sem canais de texto ainda.</Text>
+                  {(isOwner || canManageChannels) ? (
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      onPress={() => {
+                        triedEnsureDefaultChannelRef.current = false;
+                        void ensureDefaultTextChannel();
+                      }}
+                      style={{ alignSelf: "flex-start", backgroundColor: theme.colors.primary, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10 }}
+                    >
+                      <Text style={{ color: "#fff", fontWeight: "800", fontSize: 13 }}>Criar canal #geral</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <Text style={[st.infoText, { color: theme.colors.textMuted }]}>Peça a um moderador para criar um canal.</Text>
+                  )}
+                </View>
               ) : (
-                <Text style={[st.infoText, { color: theme.colors.textMuted }]}>Selecione um canal</Text>
+                <Text style={[st.infoText, { color: theme.colors.textMuted }]}>Selecione um canal acima</Text>
               )}
             </View>
 
@@ -826,8 +1304,14 @@ export default function TribeScreen() {
                 ) : (
                   <ScrollView
                     ref={chatScrollRef}
-                    style={{ flex: 1 }}
-                    contentContainerStyle={{ paddingHorizontal: 12, paddingVertical: 8 }}
+                    style={{ flex: 1, minHeight: 0 }}
+                    contentContainerStyle={{
+                      paddingHorizontal: 12,
+                      paddingVertical: 8,
+                      ...(Platform.OS === "web" ? {} : { flexGrow: 1 }),
+                    }}
+                    keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
                     onContentSizeChange={() => chatScrollRef.current?.scrollToEnd({ animated: true })}
                     showsVerticalScrollIndicator
                   >
@@ -858,7 +1342,13 @@ export default function TribeScreen() {
                             </View>
                             <View style={{ flex: 1 }}>
                               <View style={st.discordNameRow}>
-                                <Text style={[st.discordUsername, { color: theme.colors.primary }]}>{getDisplayName(msg)}</Text>
+                                <TouchableOpacity
+                                  activeOpacity={0.7}
+                                  onPress={() => openUserProfile(msg.user_id)}
+                                  hitSlop={{ top: 6, bottom: 6, left: 0, right: 8 }}
+                                >
+                                  <Text style={[st.discordUsername, { color: theme.colors.primary }]}>{getDisplayName(msg)}</Text>
+                                </TouchableOpacity>
                                 <Text style={[st.discordTimestamp, { color: theme.colors.textMuted }]}>{formatDate(msg.created_at)} {formatTime(msg.created_at)}</Text>
                               </View>
                               <Text style={[
@@ -911,8 +1401,17 @@ export default function TribeScreen() {
               ) : null}
             </View>
 
-            {/* Input */}
-            <View style={[st.chatInputBar, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+            {/* Input — sempre visível; flex acima garante espaço sem empurrar para fora da viewport (web/APK) */}
+            <View
+              style={[
+                st.chatInputBar,
+                {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: theme.colors.border,
+                  paddingBottom: Math.max(insets.bottom, 10),
+                },
+              ]}
+            >
               {isMember ? (
                 <>
                   {replyingTo && (
@@ -931,6 +1430,8 @@ export default function TribeScreen() {
                       placeholder={activeChannel ? `Conversar em #${activeChannel.name}` : "Selecione um canal"}
                       placeholderTextColor={theme.colors.textMuted}
                       multiline
+                      blurOnSubmit={false}
+                      {...(Platform.OS === "android" ? { textAlignVertical: "top" as const } : {})}
                       style={[st.chatInput, { color: theme.colors.text, backgroundColor: theme.colors.surfaceElevated, borderColor: theme.colors.border }]}
                       onSubmitEditing={handleSendChatMessage}
                     />
@@ -1063,12 +1564,16 @@ export default function TribeScreen() {
             {list.map((m) => {
               const display = m.full_name?.trim() || m.username?.trim() || "Usuário";
               const isYou = userId && m.user_id === userId;
-              const canClick = isMember && (myRole === "owner" || myRole === "moderator") && !isYou;
+              const canManageRow = isMember && (myRole === "owner" || myRole === "moderator") && !isYou;
               return (
                 <TouchableOpacity
                   key={`${m.tribe_id}_${m.user_id}`}
                   activeOpacity={0.85}
-                  onPress={() => (canClick ? openMemberModal(m) : undefined)}
+                  onPress={() => {
+                    if (!isMember) return;
+                    if (canManageRow) openMemberModal(m);
+                    else openUserProfile(m.user_id);
+                  }}
                   style={[st.memberRow, { backgroundColor: theme.colors.surfaceElevated }]}
                 >
                   {m.avatar_url ? (
@@ -1183,7 +1688,7 @@ export default function TribeScreen() {
   /* ─── Loading / Not found ─── */
   if (loading) {
     return (
-      <SafeAreaView style={{ flex: 1, paddingTop: insets.top, backgroundColor: theme.colors.background }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.background }} edges={["top", "left", "right"]}>
         <View style={st.centeredFlex}><ActivityIndicator /><Text style={[st.loadingText, { color: theme.colors.textMuted }]}>Carregando tribo...</Text></View>
       </SafeAreaView>
     );
@@ -1191,7 +1696,7 @@ export default function TribeScreen() {
 
   if (!tribe) {
     return (
-      <SafeAreaView style={{ flex: 1, paddingTop: insets.top, backgroundColor: theme.colors.background }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.background }} edges={["top", "left", "right"]}>
         <View style={st.centeredFlex}>
           <Text style={[st.loadingText, { color: theme.colors.textMuted }]}>Tribo não encontrada.</Text>
           <TouchableOpacity activeOpacity={0.9} onPress={goBackToTribes} style={[st.backBtn, { backgroundColor: theme.colors.primary }]}>
@@ -1204,18 +1709,41 @@ export default function TribeScreen() {
 
   /* ─── Main UI ─── */
   const coverUri = getCoverUri(tribe.cover_url);
+  /** Topo da tribo (capa + descrição + abas) com a mesma altura em todas as abas — evita “pulo” ao trocar Canais / Mural / etc. */
+  const headerCoverHeight = isLargeWeb ? 88 : 116;
 
   return (
-    <SafeAreaView style={{ flex: 1, paddingTop: insets.top, backgroundColor: theme.colors.background }}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-        <ScrollView
-          style={Platform.OS === "web" ? { flex: 1, touchAction: "pan-y" } as any : { flex: 1 }}
-          contentContainerStyle={{ paddingBottom: 32 + insets.bottom }}
-          keyboardShouldPersistTaps="handled"
-          scrollEnabled
+    <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.background }} edges={["top", "left", "right"]}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        enabled={Platform.OS === "ios"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? insets.top : 0}
+      >
+        <View
+          style={{
+            flex: 1,
+            minHeight: 0,
+            paddingBottom: Platform.OS === "android" ? androidKeyboardInset : 0,
+          }}
         >
-          {/* Cover */}
-          <View style={st.coverContainer}>
+        <ScrollView
+          style={
+            Platform.OS === "web"
+              ? activeTab === "chat"
+                ? ({ flexGrow: 0, flexShrink: 0, touchAction: "pan-y" } as any)
+                : ({ flex: 1, minHeight: 0, touchAction: "pan-y" } as any)
+              : activeTab === "chat"
+                ? { flexGrow: 0, flexShrink: 0 }
+                : { flexGrow: 1, flexShrink: 0, minHeight: 0 }
+          }
+          contentContainerStyle={{ paddingBottom: activeTab === "chat" ? 0 : 32 + insets.bottom }}
+          keyboardShouldPersistTaps="handled"
+          scrollEnabled={activeTab !== "chat"}
+          nestedScrollEnabled
+        >
+          {/* Capa compacta — mesma altura em todas as abas (desktop, mobile web, APK) */}
+          <View style={[st.coverContainer, { height: headerCoverHeight }]}>
             <TouchableOpacity activeOpacity={1} style={StyleSheet.absoluteFill} onLongPress={canManageCover ? () => setCoverActionsVisible(true) : undefined} delayLongPress={350}>
               {coverUri ? <Image source={{ uri: coverUri }} style={st.coverImage} resizeMode="cover" /> : <View style={[st.coverPlaceholder, { backgroundColor: theme.colors.primary + "22" }]} />}
             </TouchableOpacity>
@@ -1225,29 +1753,44 @@ export default function TribeScreen() {
               </TouchableOpacity>
               <View style={st.coverTag}><Text style={st.coverTagText}>TRIBO</Text></View>
             </View>
-            <View pointerEvents="none" style={st.coverGradient} />
-            <View style={st.coverBottomInfo}>
-              <Text style={st.coverTitle} numberOfLines={2}>{tribe.name}</Text>
-              <View style={st.coverMetaRow}>
-                <View style={st.coverMetaBadge}><Ionicons name="people" size={12} color="#E5E7EB" /><Text style={st.coverMetaText}>{tribe.members_count} membro{tribe.members_count !== 1 ? "s" : ""}</Text></View>
-                {tribe.category && <View style={st.coverMetaBadge}><Text style={st.coverMetaText}>{tribe.category}</Text></View>}
+            <View
+              pointerEvents="none"
+              style={[st.coverGradient, { height: isLargeWeb ? 72 : 80 }]}
+            />
+            <View style={[st.coverBottomInfo, { bottom: 10 }]}>
+              <Text
+                style={[
+                  st.coverTitle,
+                  {
+                    fontSize: isLargeWeb ? 17 : 18,
+                    lineHeight: isLargeWeb ? 22 : 23,
+                  },
+                ]}
+                numberOfLines={1}
+              >
+                {tribe.name}
+              </Text>
+              <View style={[st.coverMetaRow, { marginTop: 2, gap: 6 }]}>
+                <View style={st.coverMetaBadge}><Ionicons name="people" size={11} color="#E5E7EB" /><Text style={[st.coverMetaText, { fontSize: 11 }]}>{tribe.members_count} membro{tribe.members_count !== 1 ? "s" : ""}</Text></View>
+                {tribe.category && <View style={st.coverMetaBadge}><Text style={[st.coverMetaText, { fontSize: 11 }]}>{tribe.category}</Text></View>}
               </View>
-              {canManageCover && (
-                <Text style={st.coverEditHint}>{uploadingCover ? "Enviando..." : "Segure na capa para trocar"}</Text>
-              )}
+              {/* Troca de capa: manter long-press na imagem (sem linha extra — altura do topo igual em todas as abas) */}
             </View>
           </View>
 
           {/* Content */}
-          <View style={{ paddingHorizontal: isLargeWeb ? 32 : 16, paddingTop: 12 }}>
+          <View style={{ paddingHorizontal: isLargeWeb ? 32 : 16, paddingTop: 8 }}>
             {/* Description + Join */}
-            <View style={st.descriptionRow}>
+            <View style={[st.descriptionRow, { marginBottom: 2 }]}>
               <View style={{ flex: 1 }}>
-                <Text style={[st.descriptionText, { color: theme.colors.textMuted }]} numberOfLines={3}>
+                <Text
+                  style={[st.descriptionText, { color: theme.colors.textMuted, fontSize: 13, lineHeight: 18 }]}
+                  numberOfLines={1}
+                >
                   {tribe.description || "Entre e faça parte dessa comunidade."}
                 </Text>
                 {!tribe.is_public && !isMember && (
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 }}>
                     <Ionicons name="lock-closed-outline" size={12} color={theme.colors.primary} />
                     <Text style={{ fontSize: 11, fontWeight: "600", color: theme.colors.primary }}>Tribo privada · entrada por solicitação</Text>
                   </View>
@@ -1298,13 +1841,17 @@ export default function TribeScreen() {
             )}
 
             {/* Tabs */}
-            <View style={[st.tabsContainer, { backgroundColor: theme.colors.surfaceElevated, marginTop: 12 }]}>
+            <View style={[st.tabsContainer, st.tabsContainerCompact, { backgroundColor: theme.colors.surfaceElevated, marginTop: 8 }]}>
               {tabs.map((tab) => (
                 <TouchableOpacity
                   key={tab.key}
                   activeOpacity={0.85}
                   onPress={() => setActiveTab(tab.key)}
-                  style={[st.tabItem, { backgroundColor: activeTab === tab.key ? theme.colors.primary : "transparent" }]}
+                  style={[
+                    st.tabItem,
+                    st.tabItemCompact,
+                    { backgroundColor: activeTab === tab.key ? theme.colors.primary : "transparent" },
+                  ]}
                 >
                   <Ionicons name={TAB_ICONS[tab.key] as any} size={14} color={activeTab === tab.key ? "#fff" : theme.colors.textMuted} />
                   <Text style={[st.tabItemText, { color: activeTab === tab.key ? "#FFFFFF" : theme.colors.textMuted }]}>{tab.label}</Text>
@@ -1312,9 +1859,24 @@ export default function TribeScreen() {
               ))}
             </View>
 
-            {renderTabContent()}
+            {activeTab !== "chat" ? renderTabContent() : null}
           </View>
         </ScrollView>
+        {activeTab === "chat" ? (
+          <View
+            style={{
+              flex: 1,
+              minHeight: 0,
+              minWidth: 0,
+              paddingHorizontal: isLargeWeb ? 32 : 16,
+              paddingTop: 4,
+              paddingBottom: 0,
+            }}
+          >
+            {renderTabContent()}
+          </View>
+        ) : null}
+        </View>
       </KeyboardAvoidingView>
 
       {/* ─── Modals ─── */}
@@ -1436,6 +1998,14 @@ export default function TribeScreen() {
               <>
                 <Text style={[st.modalSub, { color: theme.colors.text }]}>{selectedMember.full_name?.trim() || selectedMember.username?.trim() || "Usuário"}</Text>
                 <View style={{ gap: 8, marginTop: 12 }}>
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={visitProfileFromMemberModal}
+                    style={[st.modalAction, { backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border }]}
+                  >
+                    <Ionicons name="person-circle-outline" size={18} color={theme.colors.primary} />
+                    <Text style={[st.modalActionText, { color: theme.colors.text }]}>Visitar perfil</Text>
+                  </TouchableOpacity>
                   {myRole === "owner" && (
                     <>
                       <TouchableOpacity activeOpacity={0.85} disabled={selectedMember.role === "moderator"} onPress={() => handleSetMemberRole("moderator")}
@@ -1481,6 +2051,29 @@ export default function TribeScreen() {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      <CommentsSheet
+        visible={tribeCommentsOpen}
+        postId={tribeCommentsPostId}
+        source="tribe"
+        onClose={closeTribeComments}
+      />
+
+      <LikesSheet
+        visible={tribeLikesOpen}
+        postId={tribeLikesPostId}
+        source="tribe"
+        onClose={closeTribeLikesSheet}
+        onConnect={handleConnectFromTribeLikes}
+      />
+
+      <FollowModal
+        visible={followModalVisible}
+        onClose={() => setFollowModalVisible(false)}
+        onSelect={handleFollowSelectFromTribe}
+        existingInterestType={followModalExisting}
+        loading={followModalLoading}
+      />
     </SafeAreaView>
   );
 }
@@ -1499,6 +2092,14 @@ const st = StyleSheet.create({
 
   // Cover
   coverContainer: { position: "relative", height: 220, width: "100%" },
+  feedHint: { fontSize: 12, marginBottom: 10, lineHeight: 17 },
+  feedMediaPreview: { position: "relative", borderRadius: 12, overflow: "hidden", marginBottom: 10 },
+  feedMediaPreviewImg: { width: "100%", height: 180, backgroundColor: "#111" },
+  feedMediaRemove: { position: "absolute", top: 8, right: 8, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 999 },
+  feedActionsRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 10 },
+  feedAttachBtn: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 12, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10 },
+  feedAttachText: { fontSize: 13, fontWeight: "600" },
+  postMedia: { width: "100%", height: 220, borderRadius: 12, marginTop: 10, backgroundColor: "#111" },
   coverImage: { height: "100%", width: "100%" },
   coverPlaceholder: { height: "100%", width: "100%", alignItems: "center", justifyContent: "center" },
   coverTopBar: { position: "absolute", left: 16, right: 16, top: 10, flexDirection: "row", alignItems: "center", justifyContent: "space-between", zIndex: 50 },
@@ -1522,7 +2123,10 @@ const st = StyleSheet.create({
 
   // Tabs
   tabsContainer: { flexDirection: "row", borderRadius: 14, padding: 3, gap: 2 },
+  /** Tab Canais no desktop: menos padding vertical para ganhar pixels ao chat */
+  tabsContainerCompact: { paddingVertical: 2, paddingHorizontal: 2, marginBottom: 0 },
   tabItem: { flex: 1, borderRadius: 12, alignItems: "center", justifyContent: "center", paddingVertical: 8, flexDirection: "row", gap: 4 },
+  tabItemCompact: { paddingVertical: 6 },
   tabItemText: { fontSize: 11, fontWeight: "700" },
 
   // Feed
@@ -1541,9 +2145,21 @@ const st = StyleSheet.create({
   postAuthor: { fontSize: 14, fontWeight: "700" },
   postTime: { fontSize: 11, marginTop: 1 },
   postContent: { fontSize: 14, lineHeight: 21 },
+  postActionsBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 12,
+    paddingTop: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    gap: 4,
+  },
+  postActionBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 4, paddingHorizontal: 4 },
+  postActionCount: { fontSize: 13, fontWeight: "600", minWidth: 16 },
+  postLikesSummaryWrap: { marginTop: 4, paddingHorizontal: 2, marginBottom: 2 },
+  postLikesSummary: { fontSize: 13, fontWeight: "600" },
 
-  // Chat - Discord style
-  chatContainer: { borderRadius: 16, overflow: "hidden" },
+  // Chat - Discord style (flex + minHeight 0 evita cortar a barra de input no web/APK)
+  chatContainer: { borderRadius: 16, overflow: "hidden", flex: 1, minHeight: 0 },
   channelsSidebar: { width: 180, borderRightWidth: 1 },
   channelsSidebarHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 12, paddingTop: 10, paddingBottom: 6 },
   channelsSidebarTitle: { fontSize: 10, fontWeight: "800", letterSpacing: 1 },
@@ -1551,7 +2167,7 @@ const st = StyleSheet.create({
   channelRowText: { fontSize: 13, fontWeight: "600" },
   channelPill: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10 },
   channelPillText: { fontSize: 12, fontWeight: "600" },
-  chatArea: { flex: 1, display: "flex" as any, flexDirection: "column" as any },
+  chatArea: { flex: 1, minHeight: 0, minWidth: 0, display: "flex" as any, flexDirection: "column" as any },
   chatAreaHeader: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1 },
   chatAreaHeaderContent: { flexDirection: "row", alignItems: "center", gap: 6, flex: 1 },
   chatAreaHeaderTitle: { fontSize: 15, fontWeight: "700" },
@@ -1578,7 +2194,7 @@ const st = StyleSheet.create({
   emptyChannelSub: { fontSize: 13, textAlign: "center", marginTop: 4 },
 
   // Chat input
-  chatInputBar: { paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: 1 },
+  chatInputBar: { paddingHorizontal: 12, paddingTop: 10, borderTopWidth: 1, zIndex: 2 },
   replyBanner: { flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, marginBottom: 6, borderWidth: 1 },
   replyLabel: { fontSize: 12, fontWeight: "700" },
   replyPreview: { fontSize: 12, marginTop: 1 },

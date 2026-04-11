@@ -33,6 +33,7 @@
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
+      "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "CAMERA",
         "RECORD_AUDIO",
@@ -59,6 +60,8 @@
       "favicon": "./assets/branding/favicon.png"
     },
     "plugins": [
+      "@livekit/react-native-expo-plugin",
+      "@config-plugins/react-native-webrtc",
       "expo-router",
       "expo-image-picker",
       "expo-camera",

@@ -2,13 +2,21 @@ import * as ImageManipulator from "expo-image-manipulator";
 import * as VideoThumbnails from "expo-video-thumbnails";
 import { Platform } from "react-native";
 
-export async function compressImage(uri: string): Promise<string> {
+export type CompressImageOptions = {
+  /** JPEG quality 0–1; default 0.82 (legacy). Use ~0.92 for publish when matching in-app bake preview. */
+  quality?: number;
+  maxWidth?: number;
+};
+
+export async function compressImage(uri: string, opts?: CompressImageOptions): Promise<string> {
+  const quality = typeof opts?.quality === "number" ? opts.quality : 0.82;
+  const maxWidth = typeof opts?.maxWidth === "number" ? opts.maxWidth : 1440;
   try {
     const result = await ImageManipulator.manipulateAsync(
       uri,
-      [{ resize: { width: 1440 } }],
+      [{ resize: { width: maxWidth } }],
       {
-        compress: 0.82,
+        compress: quality,
         format: ImageManipulator.SaveFormat.JPEG,
       }
     );

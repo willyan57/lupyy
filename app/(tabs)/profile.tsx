@@ -258,6 +258,8 @@ export default function Profile() {
 
   const loadingRef = useRef(false);
   const pageRef = useRef(0);
+  /** Evita aplicar estado de um fetch antigo após trocar de perfil (rota). */
+  const bootstrapRunIdRef = useRef(0);
 
   const [counts, setCounts] = useState<Record<number, Counter>>({});
   const [viewerOpen, setViewerOpen] = useState(false);
@@ -590,6 +592,20 @@ export default function Profile() {
     pageRef.current = 0;
   }, [routeUserId]);
 
+  /** Ao mudar o perfil da URL, limpa dados do utilizador anterior (evita “piscar” nível/avatar/destaque). */
+  useEffect(() => {
+    setLevelInfo(null);
+    setProfileViewStats(null);
+    setBoostInfo(null);
+    setBoostCountdown(null);
+    setAvatarUrl(null);
+    setHighlights([]);
+    setHighlightCover(null);
+    setBoostedPostIds(new Set());
+    setStories([]);
+    setLoadingHeader(true);
+  }, [routeUserId]);
+
   const loadStories = useCallback(async (uid: string) => {
     try {
       setLoadingStories(true);
@@ -640,6 +656,7 @@ export default function Profile() {
   }, []);
 
   const bootstrap = useCallback(async () => {
+    const runId = ++bootstrapRunIdRef.current;
     try {
       setLoadingHeader(true);
 
@@ -651,6 +668,8 @@ export default function Profile() {
         router.replace("/");
         return;
       }
+
+      if (runId !== bootstrapRunIdRef.current) return;
 
       const u = data.user;
       setAuthUserId(u.id);
@@ -670,6 +689,8 @@ export default function Profile() {
           .select("*")
           .eq("id", targetUserId)
           .maybeSingle();
+
+        if (runId !== bootstrapRunIdRef.current) return;
 
         if (!profileErr && row) {
           const r = row as ProfileRow;
@@ -700,6 +721,7 @@ export default function Profile() {
               .select("id, username, full_name, avatar_url")
               .eq("id", r.partner_id)
               .maybeSingle();
+            if (runId !== bootstrapRunIdRef.current) return;
             if (partnerData) setPartnerProfile(partnerData as ProfileRow);
           } else {
             setPartnerProfile(null);
@@ -728,6 +750,8 @@ export default function Profile() {
         setDraftBio("");
         relStatus = null;
       }
+
+      if (runId !== bootstrapRunIdRef.current) return;
 
       setRelationshipStatus(relStatus);
 
@@ -809,29 +833,42 @@ export default function Profile() {
         setFriendDmIntroUsed(false);
       }
 
+      if (runId !== bootstrapRunIdRef.current) return;
+
       await loadStories(targetUserId);
+
+      if (runId !== bootstrapRunIdRef.current) return;
 
       // Load highlights
       try {
         const hl = await fetchUserHighlights(targetUserId);
+        if (runId !== bootstrapRunIdRef.current) return;
         setHighlights(hl);
-      } catch { setHighlights([]); }
+      } catch {
+        if (runId !== bootstrapRunIdRef.current) return;
+        setHighlights([]);
+      }
 
-      // ── Load engagement data ──
+      // ── Load engagement data (usa targetUserId === u.id, não isOwnProfile — o state userId pode estar desatualizado neste tick) ──
       try {
+        const viewingOwn = targetUserId === u.id;
         const [lvl, pvs, boost, myBoosts] = await Promise.all([
           getUserLevelAndBadges(targetUserId),
           getProfileViewStats(targetUserId),
           getActiveBoost(targetUserId),
-          isOwnProfile ? getMyBoostedPosts() : Promise.resolve([]),
+          viewingOwn ? getMyBoostedPosts() : Promise.resolve([]),
         ]);
+        if (runId !== bootstrapRunIdRef.current) return;
         setLevelInfo(lvl);
         setProfileViewStats(pvs);
         setBoostInfo(boost);
         if (myBoosts.length > 0) {
           setBoostedPostIds(new Set(myBoosts.map((b: PostBoostInfo) => b.post_id)));
+        } else if (viewingOwn) {
+          setBoostedPostIds(new Set());
         }
       } catch {
+        if (runId !== bootstrapRunIdRef.current) return;
         setLevelInfo(null);
         setProfileViewStats(null);
         setBoostInfo(null);
@@ -843,7 +880,9 @@ export default function Profile() {
         isUserBlocked(u.id, targetUserId).then(setIsTargetBlocked).catch(() => {});
       }
     } finally {
-      setLoadingHeader(false);
+      if (runId === bootstrapRunIdRef.current) {
+        setLoadingHeader(false);
+      }
     }
   }, [router, routeUserId, loadStories]);
 
@@ -3828,6 +3867,7 @@ export default function Profile() {
               >
                 {avatarUrl ? (
                   <ExpoImage
+                    key={`avatar-ring-${userId ?? ""}`}
                     source={{ uri: avatarUrl }}
                     style={styles.avatarInRing}
                     contentFit="cover"
@@ -3840,7 +3880,13 @@ export default function Profile() {
                 )}
               </LinearGradient>
             ) : avatarUrl ? (
-              <ExpoImage source={{ uri: avatarUrl }} style={styles.avatar} contentFit="cover" cachePolicy="disk" />
+              <ExpoImage
+                key={`avatar-main-${userId ?? ""}`}
+                source={{ uri: avatarUrl }}
+                style={styles.avatar}
+                contentFit="cover"
+                cachePolicy="disk"
+              />
             ) : (
               <LinearGradient
                 colors={[Colors.brandStart, Colors.brandEnd]}
@@ -4020,7 +4066,7 @@ export default function Profile() {
 
         {/* ── LEVEL, BADGES & BOOST ── */}
         {levelInfo && (
-          <View style={[styles.panelCard, { backgroundColor: theme.colors.surface }]}>
+          <View key={`level-panel-${userId ?? ""}`} style={[styles.panelCard, { backgroundColor: theme.colors.surface }]}>
             {/* Level + XP bar */}
             <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
               <Text style={{ fontSize: 22, marginRight: 6 }}>

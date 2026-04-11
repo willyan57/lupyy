@@ -1,3 +1,4 @@
+import "@/lib/livekitRegister";
 import WebSidebar, { WEB_SIDEBAR_WIDTH } from "@/components/WebSidebar";
 import Colors from "@/constants/Colors";
 import { ThemeProvider } from "@/contexts/ThemeContext";

@@ -36,46 +36,6 @@ function effectTintLayers(id: EffectId): PreviewTintLayer[] {
           },
         },
       ];
-    case "golden_mist":
-      return [
-        {
-          opacity: 0.1,
-          gradient: {
-            colors: ["rgba(255,220,170,0.55)", "rgba(255,190,140,0.2)", "rgba(0,0,0,0)"],
-            start: { x: 0, y: 0 },
-            end: { x: 0.55, y: 0.5 },
-            locations: [0, 0.4, 1],
-          },
-        },
-        {
-          opacity: 0.07,
-          gradient: {
-            colors: ["rgba(255,200,210,0.4)", "rgba(255,180,200,0)", "rgba(0,0,0,0)"],
-            start: { x: 1, y: 1 },
-            end: { x: 0.4, y: 0.45 },
-          },
-        },
-      ];
-    case "veludo":
-      return [
-        {
-          opacity: 0.11,
-          gradient: {
-            colors: ["rgba(0,0,0,0)", "rgba(0,0,0,0.12)", "rgba(0,0,0,0.38)"],
-            start: { x: 0.5, y: 0.5 },
-            end: { x: 1, y: 1 },
-            locations: [0, 0.55, 1],
-          },
-        },
-        {
-          opacity: 0.06,
-          gradient: {
-            colors: ["rgba(255,255,255,0.35)", "rgba(255,255,255,0)", "rgba(0,0,0,0)"],
-            start: { x: 0.5, y: 0.5 },
-            end: { x: 0, y: 0 },
-          },
-        },
-      ];
     case "aurora":
       return [
         {

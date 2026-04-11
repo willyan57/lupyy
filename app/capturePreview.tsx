@@ -378,6 +378,8 @@ export default function CapturePreview() {
 
   const [collageBakeJob, setCollageBakeJob] = useState<NativeCollageBakeJob | null>(null);
   const collageBakeResolveRef = useRef<((path: string | null) => void) | null>(null);
+  /** Native multi-photo: merged + LUT + WebGL bake (matches single-image Android preview pipeline). */
+  const [nativeCollageBakedUri, setNativeCollageBakedUri] = useState<string | null>(null);
 
   // Beautify
   const [showBeautifyPanel, setShowBeautifyPanel] = useState(false);
@@ -524,11 +526,23 @@ export default function CapturePreview() {
 
   const previewLutSource = useMemo(() => getLutForFilter(mapPreviewFilterToExport(filter)), [filter]);
   const previewImageUri = useMemo(() => {
+    if (isNativeApp && hasCollagePreview && nativeCollageBakedUri && !isComparing && mediaType === "image") {
+      return nativeCollageBakedUri;
+    }
     if (isAndroidNative && !isComparing && mediaType === "image") {
       return androidPreviewUri || effectiveUri;
     }
     return effectiveUri;
-  }, [androidPreviewUri, effectiveUri, isComparing, mediaType, isAndroidNative]);
+  }, [
+    nativeCollageBakedUri,
+    hasCollagePreview,
+    isNativeApp,
+    androidPreviewUri,
+    effectiveUri,
+    isComparing,
+    mediaType,
+    isAndroidNative,
+  ]);
 
   const needsGlPreview = useMemo(() => {
     if (mediaType !== "image") return false;
@@ -873,62 +887,119 @@ export default function CapturePreview() {
     })();
   }, []);
 
-  const maybeBakeMedia = async (inputUri: string, options?: { skipCanvasFx?: boolean }) => {
-    const skipCanvasFx = !!options?.skipCanvasFx;
-    if (!shouldBakeOnExport) return inputUri;
-    try {
-      if (mediaType === "image") {
-        let bakedUri = inputUri;
+  const maybeBakeMedia = useCallback(
+    async (inputUri: string, options?: { skipCanvasFx?: boolean }) => {
+      const skipCanvasFx = !!options?.skipCanvasFx;
+      if (!shouldBakeOnExport) return inputUri;
+      try {
+        if (mediaType === "image") {
+          let bakedUri = inputUri;
 
-        const canUseDomCssBake = typeof document !== "undefined";
-        const hasCssToBake = !!(activeFilter.cssFilter || effectiveCaptureCssFilter);
+          const canUseDomCssBake = typeof document !== "undefined";
+          const hasCssToBake = !!(activeFilter.cssFilter || effectiveCaptureCssFilter);
 
-        if (isAndroidNative && androidPreviewUri && inputUri === effectiveUri) {
-          bakedUri = androidPreviewUri;
-        } else if (hasCssToBake && canUseDomCssBake) {
-          const bakeSource = isCapacitor && stableImageUri && inputUri === effectiveUri ? stableImageUri : inputUri;
-          const combinedCss = [effectiveCaptureCssFilter, activeFilter.cssFilter].filter(Boolean).join(" ").trim();
-          const baked = await bakeWebCssFilter(bakeSource, combinedCss);
-          if (baked && baked !== inputUri) bakedUri = baked;
-        } else if (!isWeb) {
-          const exportFilterId = mapPreviewFilterToExport(filter);
-          const baked = await bakeImageWithLut(inputUri, exportFilterId, beautifyForNativeExport);
-          if (baked && baked !== inputUri) {
-            try {
-              const info = await FileSystem.getInfoAsync(baked);
-              if (info.exists && (info as any).size > 0) bakedUri = baked;
-            } catch {}
-          }
-        }
-
-        if (activeWebglEffect !== "none" && !skipCanvasFx) {
-          if (isWeb || isCapacitor) {
-            try {
-              const effectBaked = await applyCanvasEffect(bakedUri, activeWebglEffect, 1.0);
-              if (effectBaked && effectBaked !== bakedUri) bakedUri = effectBaked;
-            } catch (err) {
-              console.log("WebGL effect bake error:", err);
-            }
-          } else if (isNativeApp) {
-            try {
-              const effectBaked = await runNativeCanvasEffectBake(bakedUri, activeWebglEffect);
-              if (effectBaked && effectBaked !== bakedUri) bakedUri = effectBaked;
-            } catch (err) {
-              console.log("Native effect bake error:", err);
+          if (isAndroidNative && androidPreviewUri && inputUri === effectiveUri) {
+            bakedUri = androidPreviewUri;
+          } else if (hasCssToBake && canUseDomCssBake) {
+            const bakeSource = isCapacitor && stableImageUri && inputUri === effectiveUri ? stableImageUri : inputUri;
+            const combinedCss = [effectiveCaptureCssFilter, activeFilter.cssFilter].filter(Boolean).join(" ").trim();
+            const baked = await bakeWebCssFilter(bakeSource, combinedCss);
+            if (baked && baked !== inputUri) bakedUri = baked;
+          } else if (!isWeb) {
+            const exportFilterId = mapPreviewFilterToExport(filter);
+            const baked = await bakeImageWithLut(inputUri, exportFilterId, beautifyForNativeExport);
+            if (baked && baked !== inputUri) {
+              try {
+                const info = await FileSystem.getInfoAsync(baked);
+                if (info.exists && (info as any).size > 0) bakedUri = baked;
+              } catch {}
             }
           }
-        }
 
-        return bakedUri;
+          if (activeWebglEffect !== "none" && !skipCanvasFx) {
+            if (isWeb || isCapacitor) {
+              try {
+                const effectBaked = await applyCanvasEffect(bakedUri, activeWebglEffect, 1.0);
+                if (effectBaked && effectBaked !== bakedUri) bakedUri = effectBaked;
+              } catch (err) {
+                console.log("WebGL effect bake error:", err);
+              }
+            } else if (isNativeApp) {
+              try {
+                const effectBaked = await runNativeCanvasEffectBake(bakedUri, activeWebglEffect);
+                if (effectBaked && effectBaked !== bakedUri) bakedUri = effectBaked;
+              } catch (err) {
+                console.log("Native effect bake error:", err);
+              }
+            }
+          }
+
+          return bakedUri;
+        }
+        return inputUri;
+      } catch {
+        return inputUri;
       }
-      return inputUri;
-    } catch {
-      return inputUri;
-    }
-  };
+    },
+    [
+      shouldBakeOnExport,
+      mediaType,
+      activeFilter,
+      effectiveCaptureCssFilter,
+      isAndroidNative,
+      androidPreviewUri,
+      effectiveUri,
+      isCapacitor,
+      stableImageUri,
+      filter,
+      beautifyForNativeExport,
+      activeWebglEffect,
+      isWeb,
+      isNativeApp,
+      bakeWebCssFilter,
+      bakeImageWithLut,
+      runNativeCanvasEffectBake,
+    ]
+  );
 
   useEffect(() => {
-    if (!isAndroidNative || mediaType !== "image" || !effectiveUri) {
+    if (!isNativeApp || isWeb || !hasCollagePreview || collageUris.length <= 1) {
+      setNativeCollageBakedUri(null);
+      return;
+    }
+    let cancelled = false;
+    const t = setTimeout(() => {
+      void (async () => {
+        try {
+          const merged = await bakeCollageNative(collageUris, collageLayout);
+          if (cancelled) return;
+          if (!merged) {
+            setNativeCollageBakedUri(null);
+            return;
+          }
+          const baked = await maybeBakeMedia(merged);
+          if (!cancelled) setNativeCollageBakedUri(baked);
+        } catch {
+          if (!cancelled) setNativeCollageBakedUri(null);
+        }
+      })();
+    }, 320);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [
+    isNativeApp,
+    isWeb,
+    hasCollagePreview,
+    collageUris,
+    collageLayout,
+    maybeBakeMedia,
+    bakeCollageNative,
+  ]);
+
+  useEffect(() => {
+    if (!isAndroidNative || mediaType !== "image" || !effectiveUri || hasCollagePreview) {
       setAndroidPreviewJob(null);
       setAndroidPreviewUri(null);
       androidPreviewKeyRef.current = "";
@@ -960,6 +1031,7 @@ export default function CapturePreview() {
     isAndroidNative,
     mediaType,
     effectiveUri,
+    hasCollagePreview,
     shouldBakeOnExport,
     filter,
     quickAdjustment,
@@ -1099,13 +1171,18 @@ export default function CapturePreview() {
       return;
     }
     let workingUri = finalUri || collageUris[0] || "";
-    if (mediaType === "image" && collageUris.length > 1) {
-      const merged = isWeb
-        ? await bakeCollageWeb(collageUris, collageLayout)
-        : await bakeCollageNative(collageUris, collageLayout);
-      if (merged) workingUri = merged;
+    let bakedUri: string;
+    if (mediaType === "image" && collageUris.length > 1 && nativeCollageBakedUri) {
+      bakedUri = nativeCollageBakedUri;
+    } else {
+      if (mediaType === "image" && collageUris.length > 1) {
+        const merged = isWeb
+          ? await bakeCollageWeb(collageUris, collageLayout)
+          : await bakeCollageNative(collageUris, collageLayout);
+        if (merged) workingUri = merged;
+      }
+      bakedUri = await maybeBakeMedia(workingUri, { skipCanvasFx: false });
     }
-    let bakedUri = await maybeBakeMedia(workingUri, { skipCanvasFx: false });
     if (mediaType === "image") bakedUri = await bakeOverlaysWeb(bakedUri);
 
     if (mode === "story") {
@@ -1121,7 +1198,7 @@ export default function CapturePreview() {
         if (!isVideo) {
           setSendPhase("Otimizando imagem...");
           // Web collage comes as data URL already compressed; avoid ImageManipulator stalls on large data URLs.
-          uploadUri = Platform.OS === "web" ? bakedUri : await compressImage(bakedUri);
+          uploadUri = Platform.OS === "web" ? bakedUri : await compressImage(bakedUri, { quality: 0.92 });
         }
         else {
           setSendPhase("Preparando vídeo...");
@@ -1183,7 +1260,7 @@ export default function CapturePreview() {
         let thumbUri: string | null = null;
         if (!isVideo) {
           setSendPhase(`Otimizando ${i + 1}/${urisToUpload.length}...`);
-          uploadUri = Platform.OS === "web" ? uploadUri : await compressImage(uploadUri);
+          uploadUri = Platform.OS === "web" ? uploadUri : await compressImage(uploadUri, { quality: 0.92 });
         }
         else {
           setSendPhase(`Preparando vídeo ${i + 1}/${urisToUpload.length}...`);
@@ -1235,7 +1312,11 @@ export default function CapturePreview() {
       if (status !== "granted") { Alert.alert("Permissão necessária", "Permita o acesso à galeria."); return; }
       let saveUri = effectiveUri;
       if (shouldBakeOnExport && mediaType === "image") {
-        saveUri = await maybeBakeMedia(effectiveUri);
+        if (hasCollagePreview && nativeCollageBakedUri) {
+          saveUri = nativeCollageBakedUri;
+        } else {
+          saveUri = await maybeBakeMedia(effectiveUri);
+        }
       }
       await MediaLibrary.saveToLibraryAsync(saveUri);
       Alert.alert("Salvo!", "Mídia salva na galeria.");
@@ -1503,7 +1584,7 @@ export default function CapturePreview() {
       {/* Preview */}
       <Pressable
         style={styles.previewStage}
-        onPressIn={() => { if (needsGlPreview || filter !== "none") setIsComparing(true); }}
+        onPressIn={() => { if (needsGlPreview || filter !== "none" || activeWebglEffect !== "none") setIsComparing(true); }}
         onPressOut={() => setIsComparing(false)}
         onPress={toggleTagVisibility}
         {...(isDrawing ? drawPanResponder.panHandlers : {})}
@@ -1520,6 +1601,14 @@ export default function CapturePreview() {
             />
           ) : mediaType === "image" ? (
             hasCollagePreview ? (
+              isNativeApp && nativeCollageBakedUri && !isComparing ? (
+                <Image
+                  source={{ uri: nativeCollageBakedUri }}
+                  style={[styles.preview, previewMediaStyle]}
+                  resizeMode="cover"
+                  onLoadEnd={() => setMediaLoaded(true)}
+                />
+              ) : (
               <View style={[styles.preview, previewMediaStyle, { backgroundColor: "#000" }]}>
                 {collageUris.map((item, idx) => {
                   const slot = collageSlots[idx];
@@ -1578,6 +1667,7 @@ export default function CapturePreview() {
                   );
                 })}
               </View>
+              )
             ) : (
             isWeb && !isComparing && (activeFilter.cssFilter || effectiveCaptureCssFilter || activeWebglEffect !== "none") ? (
               <View style={[styles.preview, previewMediaStyle, { position: "relative" }]}>
@@ -1805,7 +1895,7 @@ export default function CapturePreview() {
         <Text style={styles.filterLabelText}>{activeFilter.name}</Text>
       </Animated.View>
 
-        {((!mediaLoaded) || aiProcessing || (!!androidPreviewJob && !isComparing)) && (
+        {((!mediaLoaded) || aiProcessing || (!!androidPreviewJob && !isComparing) || (hasCollagePreview && isNativeApp && !nativeCollageBakedUri && !isComparing)) && (
           <View
             style={[
               styles.loadingOverlay,

@@ -3,8 +3,6 @@
 export type EffectId =
   | "none"
   | "preto_branco"
-  | "golden_mist"
-  | "veludo"
   | "aurora"
   | "claridade"
   | "brisa_rosa"
@@ -24,21 +22,20 @@ export type EffectDef = {
   category: "distortion" | "color" | "artistic" | "retro";
 };
 
+/** Order: Neon first → … → Preto e branco last (carousel start = Neon Edges). */
 export const EFFECTS: EffectDef[] = [
   { id: "none", name: "Nenhum", description: "Sem efeito", icon: "⊘", category: "color" },
-  { id: "preto_branco", name: "Preto e branco", description: "Tons de cinza elegantes", icon: "◐", category: "color" },
-  { id: "golden_mist", name: "Luz dourada", description: "Brilho suave estilo editorial", icon: "✦", category: "artistic" },
-  { id: "veludo", name: "Veludo", description: "Vignette suave e foco no centro", icon: "◆", category: "artistic" },
-  { id: "aurora", name: "Aurora", description: "Tom frio cinematográfico", icon: "❄", category: "artistic" },
-  { id: "claridade", name: "Claridade", description: "Contraste e cor mais vivos", icon: "◇", category: "color" },
-  { id: "brisa_rosa", name: "Brisa rosa", description: "Luz rosada delicada", icon: "🌸", category: "artistic" },
-  { id: "pixelate", name: "Pixel", description: "Pixelização estilizada", icon: "🟩", category: "artistic" },
-  { id: "halftone", name: "Halftone", description: "Pontos de meio-tom", icon: "⚫", category: "artistic" },
-  { id: "mirror", name: "Espelho", description: "Reflexo simétrico", icon: "🪞", category: "distortion" },
-  { id: "kaleidoscope", name: "Caleidoscópio", description: "Padrão caleidoscópico", icon: "🔮", category: "artistic" },
-  { id: "fisheye", name: "Fisheye", description: "Lente olho de peixe", icon: "🐟", category: "distortion" },
-  { id: "wave_distort", name: "Wave", description: "Distorção de onda suave", icon: "🌊", category: "distortion" },
   { id: "neon_edges", name: "Neon Edges", description: "Bordas neon brilhantes", icon: "✨", category: "artistic" },
+  { id: "fisheye", name: "Fisheye", description: "Lente olho de peixe", icon: "🐟", category: "distortion" },
+  { id: "kaleidoscope", name: "Caleidoscópio", description: "Padrão caleidoscópico", icon: "🔮", category: "artistic" },
+  { id: "halftone", name: "Halftone", description: "Pontos de meio-tom", icon: "⚫", category: "artistic" },
+  { id: "pixelate", name: "Pixel", description: "Pixelização estilizada", icon: "🟩", category: "artistic" },
+  { id: "wave_distort", name: "Wave", description: "Distorção de onda suave", icon: "🌊", category: "distortion" },
+  { id: "aurora", name: "Aurora", description: "Tom frio cinematográfico", icon: "❄", category: "artistic" },
+  { id: "mirror", name: "Espelho", description: "Reflexo simétrico", icon: "🪞", category: "distortion" },
+  { id: "brisa_rosa", name: "Brisa rosa", description: "Luz rosada delicada", icon: "🌸", category: "artistic" },
+  { id: "claridade", name: "Claridade", description: "Contraste e cor mais vivos", icon: "💎", category: "color" },
+  { id: "preto_branco", name: "Preto e branco", description: "Tons de cinza elegantes", icon: "🎬", category: "color" },
 ];
 
 /**
@@ -73,12 +70,6 @@ export async function applyCanvasEffect(
         switch (effectId) {
           case "preto_branco":
             applyPretoBranco(ctx, w, h, data, intensity);
-            break;
-          case "golden_mist":
-            applyGoldenMist(ctx, w, h, intensity);
-            break;
-          case "veludo":
-            applyVeludo(ctx, w, h, intensity);
             break;
           case "aurora":
             applyAurora(ctx, w, h, intensity);
@@ -130,10 +121,6 @@ export function getEffectCSSFilter(effectId: EffectId): string | null {
   switch (effectId) {
     case "preto_branco":
       return "grayscale(1) contrast(1.14) brightness(1.02)";
-    case "golden_mist":
-      return "brightness(1.04) contrast(1.03) saturate(1.06) sepia(0.06)";
-    case "veludo":
-      return "contrast(1.06) brightness(0.97)";
     case "aurora":
       return "brightness(1.02) contrast(1.04) saturate(1.05) hue-rotate(-10deg)";
     case "claridade":
@@ -178,50 +165,6 @@ function applyPretoBranco(
     result.data[i + 3] = data[i + 3];
   }
   ctx.putImageData(result, 0, 0);
-}
-
-function applyGoldenMist(ctx: CanvasRenderingContext2D, w: number, h: number, intensity: number) {
-  const k = 0.42 * intensity;
-  const grad1 = ctx.createRadialGradient(w * 0.12, h * 0.1, 0, w * 0.32, h * 0.28, w * 0.62);
-  grad1.addColorStop(0, `rgba(255, 220, 170, ${0.28 * k})`);
-  grad1.addColorStop(0.55, `rgba(255, 185, 120, ${0.1 * k})`);
-  grad1.addColorStop(1, "rgba(255, 160, 100, 0)");
-  ctx.globalCompositeOperation = "screen";
-  ctx.fillStyle = grad1;
-  ctx.fillRect(0, 0, w, h);
-
-  const grad2 = ctx.createRadialGradient(w * 0.88, h * 0.85, 0, w * 0.72, h * 0.68, w * 0.45);
-  grad2.addColorStop(0, `rgba(255, 200, 210, ${0.18 * k})`);
-  grad2.addColorStop(1, "rgba(255, 180, 200, 0)");
-  ctx.fillStyle = grad2;
-  ctx.fillRect(0, 0, w, h);
-
-  ctx.globalCompositeOperation = "source-over";
-}
-
-/** Vignette suave (multiply) + leve brilho central — não altera geometria. */
-function applyVeludo(ctx: CanvasRenderingContext2D, w: number, h: number, intensity: number) {
-  const cx = w / 2;
-  const cy = h / 2;
-  const r = Math.hypot(w, h) * 0.66;
-  const edgeRgb = Math.round(108 - 28 * intensity);
-  const g = ctx.createRadialGradient(cx, cy, r * 0.12, cx, cy, r);
-  g.addColorStop(0, "rgba(255,255,255,1)");
-  g.addColorStop(0.52, `rgba(248,248,248,${1 - 0.04 * intensity})`);
-  g.addColorStop(1, `rgb(${edgeRgb},${edgeRgb},${edgeRgb})`);
-  ctx.save();
-  ctx.globalCompositeOperation = "multiply";
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, w, h);
-  ctx.restore();
-
-  const g2 = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 0.48);
-  g2.addColorStop(0, `rgba(255,255,255,${0.08 * intensity})`);
-  g2.addColorStop(1, "rgba(255,255,255,0)");
-  ctx.globalCompositeOperation = "screen";
-  ctx.fillStyle = g2;
-  ctx.fillRect(0, 0, w, h);
-  ctx.globalCompositeOperation = "source-over";
 }
 
 /** Gradiente azul-esverdeado suave (overlay) — look premium frio. */
